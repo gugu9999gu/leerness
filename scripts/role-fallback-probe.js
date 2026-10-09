@@ -31,6 +31,22 @@ const { classify, applyDeclaredRiskFloor, plan: routingPlan } = require('../lib/
 const roleStore = require('../lib/role-store');
 const { _executionProvenanceSummary } = require('../lib/session-close');
 
+// Only this probe's temporary fixtures may be recursively removed. Windows can
+// briefly retain a handle after heartbeat/file I/O; retry cleanup, not assertions.
+function removeFixture(target) {
+  const resolved = path.resolve(target);
+  const relative = path.relative(path.resolve(os.tmpdir()), resolved);
+  assert.ok(relative && !path.isAbsolute(relative) && !relative.startsWith('..' + path.sep));
+  assert.match(relative.split(path.sep)[0], /^leerness-/);
+  for (let attempt = 0; ; attempt++) {
+    try { fs.rmSync(resolved, { recursive: true, force: true }); return; }
+    catch (error) {
+      if (attempt >= 5 || !['EPERM', 'EBUSY', 'ENOTEMPTY', 'EACCES'].includes(error.code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1));
+    }
+  }
+}
+
 let passed = 0;
 let failed = 0;
 function test(name, fn) {
@@ -301,7 +317,7 @@ test('append-only availability observations block quota and clear without mutati
     assert.ok(history.events.some(e => e.event === 'availability.observed'));
     assert.ok(history.events.some(e => e.event === 'availability.cleared'));
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -330,7 +346,7 @@ test('provider aliases share one availability identity and spoofed spellings poi
     assert.strictEqual(state.code, 'availability_events_invalid');
     assert.strictEqual(state.partial, true);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -389,7 +405,7 @@ test('availability validation and append share one lock boundary', () => {
     );
     assert.strictEqual(fs.readFileSync(ledger, 'utf8'), '{ race-corrupt\n');
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -404,7 +420,7 @@ test('availability mark and clear refuse a corrupt ledger without changing its b
     assert.throws(() => appendAvailabilityClear(dir, { provider: 'codex' }), error => error && error.code === 'ledger_invalid_lines');
     assert.deepStrictEqual(fs.readFileSync(ledger), before);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -431,7 +447,7 @@ test('semantically invalid availability events make routing state partial and bl
     assert.throws(() => appendAvailabilityClear(dir, { provider: 'codex' }), error => error && error.code === 'availability_events_invalid');
     assert.deepStrictEqual(fs.readFileSync(ledger), before);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -634,7 +650,7 @@ test('all execution ledger appends reject corrupt history without changing its b
     );
     assert.deepStrictEqual(fs.readFileSync(ledger), before);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -666,7 +682,7 @@ test('malformed UTF-8 in the execution ledger fails availability reads and later
     );
     assert.deepStrictEqual(fs.readFileSync(ledger), before);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -695,7 +711,7 @@ test('linked execution-ledger parents are rejected before any external target is
     assert.deepStrictEqual(fs.readFileSync(path.join(outside, 'sentinel.txt')), before);
   } finally {
     try { fs.rmSync(harness, { force: true }); } catch {}
-    fs.rmSync(base, { recursive: true, force: true });
+    removeFixture(base);
   }
 });
 
@@ -748,7 +764,7 @@ test('execution-ledger reads and appends bind validation to the opened inode', (
       assert.deepStrictEqual(fs.readFileSync(ledger), replacementBytes);
     } finally { fs.openSync = originalOpen; }
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -825,7 +841,7 @@ test('dangling execution-ledger symlinks are rejected without creating their tar
     assert.strictEqual(actual, base);
     assert.strictEqual(path.dirname(actual), temp);
     assert.match(path.basename(actual), /^leerness-ledger-dangling-[A-Za-z0-9]{6}$/);
-    fs.rmSync(actual, { recursive: true, force: true });
+    removeFixture(actual);
   }
 });
 
@@ -849,7 +865,7 @@ test('hard-linked execution ledgers fail closed for reads and appends without to
     );
     assert.deepStrictEqual(fs.readFileSync(peer), before);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -896,7 +912,7 @@ test('initial execution-ledger installation survives prepared-alias cleanup fail
     assert.strictEqual(history.events.length, 1);
     assert.strictEqual(history.events[0].taskId, 'T-CREATE-CLEANUP');
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -951,7 +967,7 @@ test('initial execution-ledger installation rolls back its canonical path when e
     assert.strictEqual(history.ok, true);
     assert.deepStrictEqual(history.events, []);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -983,7 +999,7 @@ test('execution ledger preserves its canonical envelope when extension fields ex
     assert.strictEqual(history.ok, true, history.error);
     assert.strictEqual(history.events.length, 1);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1002,7 +1018,7 @@ test('token-shaped canonical provenance IDs remain readable after a successful a
     assert.strictEqual(history.events[0].taskId, 'sk-abcdefghijk');
     assert.strictEqual(history.events[0].actualExecutor.model, 'sk-modeltoken');
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1051,7 +1067,7 @@ test('credential-shaped model values are rejected before ledger or availability 
     );
     assert.strictEqual(fs.existsSync(path.join(dir, '.leerness', 'execution-ledger.jsonl')), false);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1077,7 +1093,7 @@ test('incomplete terminal rows fail both append-time and stored-history validati
     assert.strictEqual(history.invalidLines, 1);
     assert.deepStrictEqual(history.events, []);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1098,7 +1114,7 @@ test('terminal execution rows require executed=true at append and read time', ()
     assert.strictEqual(history.ok, false);
     assert.strictEqual(history.invalidLines, 1);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1147,7 +1163,7 @@ test('concurrent CLI provenance appends retain every unique attempt', () => {
     assert.strictEqual(concurrent.length, 8);
     assert.strictEqual(new Set(concurrent.map(event => event.attemptId)).size, 8);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1218,7 +1234,7 @@ test('execution ledger masks credential-bearing keys without hiding audit metric
     const raw = fs.readFileSync(path.join(dir, '.leerness', 'execution-ledger.jsonl'), 'utf8');
     assert.doesNotMatch(raw, /opaque-(?:api|uppercase-api-key|client-uppercase-api-key|fullwidth-api-key|fullwidth-password|jwt-token|cookie|auth|password|passphrase|pass-phrase|refresh|access-token|client-secret)(?:-(?:input|output|prompt))?-value/);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1247,7 +1263,7 @@ test('append-only ledger redacts secret-looking values and tolerates one corrupt
     assert.doesNotMatch(JSON.stringify(history.events), /sk-live-LEAKME/);
     assert.match(JSON.stringify(history.events), /token=\*\*\*/);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1318,7 +1334,10 @@ test('actual multi and bench paths write provider-level provenance once per sett
         });
         process.env.LEERNESS_ENABLE_CODEX = '1';
         await agentsCmd(root, 'bench', ['synthetic bench'], { ...base, has: flag => flag === '--json', _spawnPortable: fakeChild });
+        process.exitCode = 0;
         await agentsCmd(root, 'bench', ['synthetic bench error'], { ...base, has: flag => flag === '--json', _spawnPortable: fakeErrorThenCloseChild });
+        if (process.exitCode !== 1) process.exit(10);
+        process.exitCode = 0; // The expected provider failure must not fail the probe process.
         const history = readExecutionEvents(root, 100);
         const required = ['execution.batch.started', 'execution.completed', 'benchmark.batch.started', 'benchmark.completed'];
         if (!required.every(name => history.events.some(event => event.event === name))) process.exit(3);
@@ -1344,7 +1363,7 @@ test('actual multi and bench paths write provider-level provenance once per sett
     });
     assert.strictEqual(result.status, 0, result.stderr || result.stdout);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -1424,7 +1443,7 @@ test('dispatch refuses to commit a role resolution after availability policy cha
   } finally {
     console.log = previousLog;
     process.exitCode = previousExitCode;
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeFixture(dir);
   }
 });
 
@@ -2052,7 +2071,7 @@ try {
 
   test('history reports a non-regular ledger as a structured error instead of crashing', () => {
     const ledger = path.join(fixture, '.leerness', 'execution-ledger.jsonl');
-    fs.rmSync(ledger, { recursive: true, force: true });
+    removeFixture(ledger);
     fs.mkdirSync(ledger);
     const result = run(['agents', 'history', '--path', fixture, '--json'], { env });
     assert.strictEqual(result.status, 1, result.stderr || result.stdout);
@@ -2064,7 +2083,7 @@ try {
     assert.ok(fs.statSync(ledger).isDirectory());
   });
 } finally {
-  fs.rmSync(fixture, { recursive: true, force: true });
+  removeFixture(fixture);
 }
 
 console.log(`\nROLE_FALLBACK_PROBE ${passed}/${passed + failed}`);

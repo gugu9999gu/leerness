@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const assert = require('assert');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const pkg = require('../package.json');
+const { removeTree } = require('./temp-cleanup');
 const tempParent = fs.realpathSync(os.tmpdir());
 const fixturePrefix = 'leerness-runtime-writes-';
 const directory = fs.mkdtempSync(path.join(tempParent, fixturePrefix));
@@ -178,6 +179,52 @@ function lifecycle(mode) {
   assert.strictEqual(result.status, 0, String(result.error || result.stdout + result.stderr));
   assert(result.stdout.includes(`LIFECYCLE ${mode} PASS`), result.stdout + result.stderr);
 }
+function externalRecoveryCapabilityCase() {
+  const root = path.join(directory, 'external-recovery-capability');
+  write(path.join(root, '.leerness/HARNESS_VERSION'), pkg.version);
+  descriptor(root, { ...FUTURE, requiredWriterProtocol: 1 });
+  const source = `
+    const fs = require('fs'), path = require('path'), assert = require('assert');
+    const root = process.argv[1];
+    const runtimePath = process.argv[2];
+    const runtime = require(runtimePath);
+    const hd = path.join(root, '.leerness');
+    const rawRename = fs.renameSync.bind(fs);
+    const rawSymlink = fs.symlinkSync.bind(fs);
+    let bundle = null;
+    let outer = null;
+    assert.throws(() => runtime.writeExternalRecoveryBundle(root, [{ name: 'receipt.json', bytes: Buffer.from('{}\\n') }]),
+      error => error.code === 'E_RECOVERY_BYPASS_NOT_LATCHED');
+    try {
+      runtime.withRuntimeWrites(root, () => {
+        assert.throws(() => runtime.writeExternalRecoveryBundle(root, [{ name: 'receipt.json', bytes: Buffer.from('{}\\n') }]),
+          error => error.code === 'E_RECOVERY_BYPASS_NOT_LATCHED');
+        const displaced = hd + '-displaced';
+        rawRename(hd, displaced);
+        rawSymlink(displaced, hd, process.platform === 'win32' ? 'junction' : 'dir');
+        assert.throws(() => runtime.assertCurrentRuntimeWrite(path.join(hd, 'state.json')),
+          error => error.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE');
+        bundle = runtime.writeExternalRecoveryBundle(root, [
+          { name: 'receipt.json', bytes: Buffer.from('{"storage":"external-temp"}\\n') },
+          { name: 'before.bin', bytes: Buffer.from('before') },
+        ]);
+      });
+    } catch (error) { outer = error; }
+    assert(bundle && fs.existsSync(bundle), 'latched layout failure did not create external recovery bundle');
+    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(bundle, 'receipt.json'), 'utf8')).storage, 'external-temp');
+    assert.strictEqual(fs.readFileSync(path.join(bundle, 'before.bin'), 'utf8'), 'before');
+    assert.strictEqual(outer && (outer.originalOutputCode || outer.code), 'E_RUNTIME_LAYOUT_INCOMPATIBLE');
+    fs.rmSync(bundle, { recursive: true, force: true });
+    console.log('EXTERNAL_RECOVERY_CAPABILITY_PASS');
+  `;
+  const runtimePath = path.resolve(__dirname, '../lib/runtime-writes.js');
+  const result = cp.spawnSync(process.execPath, ['-e', source, root, runtimePath], {
+    cwd: directory, env, encoding: 'utf8', timeout: 15000, maxBuffer: 128 * 1024, windowsHide: true,
+  });
+  assert.strictEqual(result.status, 0, String(result.error || result.stdout + result.stderr));
+  assert(result.stdout.includes('EXTERNAL_RECOVERY_CAPABILITY_PASS'), result.stdout + result.stderr);
+}
+
 function retainedFdCase() {
   const runtime = require('../lib/runtime-writes');
   const roots = ['fd-owner', 'fd-consumer'].map(name => path.join(directory, name));
@@ -323,6 +370,7 @@ try {
   }
   descriptor(blocked);
   write(path.join(blocked, '.leerness/cache/agent-runs/private.jsonl'), '{"task":"private-fixture-text"}\n');
+  test('external recovery bypass is available only after a latched layout failure', externalRecoveryCapabilityCase);
   test('retained FD rejection latches its unrelated consuming operation', retainedFdCase);
   test('MCP telemetry cannot swallow a layout change during its real usage read', mcpTelemetryCase);
   gitWriterCases();
@@ -452,7 +500,7 @@ try {
   assert.strictEqual(real, directory);
   assert.strictEqual(path.dirname(real), tempParent);
   assert(new RegExp(`^${fixturePrefix}[A-Za-z0-9]{6}$`).test(path.basename(real)));
-  fs.rmSync(real, { recursive: true, force: true });
+  removeTree(real, { recursive: true, force: true });
 }
 console.log(`RUNTIME_WRITE_PROBE ${passed}/${passed + failed} passed`);
 if (failed) process.exitCode = 1;

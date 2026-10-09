@@ -72,7 +72,20 @@ const catalog = run(['commands', '--json']);
 const catalogJson = json(catalog);
 const catalogRows = catalogJson?.categories ? Object.values(catalogJson.categories).flat() : [];
 check('commands --json returns the machine-readable catalog',
-  catalog.status === 0 && catalogJson?.totalCommands === 103 && catalogJson?.categories && !catalog.stderr,
+  catalog.status === 0 && catalogJson?.totalCommands >= 106 && catalogJson?.categories && !catalog.stderr,
+  catalog);
+check('commands catalog includes the exact stdin-only review-snapshot adapter',
+  catalogRows.some(row => row.cmd === 'review-snapshot candidate|compare --stdin [--json]'),
+  catalog);
+check('commands catalog includes the exact stdin-only review-checkpoint adapter',
+  catalogRows.some(row => row.cmd === 'review-checkpoint assess --stdin [--json]'),
+
+  catalog);
+check('commands catalog includes the read-only test planner and TCP/HTTP/Firestore/script probes',
+  catalogRows.some(row => row.cmd === 'test-plan assess|probe|http-probe|firestore-probe|script-probe --stdin [--json]'),
+  catalog);
+check('commands catalog separates direct, named-script and suite-list observations',
+  catalogRows.some(row => row.cmd === 'test-run node|npm-script|suite-list --stdin [--json]'),
   catalog);
 check('commands totalCommands equals the category sum',
   catalogJson?.totalCommands === catalogRows.length,

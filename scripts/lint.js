@@ -65,9 +65,32 @@ for (const f of jsonFiles) {
   try { JSON.parse(fs.readFileSync(f, 'utf8').replace(/^﻿/, '')); } catch (e) { failures.push(`json: ${path.relative(ROOT, f)} — ${e.message.slice(0, 80)}`); }
 }
 
+// ⑤ `npm test` 의 중복 단계 (1.36.287: 187단계 중 17단계를 그룹과 직접 나열로 두 번 돌렸다)
+//   `npm run <group>` 을 끝까지 펼친 최종 단계가 한 번씩만 나와야 한다. 그룹 단독 실행(CI 잡)은 그대로 둔다.
+//   ⚠ 스크립트 목록을 열거하지도, 가드 이름을 코드에 적지도 않는다. 이 파일은 npm test 가 실행하는 러너라서
+//   `audit` 의 고아 가드 탐지기가 열거를 "test:* 전부 실행" 으로, 이름 언급을 "호출" 로 읽는다
+//   (열거하던 첫 버전이 e2e 1.36.116 자기기준의 심은 잠든 가드를 가렸다 — 실측).
+let testSteps = 0;
+{
+  let scripts = {};
+  try { scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8').replace(/^\uFEFF/, '')).scripts || {}; } catch { /* ④ 가 이미 보고 */ }
+  const expand = (name, stack) => {
+    if (stack.includes(name)) { failures.push(`npm scripts cycle: ${[...stack, name].join(' -> ')}`); return []; }
+    return String(scripts[name]).split('&&').map(p => p.trim()).filter(Boolean).flatMap(p => {
+      const m = p.match(/^npm run ([\w:.-]+)$/);
+      return m && typeof scripts[m[1]] === 'string' ? expand(m[1], [...stack, name]) : [p];
+    });
+  };
+  if (typeof scripts.test === 'string') {
+    const seen = new Set(); const dup = new Set();
+    for (const step of expand('test', [])) { testSteps++; (seen.has(step) ? dup : seen).add(step); }
+    if (dup.size) failures.push(`npm test runs ${dup.size} step(s) more than once: ${[...dup].slice(0, 3).join(' | ')}${dup.size > 3 ? ' | ...' : ''}`);
+  }
+}
+
 if (failures.length) {
   console.log(`✗ lint: ${failures.length} issue(s)`);
   failures.forEach(x => console.log('  - ' + x));
   process.exit(1);
 }
-console.log(`✓ lint: ${jsFiles.length} js (syntax/U+2028/BOM) + ${jsonFiles.length} json — clean`);
+console.log(`✓ lint: ${jsFiles.length} js (syntax/U+2028/BOM) + ${jsonFiles.length} json + npm test ${testSteps} steps (no repeats) — clean`);

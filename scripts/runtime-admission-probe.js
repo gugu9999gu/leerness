@@ -13,6 +13,7 @@ const R = require('../lib/runtime-layout');
 const RW = require('../lib/runtime-writes');
 const SG = require('../lib/state-git');
 const W = require('../lib/workspace-dir');
+const { removeTree } = require('./temp-cleanup');
 const temp = fs.realpathSync.native(os.tmpdir());
 const arena = fs.mkdtempSync(path.join(temp, 'leerness-runtime-admission-'));
 const environment = { ...process.env };
@@ -276,7 +277,7 @@ try {
   if (path.dirname(resolved) !== temp || !path.basename(resolved).startsWith('leerness-runtime-admission-')) {
     throw new Error('Refusing cleanup outside the validated admission probe arena.');
   }
-  fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  removeTree(resolved, { recursive: true, force: true });
 }
 process.stdout.write(`RUNTIME_ADMISSION_PROBE ${total - failed}/${total} passed\n`);
 process.exitCode = failed ? 1 : 0;

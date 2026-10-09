@@ -13,7 +13,7 @@
 
 > **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다.
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-98-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-102-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
 
 ---
 
@@ -116,7 +116,10 @@ leerness verify-claim T-0001 --require-evidence
 - **외부 에이전트**: `agents list/check/quota/resolve/fallback/availability/record/history/dispatch` · `provider` · `roles` · `adapter`
 - **운영/확장**: `release` · `migrate` · `team` · `install-safety` · `route` · `review`(페르소나)
 - **브리지(opt-in)**: `web`(playwright) · `pc`(robotjs) · `lsp`
-- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 98개 도구 노출 (verify-claim --all 일괄 검증 포함)
+- **개발 브랜치의 미게시 추가 기능**: `review-checkpoint assess --stdin` 및 `leerness_review_checkpoint`로 검수 묶음을 읽기 전용 판정합니다. 모델 호출·검수 승인·상태 저장은 하지 않습니다. [입출력 계약](docs/review-checkpoint-transport.md).
+- **미게시 스냅샷 비교**: `review-snapshot candidate|compare --stdin` 및 `leerness_review_snapshot`으로 전달된 스냅샷 결박 정보를 식별·비교합니다. 실제 소스 조회·저장·모델 호출·검수 승인은 하지 않습니다. [입출력 계약](docs/review-snapshot-transport.md).
+
+- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 102개 도구 노출 (verify-claim --all 일괄 검증 포함)
 
 전체 명령은 `leerness commands` 또는 `leerness --help` 로 확인하세요.
 
@@ -157,7 +160,7 @@ leerness agents history --json
 
 **MCP (외부 AI 에이전트에 도구로 노출)**
 ```bash
-leerness mcp serve                          # JSON-RPC over stdio, 98개 도구
+leerness mcp serve                          # JSON-RPC over stdio, 102개 도구
 ```
 
 ---

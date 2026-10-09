@@ -78,6 +78,11 @@ function addDoneWork(root) {
   check(result.status === 0, `task update failed (exit ${result.status})`, result);
   result = run(['session', 'close', '--path', root], root);
   check(result.status === 0, `session close failed (exit ${result.status})`, result);
+  const handoff = fs.readFileSync(path.join(root, '.leerness', 'session-handoff.md'), 'utf8');
+  check(handoff.includes('<!-- leerness:current-handoff:start -->')
+    && handoff.includes('<!-- leerness:current-handoff:end -->')
+    && handoff.includes('Last generated: (auto)'),
+  'fixture did not retain the old init placeholder outside the current generated handoff');
 }
 
 function parseJson(result, label) {
@@ -155,6 +160,14 @@ try {
   const recoveredGate = run(['gate', '--path', failRoot, '--json'], failRoot, runnerEnv());
   const recoveredGateJson = parseJson(recoveredGate, 'recovered gate');
   check(recoveredGate.status === 0 && recoveredGateJson.ok === true, `latest successful verify did not recover gate (exit ${recoveredGate.status})`, recoveredGate);
+  const handoffFile = path.join(failRoot, '.leerness', 'session-handoff.md');
+  const validHandoff = fs.readFileSync(handoffFile, 'utf8');
+  fs.writeFileSync(handoffFile, validHandoff.replace('<!-- leerness:current-handoff:end -->', '<!-- leerness:current-handoff:start -->'), 'utf8');
+  const malformedLazy = run(['lazy', 'detect', '--path', failRoot, '--json'], failRoot, runnerEnv());
+  const malformedLazyJson = parseJson(malformedLazy, 'malformed handoff lazy detect');
+  check(malformedLazy.status === 1 && malformedLazyJson.findings.some(f => f.kind === 'handoff_invalid_generated_section'),
+    'malformed generated handoff markers were accepted', malformedLazy);
+  fs.writeFileSync(handoffFile, validHandoff, 'utf8');
 
   const placeholderRoot = initProject('placeholder');
   write(path.join(placeholderRoot, 'package.json'), JSON.stringify({ name: 'placeholder-probe', version: '0.0.0', scripts: { test: 'echo "Error: no test specified" && exit 1' } }, null, 2) + '\n');

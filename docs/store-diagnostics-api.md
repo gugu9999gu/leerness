@@ -55,6 +55,15 @@ observed changes fail rather than certify an unstable snapshot. These checks are
 not a portable filesystem transaction, writer lease or guarantee against every
 hostile concurrent filesystem action.
 
+On Windows runtimes that report a pathname device of zero, the reader reopens
+the current file read-only and compares both handles' device, inode, mode, link
+count, size and nanosecond timestamps. It rechecks the final pathname and parent.
+Unknown handle identities and nonzero device mismatches are rejected. Confirmation
+does not reread content or increase the byte limit. Both handles are closed even
+on failure; a close-only failure returns `unreadable/read_failed` without text.
+An earlier failure retains its bounded reason code. These remain observations,
+not atomic fencing against a later external change.
+
 Only selected known files are covered, with no recursive scan, automatic repair,
 archive append, usage write, presence update or migration. The diagnostic performs
 no content writes; ordinary filesystem access-time effects are not a content/mtime

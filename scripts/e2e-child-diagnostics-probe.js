@@ -9,6 +9,13 @@ const { createHash } = require('node:crypto');
 const root = path.resolve(__dirname, '..'), CLI = path.join(root, 'bin', 'leerness.js');
 const e2e = path.join(__dirname, 'e2e.js'), helper = path.join(__dirname, 'e2e-child-diagnostics.js');
 const source = fs.readFileSync(e2e, 'utf8').replace(/\r\n/g, '\n');
+// T-0342: e2e.js gives every call that runs selftest (selftest itself and doctor) one limit, SELFTEST_SPAWN_MS. The
+//   extracted blocks run in a VM context, so the constant is read from the source (exactly one definition) and
+//   passed in; the doctor call's budget is expected to be that value.
+const _spawnDefs = [...source.matchAll(/^const SELFTEST_SPAWN_MS = (\d+);$/gm)];
+assert.equal(_spawnDefs.length, 1, 'SELFTEST_SPAWN_MS definition missing or repeated in e2e.js');
+const SELFTEST_SPAWN_MS = Number(_spawnDefs[0][1]);
+assert.ok(SELFTEST_SPAWN_MS >= 600000, 'SELFTEST_SPAWN_MS below the measured-selftest margin: ' + SELFTEST_SPAWN_MS);
 const tempBase = fs.realpathSync(os.tmpdir());
 const arena = fs.mkdtempSync(path.join(tempBase, 'leerness-e2e-child-diagnostics-'));
 const failures = []; let passed = 0;
@@ -92,7 +99,7 @@ try {
   const ignored = { ...success, stdout: null, stderr: null };
   const execute = (name, failingResult) => {
     const lines = [], calls = [];
-    const context = { fs, path, os: { ...os, tmpdir: () => arena }, process: { execPath: process.execPath, env: { ...process.env } }, CLI, performance, childDiagnostics, total: 0, failed: 0,
+    const context = { fs, path, os: { ...os, tmpdir: () => arena }, process: { execPath: process.execPath, env: { ...process.env } }, CLI, SELFTEST_SPAWN_MS, performance, childDiagnostics, total: 0, failed: 0,
       console: { log: (...args) => lines.push(args.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')) },
       cp: { spawnSync: (executable, args, options) => {
         assert.equal(executable, process.execPath); assert.equal(args[0], CLI);
@@ -113,7 +120,7 @@ try {
   check('original child budgets and doctor parent margin', () => {
     assert.deepEqual(healthy.handoff.calls.map(c => c.options.timeout), [60000, 15000]);
     assert.equal(healthy.handoff.calls[0].options.stdio, 'ignore');
-    assert.deepEqual(healthy.surface.calls.map(c => c.options.timeout), [300000, 15000]);
+    assert.deepEqual(healthy.surface.calls.map(c => c.options.timeout), [SELFTEST_SPAWN_MS, 15000]);
     const bin = fs.readFileSync(CLI, 'utf8');
     const internal = bin.slice(bin.indexOf('function _doctorSelftestReport()'), bin.indexOf('function doctorCmd('));
     const budgets = [...internal.matchAll(/timeout:\s*(\d+)/g)];
@@ -125,11 +132,11 @@ try {
   });
   for (const name of Object.keys(blocks)) check(name + ' actual timeout remains failure with diagnostics', () => {
     const run = execute(name, timed);
-    diagnostics(run, timed, name === 'handoff' ? 15000 : name === 'surface' ? 300000 : 990000);
+    diagnostics(run, timed, name === 'handoff' ? 15000 : name === 'surface' ? SELFTEST_SPAWN_MS : 990000);
     if (name === 'handoff') diagnostics(run, ignored, 60000);
   });
   for (const name of ['surface', 'json']) check(name + ' actual unhealthy selftest remains failure with bounded names', () => {
-    diagnostics(execute(name, unhealthy), unhealthy, name === 'surface' ? 300000 : 990000, unhealthyReport);
+    diagnostics(execute(name, unhealthy), unhealthy, name === 'surface' ? SELFTEST_SPAWN_MS : 990000, unhealthyReport);
   });
 } catch (e) { failures.push(e.stack || String(e)); }
 finally {

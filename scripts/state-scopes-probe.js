@@ -13,6 +13,7 @@ const gateway = require('../lib/git');
 const W = require('../lib/workspace-dir');
 const I = require('../lib/state-inspect');
 const SG = require('../lib/state-git');
+const { removeTree } = require('./temp-cleanup');
 
 // Hosted Windows runners may expose TEMP through an 8.3 name (RUNNER~1).
 // Compare/inject metadata at the same canonical path the product inspects.
@@ -583,7 +584,7 @@ try {
   if (path.dirname(resolvedArena) !== tempDirectory || !path.basename(resolvedArena).startsWith('leerness-state-scopes-')) {
     throw new Error(`refusing cleanup outside the probe arena: ${resolvedArena}`);
   }
-  fs.rmSync(resolvedArena, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  removeTree(resolvedArena, { recursive: true, force: true });
 }
 
 process.stdout.write(`STATE_SCOPES_PROBE ${total - failed}/${total} passed\n`);

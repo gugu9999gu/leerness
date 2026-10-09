@@ -11,6 +11,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { removeTree } = require('./temp-cleanup');
 
 const PREFIX = 'ENCODING_SELFTEST_RESULT:';
 const MISSING = 'ENCODING_DIAGNOSTICS_MISSING';
@@ -209,7 +210,7 @@ function main() {
     assert(path.basename(arena).startsWith(FIXTURE_PREFIX), 'refusing unexpected fixture cleanup');
     assert(samePath(path.dirname(arena), tempParent), 'fixture cleanup escaped TEMP');
     assert(samePath(fs.realpathSync.native(arena), arena), 'fixture cleanup target changed');
-    fs.rmSync(arena, { recursive: true, force: true, maxRetries: 5, retryDelay: 40 });
+    removeTree(arena, { recursive: true, force: true });
   }
   process.stdout.write(`encoding selftest probe: ${total - failures.length}/${total} PASS (${mode})\n`);
   if (failures.length) process.exitCode = 1;

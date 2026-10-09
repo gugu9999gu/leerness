@@ -1,8 +1,0 @@
-<!-- leerness:managed -->
----
-alwaysApply: true
----
-Follow AGENTS.md and .leerness/context-routing.md.
-Run: `leerness handoff .` at session start.
-Run: `leerness session close .` at session end.
-Preserve Leerness protected files.

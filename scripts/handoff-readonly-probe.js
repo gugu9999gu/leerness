@@ -392,6 +392,40 @@ async function waitForJson(file, timeoutMs = 10000) {
   const afterSecondAdapter = fs.readFileSync(hooksPath, 'utf8');
   assert('cursor adapter hook merge is idempotent', beforeSecondAdapter === afterSecondAdapter, starts);
 
+  // T-0305: a past-due wakeup and next-action suggestions for the current task are shown by the
+  // default handoff but recorded only by --writeback. The --writeback run is the control that this
+  // fixture really reaches both writers.
+  const focusEnv = handoffEnv('focus-state-0001');
+  const wakeupsPath = path.join(root, '.leerness', 'active-wakeups.json');
+  const queuePath = path.join(root, '.leerness', 'next-action-queue.json');
+  fs.writeFileSync(wakeupsPath, JSON.stringify({ wakeups: [{ expectedFireAt: '2001-01-01T00:00:00.000Z',
+    registeredAt: '2001-01-01T00:00:00.000Z', intervalMin: 25, source: 'readonly-probe', status: 'pending' }] }, null, 2) + '\n');
+  must('focus task', run(process.execPath, [CLI, 'task', 'add', 'widgetization focus probe', '--path', root], { env: focusEnv }));
+  const focusTask = JSON.parse(must('focus task list', run(process.execPath,
+    [CLI, 'task', 'list', '--json', '--path', root], { env: focusEnv })).stdout).tasks.find(t => /widgetization/.test(t.request));
+  must('focus task in progress', run(process.execPath,
+    [CLI, 'task', 'update', focusTask.id, '--status', 'in-progress', '--path', root], { env: focusEnv }));
+  must('focus milestone', run(process.execPath, [CLI, 'plan', 'add', 'widgetization milestone', '--path', root], { env: focusEnv }));
+  must('focus decision', run(process.execPath,
+    [CLI, 'decision', 'add', 'widgetization decision', '--reason', 'readonly probe', '--path', root], { env: focusEnv }));
+  git(['add', '-A']);
+  git(['commit', '-m', 'focus state fixture']);
+  const queueBefore = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, 'utf8') : null;
+  const focusText = must('focus default handoff', run(process.execPath,
+    [CLI, 'handoff', root, '--no-drift-check'], { env: focusEnv })).stdout;
+  assert('default handoff still reports the missed wakeup', /ScheduleWakeup miss/.test(focusText), focusText.slice(-2000));
+  assert('default handoff still shows next-action suggestions', /widgetization/.test(focusText) && /M-\d{4}/.test(focusText),
+    focusText.slice(-2000));
+  const afterFocus = git(['status', '--porcelain=v1', '--untracked-files=all']).trim();
+  assert('default handoff does not record wakeup or next-action state in tracked files', afterFocus === '', afterFocus);
+  must('focus writeback handoff', run(process.execPath,
+    [CLI, 'handoff', root, '--writeback', '--no-drift-check'], { env: focusEnv }));
+  assert('writeback handoff records the missed wakeup',
+    JSON.parse(fs.readFileSync(wakeupsPath, 'utf8')).wakeups[0].status === 'missed', fs.readFileSync(wakeupsPath, 'utf8'));
+  const queueAfter = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, 'utf8') : null;
+  assert('writeback handoff records next-action suggestions',
+    queueAfter !== queueBefore && /widgetization/.test(queueAfter || ''), queueAfter);
+
   const failed = checks.filter(check => !check.ok);
   process.stdout.write(JSON.stringify({ ok: failed.length === 0, checks: checks.length, failed, parallel: parallel.length }) + '\n');
   if (failed.length) process.exitCode = 1;

@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const { removeTree } = require('./temp-cleanup');
 
 const root = path.resolve(__dirname, '..');
 const cliPath = path.join(root, 'bin', 'leerness.js');
@@ -469,16 +470,26 @@ try {
   });
   let benchMatrix = null;
   try { benchMatrix = JSON.parse(String(benchMatrixChild.stdout || '')); } catch {}
-  if (benchMatrixChild.status !== 0 || !Array.isArray(benchMatrix) || benchMatrix.length !== EXTERNAL_AGENTS.length) {
-    failures.push(`agents bench 10-provider settled matrix 실행 실패: ${String(benchMatrixChild.stderr || benchMatrixChild.stdout || '').slice(0, 500)}`);
+  // The matrix deliberately includes Ollama without an explicit model. That
+  // case must return an unsupported result and set the child exit code to 1;
+  // successful supported calls and every provenance write are checked below.
+  if (benchMatrixChild.status !== 1 || !Array.isArray(benchMatrix) || benchMatrix.length !== EXTERNAL_AGENTS.length) {
+    failures.push(`agents bench 10-provider settled matrix 실행 실패: ${JSON.stringify({
+      exit: benchMatrixChild.status, signal: benchMatrixChild.signal,
+      error: benchMatrixChild.error && benchMatrixChild.error.code,
+      rows: Array.isArray(benchMatrix) ? benchMatrix.length : null,
+      stderr: String(benchMatrixChild.stderr || '').slice(0, 300),
+    })}`);
   } else {
     for (const row of benchMatrix) {
       const supported = row.id !== 'ollama';
       if (!Array.isArray(row.results) || row.results.length !== 1
           || row.results[0].id !== row.id
           || !Array.isArray(row.checked) || row.checked.length !== 1 || row.checked[0] !== row.id
+          || row.results[0].auditWritten !== true || row.results[0].auditError !== null
           || (supported && (row.calls.length !== 1 || row.calls[0].stdin !== 'ignore' || row.results[0].ok !== true))
-          || (!supported && (row.calls.length !== 0 || !/explicit model/.test(String(row.results[0].error || ''))))) {
+          || (!supported && (row.calls.length !== 0 || row.results[0].ok !== false
+            || !/explicit model/.test(String(row.results[0].error || ''))))) {
         failures.push(`agents bench ${row.id} 단독-ready settled 결과 오류: ${JSON.stringify(row)}`);
       }
     }
@@ -1200,7 +1211,7 @@ try {
 } catch (error) {
   failures.push(String(error && (error.stack || error.message) || error));
 } finally {
-  try { fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch {}
+  try { removeTree(sandbox, { recursive: true, force: true }); } catch {}
 }
 
 if (failures.length) {

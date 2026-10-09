@@ -514,9 +514,9 @@ try {
     throw new Error('mode set JSON or manifest state changed with UI language');
   }
 
-  // The first manifest read is outside the lock. Corrupt it while mode waits
-  // for that lock, then release the lock: the locked reread must reject the
-  // mutation, preserve both generated documents, and report a real failure.
+  // Corrupt the manifest while mode waits for its lock, then release the lock.
+  // Its checked descriptor read under that lock must reject the mutation,
+  // preserve both generated documents, and report a real failure.
   const modeMidflightCorruptProject = path.join(tmp, 'mode-midflight-corrupt');
   cloneProjectState(modeMidflightCorruptProject);
   const midflightManifest = path.join(modeMidflightCorruptProject, '.leerness', 'manifest.json');
@@ -535,6 +535,7 @@ try {
     "const path = require('path');",
     "const originalMkdir = fs.mkdirSync;",
     "const originalReadFile = fs.readFileSync;",
+    "const originalOpen = fs.openSync;",
     "const lock = path.resolve(process.env.LEERNESS_TEST_MODE_LOCK);",
     "const manifest = path.resolve(process.env.LEERNESS_TEST_MODE_MANIFEST);",
     "const marker = path.resolve(process.env.LEERNESS_TEST_MODE_LOCK_MARKER);",
@@ -542,22 +543,16 @@ try {
     "const mutation = process.env.LEERNESS_TEST_MODE_MUTATION || 'corrupt';",
     "let injected = false;",
     "function record(event, detail = {}) { fs.appendFileSync(trace, JSON.stringify({ event, ...detail }) + '\\n'); }",
-    "function manifestKind(value) {",
-    "  try {",
-    "    const parsed = JSON.parse(String(value));",
-    "    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? 'valid-object' : 'invalid-value';",
-    "  } catch { return 'corrupt'; }",
-    "}",
     "function ownerHeld() {",
     "  try { return fs.readdirSync(lock).some(name => /^owner-[a-f0-9]{32}\\.json$/.test(name)); }",
     "  catch { return false; }",
     "}",
-    "fs.readFileSync = function(target, ...args) {",
-    "  const value = originalReadFile.call(fs, target, ...args);",
-    "  if (path.resolve(String(target)) === manifest) {",
-    "    record('manifest-read', { phase: injected ? 'after-injection' : 'before-contention', kind: manifestKind(value), ownerHeld: ownerHeld() });",
-    "  }",
-    "  return value;",
+    // The checked manifest reader uses descriptor opens, not readFileSync.
+    // Observe those opens without replacing its byte reader or path checks.
+    "fs.openSync = function(target, ...args) {",
+    "  const fd = originalOpen.call(fs, target, ...args);",
+    "  if (path.resolve(String(target)) === manifest) record('manifest-open', { phase: injected ? 'after-injection' : 'before-contention', ownerHeld: ownerHeld() });",
+    "  return fd;",
     "};",
     "fs.mkdirSync = function(target, ...args) {",
     "  const resolved = path.resolve(String(target));",
@@ -590,18 +585,15 @@ try {
     LEERNESS_TEST_MODE_LOCK_TRACE: lockTrace,
     LEERNESS_TEST_MODE_MUTATION: 'corrupt',
   };
-  const lockTraceShows = (traceFile, postKind) => {
+  const lockTraceShows = traceFile => {
     const events = fs.existsSync(traceFile)
       ? fs.readFileSync(traceFile, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))
       : [];
     const contentionIndex = events.findIndex(event => event.event === 'contention-observed');
-    const validPreLockIndex = events.findIndex((event, index) => index < contentionIndex
-      && event.event === 'manifest-read' && event.phase === 'before-contention'
-      && event.kind === 'valid-object' && event.ownerHeld === false);
     const lockedRereadIndex = events.findIndex((event, index) => index > contentionIndex
-      && event.event === 'manifest-read' && event.phase === 'after-injection'
-      && event.kind === postKind && event.ownerHeld === true);
-    return validPreLockIndex >= 0 && contentionIndex > validPreLockIndex && lockedRereadIndex > contentionIndex;
+      && event.event === 'manifest-open' && event.phase === 'after-injection'
+      && event.ownerHeld === true);
+    return contentionIndex >= 0 && lockedRereadIndex > contentionIndex;
   };
   const modeMidflightFailure = failureJson('mode lock-time manifest corruption', run(
     ['mode', 'set', 'minimal', '--path', modeMidflightCorruptProject, '--language', 'en', '--json'], handshakeEnv, tmp
@@ -609,7 +601,7 @@ try {
   const midflightRaw = fs.readFileSync(midflightManifest, 'utf8');
   if (!fs.existsSync(lockMarker)
       || fs.readFileSync(lockMarker, 'utf8') !== 'contention-observed\n'
-      || !lockTraceShows(lockTrace, 'corrupt')
+      || !lockTraceShows(lockTrace)
       || modeMidflightFailure.parsed.code !== 'manifest_corrupt'
       || midflightRaw !== '{ broken during lock wait\n'
       || [...midflightDocs].some(([name, before]) => {
@@ -648,7 +640,7 @@ try {
   const objectAfter = JSON.parse(fs.readFileSync(objectManifest, 'utf8'));
   if (!fs.existsSync(objectMarker)
       || fs.readFileSync(objectMarker, 'utf8') !== 'contention-observed\n'
-      || !lockTraceShows(objectTrace, 'valid-object')
+      || !lockTraceShows(objectTrace)
       || objectPayload.ok !== true || objectPayload.previous !== 'standard'
       || objectPayload.mode !== 'minimal' || objectPayload.regenerated !== 2
       || objectAfter.mode !== 'minimal'

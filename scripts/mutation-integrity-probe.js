@@ -326,22 +326,44 @@ try {
     const cleanupExpected = Buffer.from('cleanup-original');
     fs.writeFileSync(cleanupFile, cleanupExpected);
     const originalWrite = fs.writeFileSync;
-    const originalRm = fs.rmSync;
+    const originalRm = fs.rmdirSync;
     fs.writeFileSync = (file, ...args) => {
       if (path.basename(String(file)) === 'next' && String(file).includes('.leerness-write-')) { const e = new Error('simulated temp write denial'); e.code = 'EACCES'; throw e; }
       return originalWrite(file, ...args);
     };
-    fs.rmSync = (file, ...args) => {
+    fs.rmdirSync = (file, ...args) => {
       if (String(file).includes('.leerness-write-')) { const e = new Error('simulated cleanup denial'); e.code = 'EACCES'; throw e; }
       return originalRm(file, ...args);
     };
     let cleanupError = null;
     try { originalWriter(cleanupFile, cleanupExpected, Buffer.concat([BOM, cleanupExpected])); } catch (e) { cleanupError = e; }
-    finally { fs.writeFileSync = originalWrite; fs.rmSync = originalRm; }
+    finally { fs.writeFileSync = originalWrite; fs.rmdirSync = originalRm; }
     passed = check(cleanupError && cleanupError.code === 'EACCES' && Array.isArray(cleanupError.recoveryArtifacts)
       && cleanupError.recoveryArtifacts.some(a => a.role === 'cleanup-failed-scratch'), 'cleanup exhaustion is surfaced with retained scratch') && passed;
     const cleanupScratch = cleanupError.recoveryArtifacts.find(a => a.role === 'cleanup-failed-scratch').path;
     cleanupRecovery([cleanupScratch]);
+
+    // A reserved scratch directory is not authority to delete unexpected data.
+    const unexpectedFile = path.join(concurrentDir, 'unexpected-scratch.ps1');
+    fs.writeFileSync(unexpectedFile, cleanupExpected);
+    const originalMkdtemp = fs.mkdtempSync;
+    let unexpectedPath;
+    fs.mkdtempSync = (prefix, ...args) => {
+      const dir = originalMkdtemp(prefix, ...args);
+      if (String(prefix).includes('.leerness-write-')) {
+        unexpectedPath = path.join(dir, 'external');
+        fs.writeFileSync(unexpectedPath, 'unexpected content');
+      }
+      return dir;
+    };
+    let unexpectedResult;
+    try { unexpectedResult = originalWriter(unexpectedFile, cleanupExpected, Buffer.from('updated'), { retainBackup: false }); }
+    finally { fs.mkdtempSync = originalMkdtemp; }
+    passed = check(unexpectedResult && unexpectedResult.cleanupError && unexpectedResult.cleanupDirectory
+      && fs.readFileSync(unexpectedPath, 'utf8') === 'unexpected content'
+      && fs.readFileSync(unexpectedFile, 'utf8') === 'updated',
+    'nonempty scratch is retained with an explicit cleanup notice') && passed;
+    cleanupRecovery([unexpectedResult.cleanupDirectory]);
 
     // Retry only no-progress Win32 sharing violations.
     const retryFile = path.join(concurrentDir, 'transient-sharing.ps1');

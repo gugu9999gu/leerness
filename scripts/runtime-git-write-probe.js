@@ -38,6 +38,8 @@ const test = (name, fn) => {
   catch (error) { failed++; console.error(`FAIL ${name}: ${error.message}`); }
 };
 const writes = [
+  ['hash-object', '-w', '--stdin'], ['hash-object', '-wt', 'blob', '--stdin'],
+  ['mktree'], ['commit-tree', 'a'.repeat(40)],
   ['branch', 'audit-branch'], ['branch', 'audit-branch', 'HEAD'], ['branch', '-f', 'audit-branch'],
   ['branch', '-D', 'audit-branch'], ['branch', '-m', 'old', 'new'], ['branch', '-C', 'old', 'new'],
   ['branch', '-u', 'origin/main'], ['branch', '--set-upstream-to=origin/main', 'audit-branch'],
@@ -60,6 +62,7 @@ const writes = [
   ['--git-dir', path.join(cwd, '.git'), 'branch', 'audit-branch'],
 ];
 const reads = [
+  ['hash-object', '--stdin'], ['hash-object', '-t', 'blob', '--no-filters', '--stdin'],
   ['rev-parse', '--show-toplevel'], ['rev-parse', '--path-format=absolute', '--git-dir'],
   ['status', '--porcelain'], ['log', '-1', '--format=%H'], ['branch'], ['branch', '-avv'],
   ['branch', '--list', 'release/*'], ['branch', '--merged', 'main', '--list', 'release/*'],

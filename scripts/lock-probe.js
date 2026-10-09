@@ -21,8 +21,10 @@ const norm = p => { try { return path.resolve(String(p)); } catch { return Strin
 // tombstone을 상태로 세면 해제용 rename/owner 삭제가 사용자 쓰기로 오인되고, 공개 락을 계속 held로
 // 누적하면 이후의 정상 쓰기까지 "서로 다른 락" 아래에서 일어난 것처럼 보이는 거짓 실패가 난다.
 const LOCK_INTERNAL = /\.lock(?:\.release-[0-9a-f]+)?(?:[\\/]|$)/i;
+// T-0314: checked memory-output publication (1.36.190, lib/memory-output.js) prepares `.<name>.publish-<pid>-<hex>`
+// and hard-links it onto the target; like `.tmp-*`, the prepared file is not state (the link names the target).
 const isState = p => /[\\/]\.leerness[\\/]/.test(p) && !/[\\/]archive[\\/]/.test(p)
-  && !LOCK_INTERNAL.test(p) && !/\.tmp-\d+-\d+$/.test(p);
+  && !LOCK_INTERNAL.test(p) && !/\.tmp-\d+-\d+$/.test(p) && !/[\\/]\.[^\\/]+\.publish-\d+-[0-9a-f]+$/.test(p);
 const relOf = p => (p.split(/[\\/]\.leerness[\\/]/)[1] || p).replace(/\\/g, '/');
 // 선택형 경쟁 창 확대. 제품에는 영향을 주지 않으며, 테스트가 명시적으로 이 모듈을 preload 하고
 // LOCKPROBE_STALL_TARGET/LOCKPROBE_STALL_MS 를 함께 준 경우에만 최종 rename 직전에 멈춘다.
@@ -79,9 +81,7 @@ const note = (target, how) => {
 };
 const _w = fs.writeFileSync.bind(fs);
 fs.writeFileSync = function (p, ...a) { try { note(p, 'write'); } catch {} return _w(p, ...a); };
-const _r = fs.renameSync.bind(fs);
-fs.renameSync = function (from, to) {
-  try { note(to, 'rename'); } catch {}
+const stallBefore = (to) => {
   try {
     if (shouldStall(to)) {
       stalled = true;
@@ -96,6 +96,11 @@ fs.renameSync = function (from, to) {
       stall(STALL_MS);
     }
   } catch {}
+};
+const _r = fs.renameSync.bind(fs);
+fs.renameSync = function (from, to) {
+  try { note(to, 'rename'); } catch {}
+  stallBefore(to);
   const r = _r(from, to);
   // 1.36.160: 공개 락 디렉터리를 tombstone으로 원자 이동하는 순간 target에 대한
   // 상호배제는 끝난다. 실제 rename 성공 뒤에만 보유 집합에서 제거해 실패한 rename은
@@ -108,6 +113,26 @@ fs.renameSync = function (from, to) {
 };
 const _a = fs.appendFileSync.bind(fs);
 fs.appendFileSync = function (p, ...args) { try { note(p, 'append'); } catch {} return _a(p, ...args); };
+// T-0314: since 1.36.190 checked memory outputs (decisions/lessons/plan and more) are published by
+// `fs.linkSync(prepared, target)` instead of a rename. Hooking rename alone left those final writes
+// unobserved by the lock invariant and never stalled, so the race tests reported stalled:false for
+// 8 of 11 pairs without creating their race.
+const _l = fs.linkSync.bind(fs);
+fs.linkSync = function (from, to) {
+  try { note(to, 'link'); } catch {}
+  stallBefore(to);
+  return _l(from, to);
+};
+// T-0314: on Windows an existing memory output is replaced by [IO.File]::Replace in a PowerShell child
+// (lib/io.js _replaceWindowsWithBackup), which no fs hook in this process sees; the target travels in
+// LEERNESS_REPLACE_TO. Observe and stall that publication too.
+const cp = require('child_process');
+const _spawnSync = cp.spawnSync;
+cp.spawnSync = function (file, args, options) {
+  const to = options && options.env && options.env.LEERNESS_REPLACE_TO;
+  if (to) { try { note(to, 'replace'); } catch {} stallBefore(to); }
+  return _spawnSync.apply(this, arguments);
+};
 
 process.on('exit', () => {
   if (!OUT) return;

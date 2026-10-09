@@ -1,0 +1,13 @@
+# Team registry storage
+
+Team add/remove now capture `teams.json` under its canonical lock and prepare both the JSON source and `teams.md` generated view before the first save. Both files use the existing checked text publisher, with locks ordered JSON then Markdown. UTF-8 input and generated output are limited to 4 MiB per file. Invalid bytes, unpaired Unicode in parsed metadata, oversized candidates and detected source changes are refused.
+
+JSON remains authoritative. Existing array/team-ID checks, scalar member/persona normalization, unknown metadata, ID rules and add/remove behavior remain. JSON is serialized with the existing two-space format; this is semantic metadata preservation, not preservation of arbitrary JSON whitespace or numeric spelling. Each file retains its signature and first LF/CRLF style. Multiline values remain intact in JSON; the generated view uses the view's newline style consistently.
+
+An absent Markdown view can be generated. An existing view must match the current canonical render, apart from its signature and LF/CRLF style. Additional notes, old/different rendering or a stale view cause `E_TEAM_PROJECTION_EDITED` before either save. Preserve both files, reconcile any authored content and restore a matching generated view before retrying. `--force` does not bypass this protection. This change does not infer ownership of arbitrary Markdown sections or introduce automatic projection recovery.
+
+The files are published in canonical-then-view order. This is not a transaction: a later failure can leave an updated canonical file and an older view. Error output names the failed file/phase, lists confirmed `completedFiles` and retains available publication flags and recovery paths. A publisher failure may have saved the current file even if it is not in the confirmed list; inspect its flags. No rollback is claimed. The whole pair is not retried after an uncertain failure; bounded filesystem retries stay with the existing publisher. Success is reported only after both save calls and lock release complete.
+
+Read-only list/show/preview and handoff observations keep their existing tolerant-reading policy. Deployment gates and execution are unchanged. This boundary does not repair historical data, synchronize every external writer, complete all ENC-01 storage work or update existing installations.
+
+`npm run test:teams-text` uses temporary projects and isolated homes to verify real CLI preservation, creation/no-op behavior, malformed/stale input, partial publication, recovery details, output limits, multiline values, runtime restrictions and concurrent add/remove. It does not invoke coding agents or deploy teams.

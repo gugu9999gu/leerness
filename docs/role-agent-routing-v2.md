@@ -409,3 +409,14 @@ The v2 documents remain inactive, but the existing legacy runtime now has a boun
 - Add dedicated read-only CLI/MCP validation surfaces for the three native v2 documents; the current `roles validate` projection covers only legacy input.
 - Re-run installed-package, full regression, multi-runtime, and independent adversarial review before any public runtime activation.
 - Keep automatic fallback, model invocation, configuration UI, and dashboard writes disabled until their later milestones.
+
+
+## Optional UI Boundary integration
+
+UIB-02 adds `uiBoundary` to v2 role definitions and the existing execution ledger
+`review` object, with shared task policy in review-checkpoint tasks. The five UI
+responsibilities are provider/model independent. Existing permission ceilings,
+legacy assignment roundtrip, role prompts and runtime dispatch remain unchanged.
+Explicit extension use requires its versioned schema; unsupported new data is
+rejected and preserved instead of silently rewritten. See
+[UI Boundary contracts](ui-boundary-contracts.md).

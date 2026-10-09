@@ -28,6 +28,16 @@ process.env.LANGUAGE = 'ko';
 //   대부분의 init/session 테스트는 roadmap 을 검증하지 않으므로 생성 비용 제거 → 5분 내 완료.
 process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
 const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
+// T-0342: one limit for the calls here that run selftest (selftest itself, and doctor, which runs it). selftest took
+//   13 s in 1.36.85 and 116 s in 1.36.124, and with 355 cases it takes 227-241 s on Windows (2026-10-09), so the 300 s
+//   limits these calls had kept almost no room. As elsewhere, the limit follows the measurement with about three
+//   times the margin; the lived-in harness and MCP blocks already allow 900 s.
+const SELFTEST_SPAWN_MS = 900000;
+// T-0315: the suite must not write this package's own .leerness (scripts/e2e-repo-guard.js). Snapshot it before
+// anything runs; the check next to the E2E result compares.
+const repoGuard = require('./e2e-repo-guard');
+const _pkgLeerness = path.resolve(__dirname, '..', '.leerness');
+const _pkgLeernessBefore = repoGuard.snapshot(_pkgLeerness);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-'));
 // Product Git calls intentionally honor persistent global/system configuration,
 // because a user's real commit sees the same hooksPath. Test fixtures must not:
@@ -89,6 +99,15 @@ cp.spawn = function e2eSpawnWithRuntimeWarningGate(...spawnArgs) {
   return _rawSpawn(..._injectRuntimeWarningEnv(spawnArgs));
 };
 const _e2eStart = Date.now();  // 1.9.284 (UR-0029): 총 소요시간 투명성
+// T-0315: npm test starts this file in the package root, so a CLI call with neither cwd nor a project path used
+// the package repository as its project: every full run added test dispatch events to its execution ledger
+// (then listed as agent provenance in its handoff), bumped its usage counter and wrote agent-run records.
+// Run from a hermetic, initialized project instead. Blocks that name a project or pass a cwd are unaffected;
+// the other spawns in this file use absolute paths.
+const e2eHome = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-home-'));
+fs.writeFileSync(path.join(e2eHome, 'package.json'), '{"name":"e2e-home","version":"0.1.0"}\n');
+const _e2eHomeInit = cp.spawnSync(process.execPath, [CLI, 'init', e2eHome, '--yes'], { cwd: e2eHome, encoding: 'utf8', timeout: 180000 });
+process.chdir(e2eHome);
 
 // Windows의 portable runner는 임의 .cmd/.bat를 shell로 실행하지 않고, npm이
 // 생성하는 `"%dp0%\\entry.js" %*` 형태만 안전하게 해석한다. 외부 CLI fixture도
@@ -177,7 +196,7 @@ total++;
   const settingsFile = path.join(tmp, '.claude/settings.local.json');
   if (fs.existsSync(settingsFile)) {
     const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-    const hasHook = (s.hooks?.SessionStart || []).some(h => h.command && h.command.includes('leerness update'));
+    const hasHook = (s.hooks?.SessionStart || []).some(g => (g.hooks || []).some(h => h.type === 'command' && h.command === 'leerness update --check --quiet'));
     if (hasHook) console.log('✓ SessionStart hook for update --check installed');
     else { failed++; console.log('✗ SessionStart hook missing'); }
   } else { failed++; console.log('✗ .claude/settings.local.json missing'); }
@@ -220,8 +239,8 @@ total++;
   fs.writeFileSync(settingsFile, JSON.stringify(s, null, 2));
   cp.spawnSync(process.execPath, [CLI, 'auto-update', 'install', tmp], { encoding: 'utf8' });
   const after = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-  const hasLegacy = (after.hooks?.SessionStart || []).some(h => /leerness-plus update/.test(h.command || ''));
-  const hasNew = (after.hooks?.SessionStart || []).some(h => /\bleerness update\b/.test(h.command || ''));
+  const hasLegacy = (after.hooks?.SessionStart || []).some(g => /leerness-plus update/.test(g.command || '') || (g.hooks || []).some(h => /leerness-plus update/.test(h.command || '')));
+  const hasNew = (after.hooks?.SessionStart || []).some(g => (g.hooks || []).some(h => h.type === 'command' && h.command === 'leerness update --check --quiet'));
   const ok = !hasLegacy && hasNew;
   console.log(ok ? '✓ B(P1) legacy leerness-plus hook 자동 제거' : '✗ B(P1) legacy hook 남음');
   if (!ok) failed++;
@@ -1013,7 +1032,7 @@ total++;
   if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 300)); }
 }
 
-// 1.9.32 회귀: 배너 + setup-agents (비대화형 모드 안전)
+// Historical banner checks and the removed CLI-agent activation surface.
 total++;
 {
   // --version --banner: LEERNESS ASCII + 신규 슬로건 (1.9.144+ "AI 에이전트 검수·기억·드리프트 방지 하네스")
@@ -1038,42 +1057,36 @@ total++;
 
 total++;
 {
-  // setup-agents 비대화형 (--yes 또는 비-TTY): 변경 없이 안내만
-  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-setup-'));
-  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended', '--no-setup-agents'], { stdio: 'ignore', timeout: 30000 });
-  const r = cp.spawnSync(process.execPath, [CLI, 'setup-agents', tmpC, '--yes'], { encoding: 'utf8', timeout: 15000 });
-  const ok = r.status === 0
-    && /외부 AI CLI 설정 \(1\.9\.3\d\)/.test(r.stdout)
-    && /(비대화형|leerness agents list)/.test(r.stdout);
-  console.log(ok ? '✓ B(1.9.32) setup-agents 비대화형: 안내만 출력 (.env 미변경)' : `✗ setup-agents 실패`);
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-setup-removed-'));
+  const r = cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended', '--minimal', '--no-banner'], { encoding: 'utf8', timeout: 30000 });
+  const configPath = path.join(tmpC, '.leerness', 'leerness-config.json');
+  const config = r.status === 0 ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+  const ok = r.status === 0 && fs.existsSync(path.join(tmpC, 'AGENTS.md'))
+    && !Object.keys(config).some(k => /^LEERNESS_ENABLE_/.test(k))
+    && !/CLI 에이전트 활성화|Agents 활성화|외부 AI CLI 설정/.test(r.stdout);
+  console.log(ok ? '✓ init: 에이전트 활성화 문항/기본값 없이 지침 설치' : '✗ init 에이전트 활성화 잔존');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
 total++;
 {
-  // help에 setup-agents 노출
+  // Removed command is not advertised.
   const r = cp.spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8', timeout: 10000 });
-  const ok = r.status === 0 && /setup-agents/.test(r.stdout) && /1\.9\.32/.test(r.stdout);
-  console.log(ok ? '✓ B(1.9.32) --help에 setup-agents + 1.9.32 명시' : `✗ help 실패`);
+  const ok = r.status === 0 && !/setup-agents|CLI 에이전트 활성화/.test(r.stdout);
+  console.log(ok ? '✓ --help: 제거된 설정 명령 없음' : '✗ --help에 제거된 명령 잔존');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
 total++;
 {
-  // _upsertEnvLine 동작 — setup-agents가 .env 파일을 만들지 못해도 안전 (비대화형이라 skip)
-  // 직접 _upsertEnvLine 단위 테스트: 임시 파일에 key=value 작성 + 갱신
-  const tmpEnv = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-env-')), '.env');
-  fs.writeFileSync(tmpEnv, 'EXISTING=1\nLEERNESS_ENABLE_CLAUDE=0\n', 'utf8');
-  // 갱신: LEERNESS_ENABLE_CLAUDE=0 → 1
-  // (간접 검증: setup-agents의 핵심 함수가 정규식 기반 upsert)
-  const before = fs.readFileSync(tmpEnv, 'utf8');
-  // 시뮬: regex replace
-  const updated = before.replace(/^LEERNESS_ENABLE_CLAUDE=.*$/m, 'LEERNESS_ENABLE_CLAUDE=1');
-  fs.writeFileSync(tmpEnv, updated, 'utf8');
-  const after = fs.readFileSync(tmpEnv, 'utf8');
-  const ok = /LEERNESS_ENABLE_CLAUDE=1/.test(after) && /EXISTING=1/.test(after) && !/LEERNESS_ENABLE_CLAUDE=0/.test(after);
-  console.log(ok ? '✓ B(1.9.32) .env upsert: 기존 키 교체 + 다른 키 보존' : `✗ .env upsert 실패`);
-  if (!ok) { failed++; console.log(after); }
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-setup-disabled-'));
+  const tmpEnv = path.join(tmpC, '.env');
+  fs.writeFileSync(tmpEnv, 'EXISTING=1\nLEERNESS_ENABLE_CLAUDE=1\n', 'utf8');
+  const before = fs.readFileSync(tmpEnv);
+  const r = cp.spawnSync(process.execPath, [CLI, 'setup-agents', tmpC, '--yes'], { encoding: 'utf8', timeout: 10000 });
+  const ok = r.status !== 0 && fs.readFileSync(tmpEnv).equals(before);
+  console.log(ok ? '✓ 제거된 setup-agents 명령은 설정을 변경하지 않음' : '✗ 제거된 명령이 여전히 실행됨');
+  if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 500)); }
 }
 
 // 1.9.33 회귀: npx 캐시 함정 — stale 버전 실행 시 경고
@@ -2114,11 +2127,15 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-compact-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', '--include', tmpC, '--compact'], { encoding: 'utf8', timeout: 15000, cwd: os.tmpdir() });
+  // 1.36.255 (T-0278): compact 는 탐색용이다 — 고정된 일반 규칙("핵심 규칙: 의존성0 …")을 더는 싣지 않고,
+  //   규칙 원문을 부모나 `leerness rule list` 에서 확인하라는 줄을 싣는다. 지어낸 규칙이 돌아오지 않는지도 함께 본다.
+  const { COMPACT_RULES } = require(path.resolve(__dirname, '..', 'lib', 'context-reading-guidance.js'));
   const ok = r.status === 0
     && /leerness compact \(1\.9\.22\):/.test(r.stdout)
-    && /핵심 규칙: 의존성0/.test(r.stdout)
+    && r.stdout.includes(COMPACT_RULES)
+    && !/핵심 규칙: 의존성0/.test(r.stdout)
     && r.stdout.length < 2000; // compact 모드는 짧아야 함
-  console.log(ok ? '✓ B(1.9.22) handoff --compact: LLM 프롬프트용 1줄 요약' : '✗ --compact 실패');
+  console.log(ok ? '✓ B(1.9.22/1.36.255) handoff --compact: LLM 프롬프트용 1줄 요약 + 고정 규칙 대신 규칙 확인 경로' : '✗ --compact 실패');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
@@ -2653,8 +2670,12 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'release', 'note', 'e2e 검증 항목 추가', '--path', tmp], { encoding: 'utf8' });
   // 두 번째 session close — 변경 감지
   const sc = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmp], { encoding: 'utf8' });
-  const ok = /User Rules verification/.test(sc.stdout) && /✓ pass/.test(sc.stdout);
-  console.log(ok ? '✓ B(1.9.8) session close: rule 검증 ✓ pass 출력' : `✗ B(1.9.8) session close 검증 실패\n${sc.stdout.split('\n').slice(-15).join('\n')}`);
+  // 1.36.238 (T-0260, UR-0137): 키워드 관측은 룰 준수 판정이 아니다 — "✓ pass" 대신 관측(미검증)과 근거를 보고한다.
+  //   버전 룰 행이 이번 bump 를 관측하고, 관측 표 어디에도 통과 주장이 없는지 본다.
+  const sec = ((sc.stdout || '').split('## User Rule observations')[1] || '').split('\n## ')[0];
+  const versionRow = sec.split('\n').find(l => /^\|.*버전 patch bump/.test(l)) || '';
+  const ok = /observed \(unverified\)/.test(versionRow) && /0\.1\.0 -> 0\.1\.1/.test(versionRow) && !/✓ pass/.test(sec);
+  console.log(ok ? '✓ B(1.9.8/1.36.238) session close: 버전 룰이 bump 를 관측(미검증)으로 보고 + 통과 주장 없음' : `✗ B(1.9.8) session close 검증 실패\n${sc.stdout.split('\n').slice(-15).join('\n')}`);
   if (!ok) failed++;
 }
 
@@ -3399,8 +3420,10 @@ total++;
   let ok = false;
   try {
     const reg = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    // 1.36.280: `setup-agents` 명령을 제거해 강력 명령은 6개다 — 개수와 함께 그 명령이 목록에 없는지 본다.
     const dataOk = reg.CAPABILITY_SURFACE && Object.keys(reg.CAPABILITY_SURFACE).length === 6 &&
-      Array.isArray(reg.POWERFUL_COMMANDS) && reg.POWERFUL_COMMANDS.length === 7 &&
+      Array.isArray(reg.POWERFUL_COMMANDS) && reg.POWERFUL_COMMANDS.length === 6 &&
+      !reg.POWERFUL_COMMANDS.some(c => /setup-agents/.test(c.cmd)) &&
       reg.ADAPTERS && Object.keys(reg.ADAPTERS).length === 9 &&
       Array.isArray(reg.REUSE_CATEGORIES) && reg.REUSE_CATEGORIES.length === 15 &&
       Array.isArray(reg.REUSE_CHECKLIST) && reg.REUSE_CHECKLIST.length === 6;
@@ -3936,10 +3959,10 @@ total++;
     //   측정 근거 — **게시된 1.36.104** 격리 실측 doctor 97s / selftest 99s, 작업 트리 101s/94s (동일 수준).
     //   즉 내 변경이 느리게 만든 게 아니라 제한이 처음부터 빠듯했다. 3배 여유로 올린다(검사 대상은 속도가 아니라 동작).
     const doctorStarted = performance.now();
-    const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: 300000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: SELFTEST_SPAWN_MS });
     const doctorElapsed = performance.now() - doctorStarted;
     let j = null; try { j = JSON.parse(r.stdout); } catch {}
-    dbg.doctor = childDiagnostics(r, doctorElapsed, 300000, j);
+    dbg.doctor = childDiagnostics(r, doctorElapsed, SELFTEST_SPAWN_MS, j);
     const doctorOk = j && j.version && typeof j.mcpTools === 'number' && j.mcpTools >= 80 && j.selftest && j.selftest.total > 0 && j.healthy === true && r.status === 0;
     // commands 요약 + banner 가 실제 MCP 수 노출 (하드코딩 65/46 아님)
     const commandsStarted = performance.now();
@@ -3963,17 +3986,26 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', dd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
     const shp = path.join(dd, '.leerness', 'session-handoff.md');
     // 손상 시뮬: 구 timestamp + 본문 '---' (프론트매터 없는 파일)
-    fs.writeFileSync(shp, '# Session Handoff\n\nLast generated: 2026-01-01T00:00:00.000Z\n\n## Completed\n- old\n\n---\n## x\n');
+    const legacy = '# Session Handoff\n\nLast generated: 2026-01-01T00:00:00.000Z\n\n## Completed\n- old\n\n---\n## x\n';
+    fs.writeFileSync(shp, legacy);
     cp.spawnSync(process.execPath, [CLI, 'session', 'close', dd], { encoding: 'utf8', timeout: 30000 });
     const after = fs.readFileSync(shp, 'utf8');
-    const genCount = (after.match(/Last generated:/g) || []).length;   // 단일화
-    const noOld = !after.includes('2026-01-01');                       // 구 timestamp 제거
+    // 1.36.262 (CTX-02A): session close 는 **표식된** 생성 영역만 새로 쓰고, 표식 없는 옛 본문은 사람이 쓴 것과
+    //   구별할 수 없으므로 지우지 않고 영역 밖에 그대로 둔다. 그래서 파일 전체의 'Last generated' 는 둘일 수 있다.
+    //   1.9.316 이 고친 버그는 drift 가 **첫** 'Last generated'(옛 값)를 읽어 영구 오발화한 것이다 — 그 의도대로
+    //   영역 안 단일화 + 파일의 첫 값이 새 값 + 옛 본문 보존 + drift 클리어를 본다.
+    const S0 = after.indexOf('<!-- leerness:current-handoff:start -->'), S1 = after.indexOf('<!-- leerness:current-handoff:end -->');
+    const region = S0 >= 0 && S1 > S0 ? after.slice(S0, S1) : '';
+    const genCount = (region.match(/Last generated:/g) || []).length;   // 영역 안 단일화
+    const firstAt = after.indexOf('Last generated:');
+    const firstIsNew = S0 >= 0 && firstAt > S0 && firstAt < S1 && !region.includes('2026-01-01');   // 첫 값은 새 값
+    const legacyKept = S1 > 0 && after.slice(S1).includes(legacy);                                  // 옛 본문은 그대로
     const dr = cp.spawnSync(process.execPath, [CLI, 'drift', 'check', dd, '--json'], { encoding: 'utf8', timeout: 20000 });
     let driftOk = false; try { const j = JSON.parse(dr.stdout); const sig = (j.signals || []).find(x => x.label && x.label.includes('session close')); driftOk = sig && sig.ageDays <= sig.threshold; } catch {}
-    ok = genCount === 1 && noOld && driftOk;
+    ok = genCount === 1 && firstIsNew && legacyKept && driftOk;
     fs.rmSync(dd, { recursive: true, force: true });
   } catch {}
-  console.log(ok ? '✓ B(1.9.316) drift 마커: session-handoff Last generated 단일화 + session close 누락 신호 클리어' : '✗ drift 마커 실패');
+  console.log(ok ? '✓ B(1.9.316/1.36.262) drift 마커: 생성 영역 Last generated 단일화(첫 값=새 값) + 표식 없는 옛 본문 보존 + session close 누락 신호 클리어' : '✗ drift 마커 실패');
   if (!ok) failed++;
 }
 
@@ -4835,10 +4867,10 @@ total++;
     // 1.36.85: selftest 가 소스문자열 검사 → **행위 검사**로 바뀌며 4초대 → 약 13초가 됐다(CLI spawn 비용).
     //   30s 는 4초 시절 기준이라 전체 e2e 부하에서 타임아웃으로 터졌다(격리 재현 3/3 통과 = 검사 자체는 정상).
     //   여유를 넉넉히 준다 — 이 블록이 재는 것은 "비초기화 dir 에서도 통과하는가"이지 속도가 아니다.
-    const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 300000 });
+    const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: SELFTEST_SPAWN_MS });
     const sout = (sr.stdout || '') + (sr.stderr || '');
     const selftestOk = sr.status === 0 && /전체 \d+건 통과/.test(sout) && !/설치 손상/.test(sout);
-    const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 300000 });   // 1.36.87: doctor 는 selftest 를 내장한다 · 1.36.105: 실측 97~101s(게시본 포함) 라 120s 는 여유 1.2배였다 → 300s
+    const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: SELFTEST_SPAWN_MS });   // 1.36.87: doctor 는 selftest 를 내장한다 · 1.36.105: 실측 97~101s(게시본 포함) 라 120s 는 여유 1.2배였다 → 300s
     const dout = (dr.stdout || '') + (dr.stderr || '');
     // 1.36.87 (codex 26차 #11): 종료코드를 안 보면 **타임아웃/중단이 통과로 보인다**(spawnSync 타임아웃은 status=null,
     //   이미 찍힌 "통과" 문자열은 남는다). 제한을 120s 로 올린 만큼 status 단언이 반드시 함께 가야 한다.
@@ -5054,22 +5086,36 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-app-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    fs.writeFileSync(path.join(d, '.leerness', 'decisions.md'), '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n');
-    fs.rmSync(path.join(d, '.leerness', 'decisions.json'), { force: true });
+    // 1.36.191: legacy 전용 Markdown 은 **현재 렌더러 출력으로 시작할 때만** 다시 쓴다(그 뒤 덧붙인 원문은 바이트 그대로).
+    //   그래서 백필 대상은 도구가 쓴 투영이어야 한다 — `decision add` 가 만든 MD 만 남기고 canonical JSON 을 지운다.
+    //   손으로 쓴 비정형 MD 는 원문 손실 없이 재작성할 수 없으므로 거부되어야 한다(아래 대조군).
+    const dj = path.join(d, '.leerness', 'decisions.json');
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'A', '--reason', 'x', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const canonical = fs.existsSync(dj) ? fs.readFileSync(dj, 'utf8') : null;
+    fs.rmSync(dj, { force: true });
     // dry-run: json 미생성(비파괴)
     cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d], { encoding: 'utf8', timeout: 20000 });
-    const dryNoWrite = !fs.existsSync(path.join(d, '.leerness', 'decisions.json'));
-    // --yes: canonical json 생성
+    const dryNoWrite = !fs.existsSync(dj);
+    // --yes: canonical json 백필 — `decision add` 가 쓴 것과 같은 기록이어야 한다
     cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d, '--yes'], { encoding: 'utf8', timeout: 20000 });
-    const appliedOk = fs.existsSync(path.join(d, '.leerness', 'decisions.json'));
+    const appliedOk = canonical !== null && fs.existsSync(dj) && fs.readFileSync(dj, 'utf8') === canonical;
     // 멱등: 재실행 시 applied 0
     const c3 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d, '--json'], { encoding: 'utf8', timeout: 20000 });
     let idem = false;
     try { idem = JSON.parse(c3.stdout).applied.length === 0; } catch {}
-    fs.rmSync(d, { recursive: true, force: true });
-    ok = dryNoWrite && appliedOk && idem;
+    // 대조군: 렌더러와 다른 legacy MD 는 --yes 여도 쓰지 않고 projection_diverged 로 거부한다(원문·JSON 무변경)
+    const n = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-app-legacy-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', n, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const nmd = path.join(n, '.leerness', 'decisions.md'), handMade = '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n';
+    fs.writeFileSync(nmd, handMade);
+    fs.rmSync(path.join(n, '.leerness', 'decisions.json'), { force: true });
+    const nr = cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', n, '--yes', '--json'], { encoding: 'utf8', timeout: 20000 });
+    let refusedCode = null; try { refusedCode = JSON.parse(nr.stdout).code; } catch {}
+    const refusedIntact = refusedCode === 'projection_diverged' && fs.readFileSync(nmd, 'utf8') === handMade && !fs.existsSync(path.join(n, '.leerness', 'decisions.json'));
+    [d, n].forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} });
+    ok = dryNoWrite && appliedOk && idem && refusedIntact;
   } catch {}
-  console.log(ok ? '✓ B(1.9.357) UR-0075 Phase C: migrate apply (dry-run 비파괴 / --yes canonical 백필 / 멱등) (UR-0075)' : '✗ migrate apply 실패');
+  console.log(ok ? '✓ B(1.9.357/1.36.191) UR-0075 Phase C: migrate apply (dry-run 비파괴 / --yes canonical 백필 / 멱등 / 비정형 legacy 거부·무변경) (UR-0075)' : '✗ migrate apply 실패');
   if (!ok) failed++;
 }
 
@@ -5216,7 +5262,7 @@ total++;
     const silent = (r.stdout || '').trim() === '' && r.status === 0;
     // 설치된 SessionStart hook 명령이 --quiet 사용
     const settings = JSON.parse(fs.readFileSync(path.join(d, '.claude', 'settings.local.json'), 'utf8'));
-    const hookQuiet = (settings.hooks.SessionStart || []).some(h => h.command && h.command.includes('update --check --quiet'));
+    const hookQuiet = (settings.hooks.SessionStart || []).some(g => (g.hooks || []).some(h => h.type === 'command' && h.command === 'leerness update --check --quiet'));
     fs.rmSync(d, { recursive: true, force: true });
     ok = silent && hookQuiet;
   } catch {}
@@ -5257,7 +5303,7 @@ total++;
   let ok = false;
   try {
     // 1.36.85: 행위검사 전환으로 selftest 약 13s — 4초 시절 기준 30s 는 전체 부하에서 터진다.
-    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { encoding: 'utf8', timeout: 300000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { encoding: 'utf8', timeout: SELFTEST_SPAWN_MS });
     const j = JSON.parse(r.stdout);
     ok = j.ok === true && j.pass === j.total && j.fail === 0 && j.total >= 112 && r.status === 0;
   } catch {}
@@ -5272,22 +5318,38 @@ total++;
 //   → stdout 순수성만 단언하면 "우연히 통과"하므로, 잡음 자체를 0 으로 고정해 원인 단계에서 막는다.
 total++;
 {
-  let ok = false;
+  let ok = false, why = '';
+  // T-0341: run in a harness made through the product (scripts/e2e-lived-in-harness.js), the same on every tree.
+  //   T-0315 copied this repository's own .leerness, AGENTS.md and CLAUDE.md, and the public export has none of
+  //   them: there the copy held only package.json, so the paths that read the cwd's harness never ran, and the
+  //   check passed without covering them. Measured with an fs trace (2026-10-09): in a harness, selftest's own
+  //   process reads the cwd's .leerness/manifest.json (authoring language policy), inspects the workspace and
+  //   lists .leerness/skills; of the processes it starts, 39 touched the cwd, 28 its .leerness, and 13 wrote its
+  //   usage counter. The helper checks each piece of the state it builds exactly (milestones, the tasks it added
+  //   by the ids `task add` returned, a dated decision, a lesson, an active rule, an open request, a handoff naming
+  //   the in-progress task, current state, pre-wake report, manifest, skills, usage counts); the build must
+  //   succeed and leave all of it, or the check fails.
+  // 1.36.120: 잡음을 **열거**하는 대신 stderr 를 통째로 0 으로 고정한다. audit 이 `--json` 에서 stdout 만 막고
+  //   stderr 는 열어 둬서 사람용 경고가 샜고(309B), 그 문구가 **프로젝트 상태에 따라** 달라져
+  //   같은 코드로 게이트가 통과/실패로 갈렸다(실측). 열거는 유계가 아니다 — 원인 단계에서 막았으니 여기선 0을 요구한다.
+  //   ⚠ `trim()===''` 은 개행만 있는 출력을 통과시킨다 — 문구가 "0 바이트" 면 검사도 0 바이트여야 한다(검수 P3).
+  //   selftest in a lived-in harness took 274-285 s alone (2026-09-30), against a 300 s limit that the old block
+  //   shared; as in 1.36.87, the limit follows the measurement with about three times the margin (900 s).
+  const livedIn = require('./e2e-lived-in-harness');
+  const harnessDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-livedin-'));
   try {
-    const repoRoot = path.resolve(__dirname, '..');
-    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { cwd: repoRoot, encoding: 'utf8', timeout: 300000, maxBuffer: 64 * 1024 * 1024 });
-    const pureStdout = typeof r.stdout === 'string' && r.stdout.trimStart().startsWith('{');
-    const j = JSON.parse(r.stdout);                       // 계약: stdout 전체가 단일 JSON 문서
-    const payloadOk = j.ok === true && j.pass === j.total && j.fail === 0 && j.total > 0;
-    const se = r.stderr || '';
-    // 1.36.120: 잡음을 **열거**하는 대신 stderr 를 통째로 0 으로 고정한다. audit 이 `--json` 에서 stdout 만 막고
-    //   stderr 는 열어 둬서 사람용 경고가 샜고(309B), 그 문구가 **프로젝트 상태에 따라** 달라져
-    //   같은 코드로 게이트가 통과/실패로 갈렸다(실측). 열거는 유계가 아니다 — 원인 단계에서 막았으니 여기선 0을 요구한다.
-    //   ⚠ `trim()===''` 은 개행만 있는 출력을 통과시킨다 — 문구가 "0 바이트" 면 검사도 0 바이트여야 한다(검수 P3).
-    const noiseFree = se.length === 0;
-    ok = pureStdout && payloadOk && noiseFree && r.status === 0;
-  } catch {}
-  console.log(ok ? '✓ B(1.36.88) selftest --json 계약: 리포 루트 cwd stdout 순수 JSON + stderr 잡음 0' : '✗ selftest --json 계약 실패 (stdout 오염 또는 stderr 잡음)');
+    const built = livedIn.buildLivedInHarness(harnessDir, CLI);
+    if (!built.ok) {
+      why = 'fixture: ' + [...built.steps.filter(s => s.status !== 0 || s.error).map(s => `${s.command} exit=${s.status}${s.error ? ' ' + s.error : ''}`),
+        ...built.missing.map(m => 'missing ' + m)].join('; ');
+    } else {
+      const c = livedIn.selftestJsonContract(CLI, harnessDir, { timeout: 900000 });
+      ok = c.ok;
+      if (!ok) why = `pureStdout=${c.pureStdout} payloadOk=${c.payloadOk} stderr=${c.stderrBytes}B exit=${c.status}${c.error ? ' ' + c.error : ''}`
+        + (c.stderrHead ? ` stderr: ${JSON.stringify(c.stderrHead.slice(0, 160))}` : '');
+    }
+  } catch (e) { why = 'threw: ' + (e && e.message || e); } finally { try { fs.rmSync(harnessDir, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.88) selftest --json 계약: 제품으로 만든 쓰던 하네스 cwd stdout 순수 JSON + stderr 잡음 0 (T-0341)' : `✗ selftest --json 계약 실패 (${why})`);
   if (!ok) failed++;
 }
 
@@ -5345,7 +5407,7 @@ total++;
 //   MCP 래퍼가 끄는 안내를 단언 → MCP 경유에서만 1건 실패 = AI 에게 "설치가 깨졌다" 는 **거짓 보고**.
 total++;
 {
-  let ok = false; const bad = [];
+  let ok = false, mcpSeconds = null; const bad = [];
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcp124-'));
   const ENVm = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
   // 1.36.125 (검수 P3 + 실측): 이 블록은 **부모 환경을 상속하면 안 된다**. 사용자가 켜 둔 공개 설정 하나로
@@ -5370,8 +5432,10 @@ total++;
       + rpc(4, 'tools/call', { name: 'leerness_brainstorm', arguments: { path: d } })          // 필수 인자 누락 → -32602
       + rpc(5, 'tools/call', { name: 'leerness_does_not_exist', arguments: {} })                // 미지 도구 → -32601
       + rpc(6, 'unknown/method', {});                                                          // 미지 메서드 → -32601
+    const _mcpT0 = Date.now();
     const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve', '--path', d],
       { cwd: d, input, encoding: 'utf8', timeout: 900000, env: ENVm, maxBuffer: 64 * 1024 * 1024 });
+    mcpSeconds = Math.round((Date.now() - _mcpT0) / 1000);
     const msgs = [];
     for (const line of String(r.stdout || '').split('\n')) { const s = line.trim(); if (s) { try { msgs.push(JSON.parse(s)); } catch { bad.push('비JSON줄'); } } }
     const by = (i) => msgs.find(m => m.id === i);
@@ -5406,8 +5470,10 @@ total++;
     const txt = call && call.result && Array.isArray(call.result.content) ? String((call.result.content[0] || {}).text || '') : '';
     // ⚠ content 가 비어 있지 않다는 것만 보면 **타임아웃 문구도 성공**으로 센다(내 첫 프로브가 그랬다).
     if (!call || call.error) bad.push('tools/call오류');
-    else if (call.result && call.result.isError) bad.push('tools/call_isError');   // 도구 실패를 성공으로 세던 자리(검수 P1)
-    else if (/안에 끝나지 않아 중단/.test(txt)) bad.push('tools/call타임아웃');
+    // T-0342: a timeout is also an isError result, so it is checked first — the report says "budget exceeded"
+    //   (with the session's seconds) instead of a bare tool failure, which is what hid the cause on 2026-10-09.
+    else if (/안에 끝나지 않아 중단/.test(txt)) bad.push(`tools/call타임아웃(${mcpSeconds}s)`);
+    else if (call.result && call.result.isError) bad.push('tools/call_isError: ' + JSON.stringify(txt.slice(0, 120)));   // 도구 실패를 성공으로 세던 자리(검수 P1)
     else if (!/"total"\s*:\s*\d+|전체 \d+건 통과/.test(txt)) bad.push('tools/call결과아님');
     // MCP 경유 selftest 가 **실패를 보고하면** 그건 거짓 보고다(같은 프로젝트에서 CLI 는 통과한다)
     //   ⚠ `fail` 필드가 **없으면** 통과시키던 자리 — 계약상 반드시 있고 0 이어야 하며 pass===total 이어야 한다(검수 P1).
@@ -5428,8 +5494,8 @@ total++;
     ok = bad.length === 0;
   } catch (e) { bad.push('ERR:' + String(e && e.message).slice(0, 80)); }
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
-  console.log(ok ? '✓ B(1.36.124) MCP 살아있는 통신: initialize · tools/list(설명·스키마 전수) · tools/call selftest 결과 반환 · stderr 0'
-    : '✗ MCP 살아있는 통신 실패 ' + JSON.stringify(bad.slice(0, 6)));
+  console.log(ok ? `✓ B(1.36.124) MCP 살아있는 통신: initialize · tools/list(설명·스키마 전수) · tools/call selftest 결과 반환 · stderr 0 (${mcpSeconds}s)`
+    : '✗ MCP 살아있는 통신 실패 ' + JSON.stringify(bad.slice(0, 6)) + ` (${mcpSeconds}s)`);
   if (!ok) failed++;
 }
 
@@ -5941,7 +6007,12 @@ total++;
   let ok = false;
   try {
     const pkgRoot = path.resolve(__dirname, '..');
-    const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', pkgRoot, '--from', '1.9.388', '--json'], { encoding: 'utf8', timeout: 15000 });
+    // T-0315: whats-new reads <path>/CHANGELOG.md and falls back to the package's own CHANGELOG. Naming the package
+    //   root made the repository the command's project, so its usage counter was bumped; a directory without a
+    //   CHANGELOG reads the same real file without touching the repository.
+    const noChangelog = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-whatsnew-'));
+    const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', noChangelog, '--from', '1.9.388', '--json'], { encoding: 'utf8', timeout: 15000 });
+    try { fs.rmSync(noChangelog, { recursive: true, force: true }); } catch {}
     const j = JSON.parse(r.stdout);
     // 실제 CHANGELOG(## X — DATE — title 형식)에서 1.9.388 초과 버전이 1건 이상 파싱돼야 함
     const versOk = Array.isArray(j.versions) && j.versions.length >= 1 && j.versions.every(v => /^\d+\.\d+\.\d+$/.test(v.version));
@@ -6640,7 +6711,8 @@ total++;
     fs.writeFileSync(path.join(d3, '.gitignore'), 'node_modules/\n');
     fs.writeFileSync(path.join(d3, 'config.js'), 'const k="AKIAJQXMP7RZ2KL9WXYZ";\nconst g="ghp_aZ9bY8cX7dW6eV5fU4gT3hS2iR1jQ0kP9oN8";\n');
     const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', d3], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
-    const f2ko = /🔒\s*보안 요약/.test(hoKo) && /커밋된 시크릿/.test(hoKo) && /config\.js/.test(hoKo);
+    // 1.36.237 (T-0259): handoff 라벨의 장식 아이콘을 뺐다 — 섹션 제목(아이콘 없이)과 내용으로 본다.
+    const f2ko = /^## 보안 요약/m.test(hoKo) && /커밋된 시크릿/.test(hoKo) && /config\.js/.test(hoKo);
     const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f2en-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d4, '--yes', '--language', 'en'], { encoding: 'utf8', timeout: 30000 });
     fs.writeFileSync(path.join(d4, '.gitignore'), 'node_modules/\n');
@@ -6672,10 +6744,11 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', alone, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     const aj = cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', '--path', alone, '--json'], { encoding: 'utf8', timeout: 15000 });
     let aloneOk = false; try { const j = JSON.parse(aj.stdout); aloneOk = j.parent === null; } catch {}
-    // (3) handoff headline from sub shows 🔗 부모 프로젝트 (미적용); en shows "not applied"
+    // (3) handoff headline from sub shows 부모 프로젝트 (미적용); en shows "not applied"
+    //   1.36.237 (T-0259): 헤드라인의 장식 아이콘(🔗)을 뺐다 — 문구와 상태로 본다.
     const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
     const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
-    const headlineOk = /🔗 부모 프로젝트.*미적용/.test(hoKo) && /🔗 parent project.*not applied/.test(hoEn);
+    const headlineOk = /부모 프로젝트.*미적용/.test(hoKo) && /parent project.*not applied/.test(hoEn);
     // (4) read-only: parent detect 가 sub 에 아무 파일도 쓰지 않음(adopt 미구현)
     const before = fs.readdirSync(sub).sort().join(',');
     cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', '--path', sub], { encoding: 'utf8', timeout: 15000 });
@@ -6712,7 +6785,7 @@ total++;
     // (3) handoff 헤드라인 adopted 반영(ko/en)
     const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
     const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
-    const headlineOk = /🔗 부모 프로젝트.*adopted/.test(hoKo) && /🔗 parent project.*adopted/.test(hoEn);
+    const headlineOk = /부모 프로젝트.*adopted/.test(hoKo) && /parent project.*adopted/.test(hoEn);   // 1.36.237: 🔗 아이콘 제거
     // (4) --json applied:true on apply
     const aj = cp.spawnSync(process.execPath, [CLI, 'parent', 'adopt', '--apply', '--json', '--path', sub], { encoding: 'utf8', timeout: 15000 });
     let jsonOk = false; try { const j = JSON.parse(aj.stdout); jsonOk = j.applied === true && typeof j.inheritedPath === 'string'; } catch {}
@@ -6823,8 +6896,9 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'nightly', '--members', 'a,b', '--schedule', 'every-session', '--path', d], { encoding: 'utf8', timeout: 15000 });
     const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', d, '--language', 'en'], { encoding: 'utf8', timeout: 30000 }).stdout) || '';
     const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 30000 }).stdout) || '';
-    const teamEn = hoEn.split('\n').filter(l => /🤝|team preview nightly/.test(l));
-    const teamKo = hoKo.split('\n').filter(l => /🤝|team preview nightly/.test(l));
+    //   1.36.237 (T-0259): 섹션 제목의 장식 아이콘(🤝)을 뺐다 — 두 언어 제목에 공통인 UR-0073 으로 제목 줄을 잡는다.
+    const teamEn = hoEn.split('\n').filter(l => /UR-0073|team preview nightly/.test(l));
+    const teamKo = hoKo.split('\n').filter(l => /UR-0073|team preview nightly/.test(l));
     const teamOk = teamEn.length >= 2 && !teamEn.some(l => H.test(l))
       && teamEn.some(l => /2 members/.test(l)) && teamEn.some(l => /review needed/.test(l)) && teamEn.some(l => /preview:/.test(l))
       && teamKo.some(l => /2명/.test(l)) && teamKo.some(l => /검수필요/.test(l)) && teamKo.some(l => /미리보기/.test(l));
@@ -7222,8 +7296,9 @@ total++;
     const env = { ...process.env, LEERNESS_ENABLE_CODEX: '1', PATH: fbin + path.delimiter + process.env.PATH };
     const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--path', d], { encoding: 'utf8', timeout: 20000, env });
     const out = r.stdout || '';
-    // 1.35.6: 기본은 harness 브리프가 접두되므로 task 는 "... 작업: REVIEWTASK" 끝에 그대로(코덱스/경로 흡수 없음).
-    const briefOk = /작업: REVIEWTASK"/.test(out) && !/REVIEWTASK codex"/.test(out) && !/REVIEWTASK.*tmp/.test(out);
+    // 1.35.6: 기본은 harness 브리프가 접두되므로 task 는 브리프 끝에 그대로(코덱스/경로 흡수 없음).
+    //   1.36.255 (T-0278): 위임 브리프를 공용 문구(DELEGATED_CONTEXT)로 바꿔 끝이 "--- Task: REVIEWTASK" 다.
+    const briefOk = /--- Task: REVIEWTASK"/.test(out) && !/REVIEWTASK codex"/.test(out) && !/REVIEWTASK.*tmp/.test(out);
     // --raw 는 1.9.435 원형 보존 — task 가 정확히 "REVIEWTASK" 로만 인용.
     const rRaw = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--raw', '--path', d], { encoding: 'utf8', timeout: 20000, env });
     const outRaw = rRaw.stdout || '';
@@ -7719,7 +7794,8 @@ total++;
     // en 지시 본문의 핵심 계약 존재(번역이 빈 껍데기가 아님) — 검수 #2 반영: lens 질문/체크리스트/안티패턴/자동화 지시까지
     const ag = fs.readFileSync(path.join(de, 'AGENTS.md'), 'utf8');
     const wf = fs.readFileSync(path.join(de, '.leerness/session-workflow.md'), 'utf8');
-    const substOk = ag.includes('Ask-on-ambiguity duty') && ag.includes('Preview-approval duty') && ag.includes('senior developer') && ag.includes('leerness release bump')
+    //   1.36.238 (T-0260): "자동 검증 가능한 룰은 release bump 로 자동화" 문단을 빼고 관측·근거 절로 바꿨다.
+    const substOk = ag.includes('Ask-on-ambiguity duty') && ag.includes('Preview-approval duty') && ag.includes('senior developer') && ag.includes('## Rule observations and evidence')
       && wf.includes('## Step 6') && wf.includes('Quick checklist') && wf.includes('Anti-patterns') && wf.includes('LEERNESS_AUTO_SECURITY_FIX');
     // (검수 #4) en 재init: 커스텀 라인 정확히 1회 생존 + exit 0
     fs.appendFileSync(path.join(de, 'AGENTS.md'), '\nMY EN CUSTOM LINE\n');
@@ -7822,10 +7898,25 @@ total++;
     const small = JSON.parse(R(['--from', _fromRecent, '--json']).stdout);
     const smallOk = small.truncated === false && small.hint === undefined && small.shown === small.totalVersions && small.shown > 0;
     // MCP 인자 전달 (limit)
-    const mcpReq = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_whats_new', arguments: { from: '1.9.33', limit: 2 } } });
-    const mcpR = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: mcpReq + '\n', maxBuffer: 32 * 1024 * 1024 });
+    // T-0336: the MCP answer comes in 50,000-character chunks with nextCursor. The two newest versions of an unreleased
+    //   CHANGELOG section outgrew one chunk, and parsing the first chunk alone failed; join the chunks as a client does.
     let mcpOk = false;
-    try { const txt = JSON.parse(mcpR.stdout.split('\n').filter(Boolean)[0]).result.content[0].text; mcpOk = JSON.parse(txt).shown === 2; } catch {}
+    try {
+      let txt = '', cursor = null;
+      for (let i = 0; i < 20; i++) {
+        const mcpReq = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_whats_new', arguments: { from: '1.9.33', limit: 2, ...(cursor !== null ? { _cursor: cursor } : {}) } } });
+        const mcpR = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: mcpReq + '\n', maxBuffer: 32 * 1024 * 1024 });
+        if (mcpR.error || mcpR.status !== 0) throw new Error('mcp serve failed');
+        const res = JSON.parse(mcpR.stdout.split('\n').filter(Boolean)[0]).result;
+        if (!res || res.isError) throw new Error('tool error');
+        txt += res.content[0].text;
+        cursor = res.nextCursor === undefined ? null : res.nextCursor;   // review round 4: a falsy cursor is not the end
+        if (cursor === null) break;
+        if (typeof cursor !== 'string' || !/^\d+$/.test(cursor)) throw new Error('invalid cursor');
+      }
+      const doc = JSON.parse(txt);
+      mcpOk = cursor === null && doc.shown === 2 && Array.isArray(doc.versions) && doc.versions.length === 2;
+    } catch {}
     const all = JSON.parse(R(['--from', '1.9.33', '--json', '--all']).stdout);
     const allOk = all.shown === all.totalVersions && all.truncated === false && all.versions.length === def.totalVersions;
     const lim = JSON.parse(R(['--from', '1.9.33', '--json', '--limit', '3']).stdout);
@@ -10410,7 +10501,10 @@ total++;
     const min = mk('min', ['--mode', 'minimal']);
     const mB = J(min, ['context', 'budget', '--json']);
     dbg.shrinks = !!mB && !!sB && mB.total < sB.total / 5;
-    dbg.shortAgents = fs.statSync(path.join(min, 'AGENTS.md')).size < 1200;
+    //   T-0314 (소유자 결정 2026-09-29): 최소 등급도 컨텍스트 읽기 문단(1.36.255, "최소 모드는 이 문단을 직접 따른다")과
+    //   검수 절차 전문(1.36.246)을 싣는다. selftest(_p0015ModeOk)가 이미 적어 둔 대로 공유 안전·검수 규칙이 자라면
+    //   고정 바이트 상한은 무효가 된다 — standard 보다 작다는 것과 적재 총량 1/5 미만(위 shrinks)으로 본다.
+    dbg.shortAgents = fs.statSync(path.join(min, 'AGENTS.md')).size < fs.statSync(path.join(std, 'AGENTS.md')).size;
     // minimal 은 문서 본문도 워크플로 안내도 싣지 않는다(적재 총량이 목적) — 그러면서 헤드라인은 남는다
     const minHo = (R(min, ['handoff', '.']).stdout) || '';
     dbg.minLean = !/=== Current State/.test(minHo) && !/세션 워크플로 6단계/.test(minHo)
@@ -10427,7 +10521,9 @@ total++;
     const b1 = fs.statSync(path.join(sw, 'AGENTS.md')).size;
     R(sw, ['mode', 'set', 'standard']);
     const b2 = fs.statSync(path.join(sw, 'AGENTS.md')).size;
-    dbg.switches = b1 < b0 / 3 && Math.abs(b2 - b0) < 200;
+    //   T-0314: 고정 비율(1/3)은 검수 절차 전문을 실은 뒤 en 에서 깨진다(3,270B vs 9,574B/3). 실질 감소는
+    //   위 shrinks(적재 총량 1/5 미만)가 보므로 여기서는 전환이 산출물을 줄이고 왕복이 원래대로 오는지만 본다.
+    dbg.switches = b1 < b0 && Math.abs(b2 - b0) < 200;
     // 등급 전환이 사용자 내용을 지우지 않는다 — LF/CRLF 둘 다 (검수가 두 경우 모두 삭제를 재현했다)
     const uc = mk('user');
     fs.appendFileSync(path.join(uc, 'AGENTS.md'), '\nDIRECT-USER-INSTRUCTION-DO-NOT-LOSE\n');
@@ -10542,7 +10638,8 @@ total++;
   try {
     fs.writeFileSync(path.join(proj, 'package.json'), '{"name":"p","version":"0.1.0"}');
     const ENV = Object.assign({}, process.env, { TMPDIR: sandbox, TEMP: sandbox, TMP: sandbox });
-    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: proj, encoding: 'utf8', timeout: 300000, env: ENV });
+    // T-0342: R runs selftest and doctor below, so it takes the selftest limit.
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: proj, encoding: 'utf8', timeout: SELFTEST_SPAWN_MS, env: ENV });
     R(['init', proj, '--yes']);
     const count = () => { try { return fs.readdirSync(sandbox).filter(x => /^(__leerness_|leerness-)/.test(x)).length; } catch { return -1; } };
     const delta = (a) => { const b = count(); R(a); return count() - b; };
@@ -10572,12 +10669,12 @@ total++;
     // codex 검수 LOW#4: **파일**을 "임시 디렉토리" 로 세면 안 된다 (leerness-note.txt 210개는 잔존 0)
     const fbox = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fbox-'));
     for (let i = 0; i < 210; i++) fs.writeFileSync(path.join(fbox, 'leerness-user-note-' + i + '.txt'), 'x');
-    let fj = null; try { fj = JSON.parse(((cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { cwd: proj, encoding: 'utf8', timeout: 300000, env: Object.assign({}, process.env, { TMPDIR: fbox, TEMP: fbox, TMP: fbox }) }).stdout) || '').trim()); } catch {}
+    let fj = null; try { fj = JSON.parse(((cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { cwd: proj, encoding: 'utf8', timeout: SELFTEST_SPAWN_MS, env: Object.assign({}, process.env, { TMPDIR: fbox, TEMP: fbox, TMP: fbox }) }).stdout) || '').trim()); } catch {}
     dbg.filesNotCounted = !!fj && fj.tmpLeftover === null;
     // codex 검수 LOW#5: Windows 는 대소문자를 구분하지 않는다 — 대문자 접두도 잡아야 한다
     const cbox = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cbox-'));
     for (let i = 0; i < 210; i++) fs.mkdirSync(path.join(cbox, '__LEERNESS_probe_' + i));
-    let cj = null; try { cj = JSON.parse(((cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { cwd: proj, encoding: 'utf8', timeout: 300000, env: Object.assign({}, process.env, { TMPDIR: cbox, TEMP: cbox, TMP: cbox }) }).stdout) || '').trim()); } catch {}
+    let cj = null; try { cj = JSON.parse(((cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { cwd: proj, encoding: 'utf8', timeout: SELFTEST_SPAWN_MS, env: Object.assign({}, process.env, { TMPDIR: cbox, TEMP: cbox, TMP: cbox }) }).stdout) || '').trim()); } catch {}
     dbg.caseInsensitive = !!cj && !!cj.tmpLeftover && cj.tmpLeftover.count >= 210;
     for (const _b of [fbox, cbox]) { try { fs.rmSync(_b, { recursive: true, force: true }); } catch {} }
     ok = dbg.selftest === 0 && dbg.doctor === 0 && dbg.selftest2 === 0
@@ -11107,7 +11204,7 @@ total++;
     // this vector, a +1 regression can consume an unrelated -1 improvement and
     // still satisfy the aggregate 30-line ratchet.
     const EXPECTED_LEAKS = new Map([
-      ['commands', 0], ['status', 0], ['health', 0], ['pulse', 2], ['check', 0], ['mode', 0],
+      ['commands', 0], ['status', 0], ['health', 0], ['pulse', 0], ['check', 0], ['mode', 0],
       ['toggle list', 0], ['task list', 0], ['decision list', 1], ['plan list', 0], ['lesson list', 1],
       ['rule list', 1], ['lens', 0], ['route feature', 0], ['milestones', 0], ['round-history', 0],
       ['memory status', 2], ['reuse-map', 2], ['preview list', 2], ['feature list', 2], ['requests list', 1],
@@ -11148,7 +11245,8 @@ total++;
     // 1.36.182: milestones 빈 이력 표면 4줄을 영어화해 34로 조임. 도달/ETA 분기도 전용 probe가 고정한다.
     // 1.36.183: skill list 기본 카탈로그 4줄을 영어화해 30으로 조임. stored/env/flag·ko·JSON은 전용 probe가 고정한다.
     // 1.36.184: mode 조회 표면 3줄을 영어화해 27로 조임. set/손상/오입력 형제 분기도 전용 probe가 고정한다.
-    const BASELINE = 27;
+    // 1.36.292 (T-0317): handoff --pulse 와 같은 함수인 pulse 의 머리·안내 2줄을 영어화해 25로 조임(handoff-i18n-probe 가 고정).
+    const BASELINE = 25;
     dbg.baseline = BASELINE;
     // 합계가 우연히 낮아진 뒤 다른 명령의 회귀가 그 여유를 소비하지 못하게 exact 로 잠근다.
     // 번역이 더 진행되면 실측값과 BASELINE을 같은 변경에서 함께 낮춰야 한다.
@@ -13443,8 +13541,8 @@ total++;
       dbg.autofix = Object.assign(p, { dupAfter: nAfter });
     }
 
-    // ③ `session close` 의 rules 쓰기(verifyRules)도 **락 안**이다. 종전엔 무락 RMW 라 동시 `rule add` 를 삼켰다.
-    //    쓰기가 실제로 일어나는 상태를 만들어야 한다 — writeUtf8 은 동일 내용이면 쓰지 않는다(1.36.65).
+    // ③ Keyword verification must not rewrite authored rules or lastVerified.
+    //    session close only records observations; rule CRUD retains its lock coverage above.
     {
       const d = mkP('verifyrules', true);
       const rp = path.join(d, '.leerness', 'rules.md');
@@ -13452,10 +13550,13 @@ total++;
       if (ra.status !== 0) bad.push(`③rule add exit=${ra.status}`);
       const rv = RP(d, ['rule', 'verify', '--path', d]);
       if (rv.status !== 0) bad.push(`③rule verify exit=${rv.status}`);
-      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.2.0"}');   // → version 절 pass → lastVerified 갱신 → 실제 쓰기
-      const p = lockProbe('③rules', d, rp, ['session', 'close', d]);
-      if (!/\| R-\d/.test(fs.readFileSync(rp, 'utf8'))) bad.push('③룰 표가 사라짐');
-      dbg.verifyRules = p;
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.2.0"}');
+      const before = fs.readFileSync(rp); const mtime = fs.statSync(rp).mtimeMs;
+      const closed = RP(d, ['session', 'close', d, '--no-suggest', '--json']);
+      let result; try { result = JSON.parse(closed.stdout); } catch {}
+      if (closed.status !== 0 || result?.ruleVerification?.compliance !== 'unknown') bad.push('③rule observations contract missing');
+      if (!fs.readFileSync(rp).equals(before) || fs.statSync(rp).mtimeMs !== mtime) bad.push('③verification rewrote user rules');
+      dbg.verifyRules = { exit: closed.status, preserved: fs.readFileSync(rp).equals(before) };
     }
 
     // ④ auto-fix 가 **실패했는데 성공으로 보고**하지 않는다(고칠 수 없는 손상행이 섞인 경우).
@@ -13591,14 +13692,16 @@ total++;
       const after = walk(path.join(d, '.leerness'));
       const P = String(plain.stdout || ''), C = String(compact.stdout || ''), H = String(hook.stdout || '');
       let J = null; try { J = JSON.parse(String(jsonR.stdout || '')); } catch { bad.push('②--json 이 JSON 이 아님'); }
-      if (!/👥 다른 세션 기록 1건/.test(P)) bad.push('②평문 헤드라인에 다른 세션 없음');
-      if (!/👥 다른 세션 1/.test(C)) bad.push('②--compact 에 다른 세션 없음(MCP 경로가 못 본다)');
+      //   1.36.237 (T-0259): 평문 헤드라인의 장식 아이콘을 뺐다 — 문구로 본다. 짧은 표면(--compact·훅)은 👥/🙈 플래그를 그대로 쓴다.
+      if (!/다른 세션 기록 1건|1 other session record/.test(P)) bad.push('②평문 헤드라인에 다른 세션 없음');
+      //   1.36.292 (T-0317): 짧은 플래그도 프로젝트 언어를 따른다 — 영어 기본 로케일에서 init 된 경우를 함께 받는다.
+      if (!/👥 (?:다른 세션|other sessions) 1/.test(C)) bad.push('②--compact 에 다른 세션 없음(MCP 경로가 못 본다)');
       if (!J || !J.sessions || J.sessions.others !== 1) bad.push(`②--json.sessions.others=${J && J.sessions ? J.sessions.others : 'none'} (기대 1) — 기계 경로가 못 본다`);
-      if (!/👥 다른 세션 1/.test(H)) bad.push('②훅에 다른 세션 없음(유일한 강제 경로가 못 본다)');
+      if (!/👥 (?:다른 세션|other sessions) 1/.test(H)) bad.push('②훅에 다른 세션 없음(유일한 강제 경로가 못 본다)');
       //    죽은 채널 — agent-reminders.md 는 1.9.38 부터 만들어졌지만 어떤 표면도 내용을 보여주지 않았다.
       if (!/DELIVERTEST/.test(P)) bad.push('④리마인더 본문이 handoff 에 안 나옴(죽은 채널)');
       if (!J || !J.agentReminders) bad.push('④--json 에 리마인더 없음');
-      if (!/🔔 리마인더/.test(H)) bad.push('④훅에 리마인더 없음');
+      if (!/🔔 (?:리마인더|reminders)/.test(H)) bad.push('④훅에 리마인더 없음');
       //    훅은 **쓰기 0** 계약이다 — 신호를 얹으면서 염 파일을 만들면 그 계약이 깨진다.
       if (after.length !== before.length) bad.push(`②훅이 파일을 만들었다(${after.filter(f => !before.includes(f)).map(f => path.basename(f)).join(',')}) — 쓰기 0 계약 위반`);
       //   내용까지 본다 — 개수가 같아도 덮어썼을 수 있다(무효 salt 가 새 랜덤으로 교체된 실제 회귀).
@@ -13620,7 +13723,7 @@ total++;
       const dir = path.join(d, '.leerness', 'cache', 'sessions');
       const n1 = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.json$/.test(f)).length : 0;
       if (n1 !== 0) bad.push(`③주소 없는 세션이 등록됨(${n1}) — 식별 불가인데 기록했다`);
-      if (!/🙈/.test(String(r1.stdout || ''))) bad.push('③주소 없는 세션에게 "안 보인다"고 말하지 않음(비대칭이 조용하다)');
+      if (!/이 세션은 다른 세션에게 보이지 않습니다|this session is invisible to others/.test(String(r1.stdout || ''))) bad.push('③주소 없는 세션에게 "안 보인다"고 말하지 않음(비대칭이 조용하다)');
       //    (a) codex 는 **설정 없이도** 주소를 갖는다 — codex-cli 가 CODEX_THREAD_ID 를 이미 환경에 둔다
       //        (실측 codex-cli 0.147.0: 소문자 UUIDv7 36자, 한 세션의 자식 호출들에서 동일, 세션이 바뀌면 값이 바뀜).
       const TID = '01a01570-54a6-70e2-a002-55291c73a3ce';
@@ -13675,7 +13778,7 @@ total++;
       const iP = String(RP(d3, ['handoff', d3], noAddr).stdout || '');
       const iC = String(RP(d3, ['handoff', d3, '--compact'], noAddr).stdout || '');
       const iH = String(RP(d3, ['hook', 'session-start'], noAddr).stdout || '');
-      if (!/🙈/.test(iP)) bad.push('⑥평문에 "나는 안 보임" 없음');
+      if (!/이 세션은 다른 세션에게 보이지 않습니다|this session is invisible to others/.test(iP)) bad.push('⑥평문에 "나는 안 보임" 없음');
       if (!/🙈/.test(iC)) bad.push('⑥--compact 에 "나는 안 보임" 없음(짧은 표면일수록 필요한 신호다)');
       if (!/🙈/.test(iH)) bad.push('⑥훅에 "나는 안 보임" 없음');
       dbg.prereq = { readOnlyWrites: made, afterHandoff, afterClose, invisible: [/🙈/.test(iP), /🙈/.test(iC), /🙈/.test(iH)] };
@@ -13694,11 +13797,11 @@ total++;
       if (!rec || !rec.sharedKeyAgents) bad.push('⑦레코드에 공유 표식 없음');
       const shEnv = { CODEX_MANAGED_BY_NPM: '1', LEERNESS_SESSION_ID: KEY };
       const cOut = String(RP(d, ['handoff', d, '--compact'], shEnv).stdout || '');
-      if (!/주소 공유/.test(cOut)) bad.push('⑦--compact 에 공유 경고 없음');
+      if (!/주소 공유|address shared/.test(cOut)) bad.push('⑦--compact 에 공유 경고 없음');
       const pOut = String(RP(d, ['handoff', d], shEnv).stdout || '');
-      if (!/주소 공유/.test(pOut)) bad.push('⑦평문에 공유 경고 없음 — stderr 는 한 번뿐이라 여기서 빠지면 영영 안 보인다');
+      if (!/주소 공유|address shared/.test(pOut)) bad.push('⑦평문에 공유 경고 없음 — stderr 는 한 번뿐이라 여기서 빠지면 영영 안 보인다');
       const hOut = String(RP(d, ['hook', 'session-start'], shEnv).stdout || '');
-      if (!/주소 공유/.test(hOut)) bad.push('⑦훅에 공유 경고 없음');
+      if (!/주소 공유|address shared/.test(hOut)) bad.push('⑦훅에 공유 경고 없음');
       //    대조군 — 서로 다른 주소면 경고가 뜨면 안 된다(오탐 0). 라벨이 unknown 인 경우도 발화하면 안 된다.
       const d2 = mkP('distinctkey', true);
       RP(d2, ['handoff', d2], { CLAUDECODE: '1', LEERNESS_SESSION_ID: 'distinctkeyA0001' });
@@ -14678,7 +14781,13 @@ total++;
     {
       const d = mk('dupdrop');
       const dj = path.join(d, '.leerness', 'decisions.json');
-      fs.writeFileSync(dj, JSON.stringify([{ date: '2026-08-20', title: 'dup-title', decision: 'D', reason: 'R' }], null, 2) + '\n');
+      //   1.36.190~191 (T-0193 · 검사된 투영): drop 은 archive 가 원본 기록을 정확히 복원할 수 있고 decisions.md 투영이
+      //   canonical 과 맞을 때만 지운다. 옛 픽스처는 decisions.json 을 손으로 썼다 — 4키 기록은 "무손실 아님",
+      //   6키로 바꿔도 투영(init 템플릿)과 어긋나 projection_diverged 로 두 프로세스가 동시성까지 못 가고 실패했다.
+      //   기록은 제품 쓰기 경로(`decision add`)로 만들고, 셋업 자체가 성공했는지 먼저 본다(실패한 셋업이 판정을 가리지 않게).
+      const seeded = RP(d, ['decision', 'add', 'dup-title', '--reason', 'R', '--path', d]);
+      let seededRows = []; try { seededRows = JSON.parse(fs.readFileSync(dj, 'utf8')); } catch {}
+      if (seeded.status !== 0 || seededRows.length !== 1 || seededRows[0].title !== 'dup-title') bad.push(`③셋업 실패(decision add exit=${seeded.status}, 행 ${seededRows.length})`);
       const marks = path.join(sb, 'marks'); fs.mkdirSync(marks, { recursive: true });
       const runner = path.join(sb, 'dropr.js');
       fs.writeFileSync(runner, [
@@ -15808,6 +15917,16 @@ setImmediate(() => {
     failed++;
     console.log(`✗ T-0139 DEP0190 런타임 경고 ${runtimeDep0190.length}건`);
     process.stderr.write(runtimeDep0190.join('\n---\n') + '\n');
+  }
+  // T-0315: 테스트는 패키지 저장소 자신의 상태를 바꾸지 않는다 — gitignore 된 캐시·원장까지 전부 대조한다.
+  total++;
+  const _pkgChanged = repoGuard.diff(_pkgLeernessBefore, repoGuard.snapshot(_pkgLeerness));
+  if (_e2eHomeInit.status === 0 && _pkgChanged.length === 0) {
+    console.log(`✓ T-0315 e2e 가 패키지 저장소 .leerness 를 바꾸지 않음 (항목 ${_pkgLeernessBefore.size}개 대조 · cwd 없는 CLI 호출은 격리 홈 프로젝트에서 실행)`);
+  } else {
+    failed++;
+    console.log(`✗ T-0315 e2e 격리 실패 — 격리 홈 init exit=${_e2eHomeInit.status}, 패키지 .leerness 변경 ${_pkgChanged.length}건: ${_pkgChanged.slice(0, 20).join(', ')}${_pkgChanged.length > 20 ? ' …' : ''}`
+      + ' (실행 중 이 저장소에서 leerness 를 직접 실행했다면 그 쓰기도 여기에 잡힌다)');
   }
   console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
   if (failed > 0) process.exitCode = 1;

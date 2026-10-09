@@ -1,0 +1,19 @@
+{
+  "schema": "leerness.review-checkpoint-input/v1",
+  "objective": { "id": "example-order-create", "criteria": ["example-order-works"] },
+  "tasks": [{
+    "id": "example-order-api", "objectiveId": "example-order-create",
+    "criteria": ["example-order-works"], "dependsOn": [],
+    "implementation": "implemented", "verification": "passed",
+    "evidenceRefs": ["example:unverified-evidence"],
+    "risk": "normal", "riskTags": [], "aspects": ["code", "tests"]
+  }],
+  "context": { "event": "task-report", "purposeComplete": true, "executionMode": "direct" },
+  "snapshot": {
+    "kind": "git",
+    "baseCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "headCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "limits": { "maxTasks": 5, "maxFiles": 10, "maxChangedLines": 400, "maxWaitingHours": 24 },
+  "metrics": { "fileCount": 2, "changedLines": 80, "waitingHours": 1 }
+}

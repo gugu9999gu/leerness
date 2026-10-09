@@ -114,8 +114,8 @@ async function main() {
     const settings = path.join(root, '.claude', 'settings.local.json');
     const slash = path.join(root, '.claude', 'commands', 'update.md');
     write(settings, JSON.stringify({ permissions: { allow: ['Read'] }, hooks: { SessionStart: [
-      { matcher: '*', command: 'leerness update --check --quiet' },
-      { matcher: 'startup|clear|compact', command: 'leerness hook session-start' },
+      { matcher: '*', hooks: [{ type: 'command', command: 'leerness update --check --quiet' }] },
+      { matcher: 'startup|clear|compact', hooks: [{ type: 'command', command: 'leerness hook session-start' }] },
     ] } }, null, 2) + '\n');
     write(slash, '# /update\n\n```\n!leerness update --yes\n```\n\n```\n!leerness update --check\n```\n');
     const before = snapshotFiles(root, ['.claude/settings.local.json', '.claude/commands/update.md']);
@@ -126,8 +126,8 @@ async function main() {
     assert(JSON.stringify(snapshotFiles(root, ['.claude/settings.local.json', '.claude/commands/update.md'])) === JSON.stringify(before), 'status mutated installed files');
 
     write(settings, JSON.stringify({ hooks: { SessionStart: [
-      { matcher: '*', command: 'leerness update --check' },
-      { matcher: 'startup|clear|compact', command: 'leerness hook session-start' },
+      { matcher: '*', hooks: [{ type: 'command', command: 'leerness update --check' }] },
+      { matcher: 'startup|clear|compact', hooks: [{ type: 'command', command: 'leerness hook session-start' }] },
     ] } }, null, 2) + '\n');
     const degraded = json(run(['auto-update', 'status', root, '--json']));
     assert(degraded.installed === false && degraded.hooks.updateCheck === true && degraded.hooks.updateQuiet === false,
@@ -206,29 +206,48 @@ async function main() {
     assert(nr.status !== 0 && nj.code === 'invalid_keep', `negative keep accepted: ${nr.status}/${nr.stdout.slice(0, 160)}`);
   });
 
-  await check('setup-agents no-setup flag is an explicit read-only skip', () => {
+  await check('install preserves external-agent choices without an activation step', () => {
     const root = temp('leerness-dead-agents-');
     write(path.join(root, 'keep.txt'), 'keep\n');
     const before = snapshotFiles(root, ['keep.txt', '.env', '.leerness/providers.json']);
-    const r = run(['setup-agents', '--no-setup-agents', '--path', root, '--json']);
-    const j = json(r);
-    assert(r.status === 0 && j.ok === true && j.skipped === true && j.reason === 'no_setup_agents' && j.root === path.resolve(root), `skip not explicit: ${r.status}/${r.stdout.slice(0, 240)}`);
-    assert(JSON.stringify(snapshotFiles(root, ['keep.txt', '.env', '.leerness/providers.json'])) === JSON.stringify(before), 'skip mutated project');
+    const removed = run(['setup-agents', '--path', root, '--yes']);
+    assert(removed.status !== 0, 'removed setup-agents command still accepted');
+    assert(JSON.stringify(snapshotFiles(root, ['keep.txt', '.env', '.leerness/providers.json'])) === JSON.stringify(before), 'removed command mutated project');
 
     const configured = temp('leerness-dead-agents-init-');
     const configFile = path.join(configured, '.leerness', 'leerness-config.json');
     write(configFile, JSON.stringify({ LEERNESS_ENABLE_CODEX: '1', CUSTOM_KEEP: 'yes' }, null, 2) + '\n');
-    const init = run(['init', configured, '--yes', '--no-setup-agents', '--minimal', '--no-env', '--no-auto-update', '--no-auto-roadmap', '--no-enforce', '--no-mcp', '--no-banner', '--language', 'en', '--json'], { timeout: 120000 });
-    assert(init.status === 0, `init opt-out failed: ${(init.stdout || init.stderr).slice(0, 240)}`);
+    const init = run(['init', configured, '--yes', '--minimal', '--no-env', '--no-auto-update', '--no-auto-roadmap', '--no-enforce', '--no-mcp', '--no-banner', '--language', 'en', '--json'], { timeout: 120000 });
+    assert(init.status === 0, `init failed: ${(init.stdout || init.stderr).slice(0, 240)}`);
     const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-    assert(config.LEERNESS_ENABLE_CODEX === '1' && config.CUSTOM_KEEP === 'yes', 'init opt-out overwrote existing agent configuration');
-    assert(!Object.keys(config).some(k => /^LEERNESS_ENABLE_/.test(k) && k !== 'LEERNESS_ENABLE_CODEX'), 'init opt-out introduced provider decisions');
+    assert(config.LEERNESS_ENABLE_CODEX === '1' && config.CUSTOM_KEEP === 'yes', 'init overwrote existing agent configuration');
+    assert(!Object.keys(config).some(k => /^LEERNESS_ENABLE_/.test(k) && k !== 'LEERNESS_ENABLE_CODEX'), 'init introduced provider decisions');
+
+    const migrate = run(['migrate', configured, '--yes', '--minimal', '--no-env', '--no-auto-update', '--no-auto-roadmap', '--no-enforce', '--no-mcp', '--no-banner', '--language', 'en', '--json'], { timeout: 120000 });
+    assert(migrate.status === 0, `migrate failed: ${(migrate.stdout || migrate.stderr).slice(0, 240)}`);
+    const migratedConfig = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    assert(migratedConfig.LEERNESS_ENABLE_CODEX === '1' && migratedConfig.CUSTOM_KEEP === 'yes', 'migrate overwrote existing agent configuration');
+    assert(!Object.keys(migratedConfig).some(k => /^LEERNESS_ENABLE_/.test(k) && k !== 'LEERNESS_ENABLE_CODEX'), 'migrate introduced provider decisions');
 
     const fresh = temp('leerness-dead-agents-fresh-');
-    const freshInit = run(['init', fresh, '--yes', '--no-setup-agents', '--minimal', '--no-env', '--no-auto-update', '--no-auto-roadmap', '--no-enforce', '--no-mcp', '--no-banner', '--language', 'en', '--json'], { timeout: 120000 });
-    assert(freshInit.status === 0, `fresh init opt-out failed: ${(freshInit.stdout || freshInit.stderr).slice(0, 240)}`);
+    const freshInit = run(['init', fresh, '--yes', '--minimal', '--no-env', '--no-auto-update', '--no-auto-roadmap', '--no-enforce', '--no-mcp', '--no-banner', '--language', 'en', '--json'], { timeout: 120000 });
+    assert(freshInit.status === 0, `fresh init failed: ${(freshInit.stdout || freshInit.stderr).slice(0, 240)}`);
     const freshConfig = JSON.parse(fs.readFileSync(path.join(fresh, '.leerness', 'leerness-config.json'), 'utf8'));
-    assert(!Object.keys(freshConfig).some(k => /^LEERNESS_ENABLE_/.test(k)), 'fresh init opt-out wrote implicit provider flags');
+    assert(!Object.keys(freshConfig).some(k => /^LEERNESS_ENABLE_/.test(k)), 'fresh init wrote implicit provider flags');
+
+    const fromEnv = temp('leerness-dead-agents-env-');
+    write(path.join(fromEnv, '.env'), 'LEERNESS_ENABLE_CLAUDE=1\nPRIVATE_KEEP=local\n');
+    const migratedEnv = run(['init', fromEnv, '--yes', '--minimal', '--no-auto-update', '--no-auto-roadmap', '--no-enforce', '--no-mcp', '--no-banner', '--language', 'en', '--json'], { timeout: 120000 });
+    assert(migratedEnv.status === 0, `environment migration failed: ${(migratedEnv.stdout || migratedEnv.stderr).slice(0, 240)}`);
+    const envConfig = JSON.parse(fs.readFileSync(path.join(fromEnv, '.leerness', 'leerness-config.json'), 'utf8'));
+    assert(envConfig.LEERNESS_ENABLE_CLAUDE === '1', 'existing .env agent choice was not retained');
+    assert(fs.readFileSync(path.join(fromEnv, '.env'), 'utf8').includes('PRIVATE_KEEP=local'), 'unrelated .env value was not retained');
+
+    const legacy = temp('leerness-dead-agents-legacy-');
+    const legacyInit = run(['init', legacy, '--yes', '--no-setup-agents', '--minimal', '--no-env', '--no-auto-update', '--no-auto-roadmap', '--no-enforce', '--no-mcp', '--no-banner', '--language', 'en', '--json'], { timeout: 120000 });
+    assert(legacyInit.status === 0, 'legacy no-setup flag stopped installation');
+    const legacyConfig = JSON.parse(fs.readFileSync(path.join(legacy, '.leerness', 'leerness-config.json'), 'utf8'));
+    assert(!Object.keys(legacyConfig).some(k => /^LEERNESS_ENABLE_/.test(k)), 'legacy no-op flag enabled a provider');
   });
 
   await check('provider add persists and exposes env/version/description options', () => {

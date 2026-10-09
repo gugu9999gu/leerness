@@ -1,6 +1,6 @@
 name: CI
 
-# leerness CI — runs the full integrity gate (version + selftest + e2e) on every push/PR.
+# Public release CI on GitHub-hosted runners.
 # Public CI result raises trust: the e2e badge in README reflects this workflow.
 
 on:
@@ -12,6 +12,7 @@ on:
 
 jobs:
   fast:
+    if: github.repository == 'gugu9999gu/leerness'
     name: fast (${{ matrix.os }}, selftest + smoke)
     runs-on: ${{ matrix.os }}
     strategy:
@@ -33,6 +34,7 @@ jobs:
         run: npm run test:fast
 
   test:
+    if: github.repository == 'gugu9999gu/leerness'
     name: gate (selftest + e2e)
     runs-on: ${{ matrix.os }}
     strategy:
@@ -96,7 +98,28 @@ jobs:
           LEERNESS_OFFLINE: "1"
         run: node ./scripts/e2e.js
 
+  installed:
+    if: github.repository == 'gugu9999gu/leerness'
+    name: installed package (${{ matrix.os }}, node 20)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          package-manager-cache: false
+      # 소스 checkout뿐 아니라 실제 pack/install 경로도 독립 검증한다.
+      - name: installed cleanroom
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: npm run test:installed
+
   release-runtime:
+    if: github.repository == 'gugu9999gu/leerness'
     name: release runtime (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     strategy:

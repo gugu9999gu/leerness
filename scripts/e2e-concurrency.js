@@ -33,24 +33,25 @@ function init(d) {
   if (r.status !== 0) throw new Error('init exit=' + r.status);
 }
 
+// The preload writes this file at the moment it stalls the final publication of the target, so "stalled"
+// is observed rather than inferred. T-0314: inferring it from `<target>.tmp-*` names stopped working when
+// 1.36.190 published memory outputs through `.<target>.publish-*` + link; 8 of 11 races then never raced.
+const readyFileOf = d => path.join(d, '.stall-ready.json');
+
 function spawn(d, args, stallTarget) {
   const nodeArgs = stallTarget
     ? ['--require', PRELOAD, CLI, ...args, '--path', d]
     : [CLI, ...args, '--path', d];
   const env = stallTarget
-    ? { ...ENV, LOCKPROBE_STALL_TARGET: stallTarget, LOCKPROBE_STALL_MS: String(STALL_MS) }
+    ? { ...ENV, LOCKPROBE_STALL_TARGET: stallTarget, LOCKPROBE_STALL_MS: String(STALL_MS), LOCKPROBE_READY_FILE: readyFileOf(d) }
     : ENV;
   return cp.spawn(process.execPath, nodeArgs, { cwd: d, env, stdio: 'ignore' });
 }
 
 function waitForStall(d, target) {
-  const normalized = target.replace(/\\/g, '/');
-  const targetDir = path.dirname(normalized) === '.' ? '' : path.dirname(normalized);
-  const targetName = path.basename(normalized);
-  const re = new RegExp('^' + targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.tmp-');
-  const hd = path.join(d, '.leerness', targetDir);
+  const normalized = target.replace(/\\/g, '/').replace(/^\.?\/+/, '');
   for (let i = 0; i < 800; i++) {
-    try { if (fs.readdirSync(hd).some(name => re.test(name))) return true; } catch {}
+    try { if (JSON.parse(fs.readFileSync(readyFileOf(d), 'utf8')).target === normalized) return true; } catch {}
     nap(10);
   }
   return false;

@@ -12,6 +12,7 @@ const cp = require('child_process');
 const G = require('../lib/git');
 const SG = require('../lib/state-git');
 const R = require('../lib/runtime-layout');
+const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 
 const tempDirectory = fs.realpathSync.native(os.tmpdir());
@@ -86,11 +87,18 @@ function seed(root) {
   git(root, ['-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${path.join(arena, 'disabled-hooks')}`,
     'commit', '-qm', 'runtime layout fixture']);
 }
-function snapshot(root) {
+function snapshot(root, heartbeatLock = null) {
   const rows = [];
   function visit(file, relative) {
     const stat = fs.lstatSync(file, { bigint: true });
-    const row = [relative, stat.mode.toString(), stat.size.toString(), stat.mtimeNs.toString()];
+    // The lock worker can touch its owner's mtime while the writer is paused
+    // inside a diagnostic callback. Keep checking its bytes and every other
+    // field; only that concurrent lease timestamp is outside this read check.
+    const leaseTimestamp = heartbeatLock && stat.isFile()
+      && path.dirname(file) === heartbeatLock
+      && /^owner-[a-f0-9]{32}\.json$/.test(path.basename(file));
+    const row = [relative, stat.mode.toString(), stat.size.toString(),
+      leaseTimestamp ? 'active-lock-heartbeat' : stat.mtimeNs.toString()];
     if (stat.isSymbolicLink()) rows.push([...row, 'link', fs.readlinkSync(file)]);
     else if (stat.isDirectory()) {
       rows.push([...row, 'directory']);
@@ -100,10 +108,10 @@ function snapshot(root) {
   visit(root, '.');
   return JSON.stringify(rows);
 }
-function noWrites(fn) {
-  const before = snapshot(arena);
+function noWrites(fn, heartbeatLock = null) {
+  const before = snapshot(arena, heartbeatLock);
   try { return fn(); }
-  finally { assert.strictEqual(snapshot(arena), before, 'diagnosis changed fixture bytes or mtimes'); }
+  finally { assert.strictEqual(snapshot(arena, heartbeatLock), before, 'diagnosis changed fixture bytes or mtimes'); }
 }
 function contract(report) {
   assert.strictEqual(report.schema, 'leerness.runtime-compatibility/v1');
@@ -773,6 +781,20 @@ try {
       assert.strictEqual(released[0].writeDisposition, 'allowed', released[0].reasonCode);
     `, [root]);
   });
+  check('read snapshot ignores only the declared lock owner heartbeat timestamp', () => {
+    const root = directory('heartbeat-snapshot');
+    const lock = path.join(root, '.leerness', 'execution-ledger.jsonl.lock');
+    const owner = path.join(lock, `owner-${'a'.repeat(32)}.json`);
+    const other = path.join(root, 'other.txt');
+    write(owner, 'unchanged owner bytes\n');
+    write(other, 'unchanged other bytes\n');
+    const later = new Date(Date.now() + 120000);
+    noWrites(() => fs.utimesSync(owner, later, later), lock);
+    assert.throws(() => noWrites(() => fs.writeFileSync(owner, 'changed owner bytes\n'), lock),
+      /diagnosis changed fixture bytes or mtimes/);
+    assert.throws(() => noWrites(() => fs.utimesSync(other, later, later), lock),
+      /diagnosis changed fixture bytes or mtimes/);
+  });
   check('actual exclusive role and ledger installers admit their temporary files', () => {
     const roleStore = require('../lib/role-store');
     const fallback = require('../lib/role-fallback');
@@ -782,11 +804,11 @@ try {
       const local = path.dirname(String(to)) === path.join(root, '.leerness');
       if (local) {
         assert(!fs.existsSync(to));
-        noWrites(() => expect(root, 'legacy_absent'));
+        noWrites(() => expect(root, 'legacy_absent'), `${to}.lock`);
         observed.push(path.basename(to));
       }
       const result = original.call(this, from, to, ...args);
-      if (local) noWrites(() => expect(root, 'legacy_absent'));
+      if (local) noWrites(() => expect(root, 'legacy_absent'), `${to}.lock`);
       return result;
     }, () => {
       roleStore.saveRoles(root, { coder: { provider: 'codex', model: 'synthetic-model' } }, roleStore.readRoleStore(root));
@@ -801,6 +823,7 @@ try {
     const fallback = require('../lib/role-fallback');
     const root = directory('real-create-detacher');
     const workspace = path.join(root, '.leerness');
+    const file = path.join(workspace, producer === 'agent-roles' ? 'agent-roles.json' : 'execution-ledger.jsonl');
     const aliasPattern = new RegExp(`^\\.${producer}-create-[1-9][0-9]*-[a-f0-9]{24}$`);
     const detacherPattern = new RegExp(`^\\.${producer}-create-[1-9][0-9]*-[a-f0-9]{24}\\.detach-[1-9][0-9]*-[a-f0-9]{16}$`);
     const isAlias = target => path.dirname(String(target)) === workspace && aliasPattern.test(path.basename(String(target)));
@@ -823,7 +846,7 @@ try {
       const result = original.call(this, target, ...args);
       if (path.dirname(String(target)) === workspace && detacherPattern.test(path.basename(String(target)))) {
         observed.push({ name: path.basename(target), regular: fs.lstatSync(target).isFile(),
-          report: noWrites(() => R.inspectRuntimeCompatibility(root)) });
+          report: noWrites(() => R.inspectRuntimeCompatibility(root), `${file}.lock`) });
       }
       return result;
     }, () => {
@@ -831,7 +854,6 @@ try {
         roleStore.saveRoles(root, { coder: { provider: 'codex', model: 'synthetic-model' } }, roleStore.readRoleStore(root));
       } else fallback.appendExecutionEvent(root, { event: 'dispatch.prepared', taskId: 'T-DETACH', executed: false });
     })));
-    const file = path.join(workspace, producer === 'agent-roles' ? 'agent-roles.json' : 'execution-ledger.jsonl');
     assert(unlinkFailures > 0 && rmFailures > 0, 'both real alias cleanup paths must fail before recovery');
     assert.strictEqual(Number(fs.lstatSync(file).nlink), 1, 'the installer must detach the committed inode');
     assert.strictEqual(producer === 'agent-roles' ? roleStore.readRoleStore(root).ok : fallback.readExecutionEvents(root).ok, true);
@@ -1192,7 +1214,7 @@ try {
   if (path.dirname(resolvedArena) !== tempDirectory || !path.basename(resolvedArena).startsWith('leerness-runtime-layout-')) {
     throw new Error('Refusing cleanup outside the validated runtime-layout probe arena.');
   }
-  fs.rmSync(resolvedArena, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  removeTree(resolvedArena, { recursive: true, force: true });
 }
 process.stdout.write(`RUNTIME_LAYOUT_PROBE ${total - failed}/${total} passed\n`);
 process.exitCode = failed ? 1 : 0;

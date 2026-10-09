@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const { removeTree } = require('./temp-cleanup');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-platform-smoke-'));
@@ -65,25 +66,18 @@ let failed = null;
 let cleanupError = null;
 const debug = {};
 try {
-  // Windows Node 20 runner에서 enforce의 실제 sh 발화 검증까지 포함한 전체 selftest가
-  // 120초를 근소하게 넘는다. 전체 E2E보다 먼저 실패를 잡는 fast gate 목적은 유지하되
-  // 프로세스를 중간에 잘라 거짓 실패로 만들지 않도록 이 단계만 240초를 허용한다.
-  const selftest = leerness(sandbox, ['selftest', '--json'], 240000);
-  const selfJson = parseJson(selftest);
-  const pathCase = selfJson && Array.isArray(selfJson.results)
-    ? selfJson.results.find(row => /Windows 8\.3 tilde/.test(row.name || ''))
-    : null;
-  const selfFailures = selfJson && Array.isArray(selfJson.results)
-    ? selfJson.results.filter(row => row.ok !== true).slice(0, 10)
-    : [];
-  debug.shortPath = { command: output(selftest), case: pathCase || null, selfFailures };
-  if (selftest.error && selftest.error.code === 'ETIMEDOUT') {
-    failed = 'platform smoke 선행 selftest가 240초 안에 끝나지 않음';
-  } else if (!pathCase || pathCase.ok !== true) {
-    failed = 'Windows 8.3 실행 경로 selftest가 통과하지 않음';
-  } else if (selftest.status !== 0) {
-    failed = `platform smoke 선행 selftest 실패: ${selfFailures.map(row => row.name).join(', ') || '원인 미확인'}`;
+  // This fast check needs one pure Windows path case. The full 355-case
+  // selftest still runs explicitly later in test:core and npm test; repeating
+  // it here delayed this smoke check past its 240-second child deadline.
+  const pathCases = require(CLI)._selfTestCases().filter(row => /Windows 8\.3 tilde/.test(row.name || ''));
+  let pathCase = null;
+  if (pathCases.length === 1) {
+    try { pathCase = { name: pathCases[0].name, ok: pathCases[0].run() === true }; }
+    catch (error) { pathCase = { name: pathCases[0].name, ok: false, error: String(error && error.message || error).slice(0, 200) }; }
   }
+  debug.shortPath = { scope: 'selected-selftest-case', selected: pathCases.length,
+    case: pathCase, fullSelftestRun: false };
+  if (!pathCase || pathCase.ok !== true) failed = 'Windows 8.3 실행 경로 selftest가 통과하지 않음';
 
   const main = path.join(sandbox, 'main');
   const sibling = path.join(sandbox, 'sibling');
@@ -164,7 +158,7 @@ try {
   failed = `platform smoke 예외: ${String(e && (e.stack || e.message) || e).slice(0, 800)}`;
 } finally {
   try {
-    fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 8, retryDelay: 75 });
+    removeTree(sandbox, { recursive: true, force: true });
     if (fs.existsSync(sandbox)) cleanupError = 'rmSync 뒤에도 sandbox가 남음';
   } catch (e) {
     let remaining = [];

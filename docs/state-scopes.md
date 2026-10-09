@@ -1,5 +1,19 @@
 # State scopes and migration design
 
+2026-09-14 additive retention: [UI review runs](ui-review-run-api.md) preserve
+actual file/ledger observations in create-only Git refs fenced against the current
+review control revision. A separate read-only check verifies the exact record and
+selected materials at a host-designated retained commit. This proves matching
+local Git bytes, not accepted-authority policy, actor authentication, general
+finalization or cleanup eligibility. Failure observations remain failures.
+
+2026-09-14 additive implementation: [review-control](review-control-api.md) provides
+an opt-in Common-Control Git-ref backend for review batches, owner generations,
+revision CAS and retained snapshot bindings. It does not activate the proposed
+directory layout or finish general task claims, runtime migration or RunRecord
+finalization. The dated design and previous implementation observations below are
+preserved; this addition is not a replacement authority for legacy task state.
+
 Status: scope inspection implemented; runtime architecture remains proposed (2026-09-05).
 Request: UR-0097; implementation/optimization approval: UR-0098. Audit: T-0173.
 First implementation: T-0174 / approved P-0020. See [the inspection API](state-paths-api.md).

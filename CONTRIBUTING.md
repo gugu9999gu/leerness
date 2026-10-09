@@ -9,13 +9,21 @@
 
 ## Test tiers
 
-The main three tiers, fastest to slowest:
+Inspect `package.json` before selecting a tier. The legacy `test:fast` and
+`test:core` aliases have accumulated broad regression suites, so their names and
+historical time estimates below no longer describe their current cost. For a
+fix, start with its specific probe (for example `npm run test:hooks`), expand to
+related checks, then run the required final gate. See
+[efficient testing](docs/efficient-testing.md). Dedicated automatic selection and
+alias restructuring remain planned; this documentation does not skip any gate.
+
+The original intended tiers (not current duration guarantees):
 
 | Command | What it runs | Time | Use it for |
 |---|---|---|---|
-| `npm run test:fast` | `selftest` + smoke (commands run without crashing) | < 1 min | the dev loop |
-| `npm run test:core` | `selftest` + a flagship behavioral suite — `verify-claim` / `gate` / `contract` / `scan` actually reject bad input and pass honest input | ~20 s | pre-commit, quick CI |
-| `npm test` | `--version` + `selftest` + the entire e2e suite + a packed-artifact cleanroom | **10+ minutes by design** | the release gate |
+| `npm run test:fast` | Historically smoke; now also broad regression suites | Measure the current command | inspect before using in a dev loop |
+| `npm run test:core` | Historically flagship behavioral checks; now also broad regressions | Measure the current command | inspect before selecting a gate |
+| `npm test` | Full configured suite and packed-artifact checks | Depends on runtime and infrastructure | the release gate |
 
 Focused suites are also available: `npm run test:commands` drives the broad CLI command surface, while `npm run test:installed` packs the package, installs it into a separate consumer, verifies canonical workspace migration and concurrent handoff isolation, then reruns that command surface from the installed artifact.
 

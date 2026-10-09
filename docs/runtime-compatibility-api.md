@@ -65,6 +65,25 @@ conversations or inferred migration success. It creates no cache, lock or presen
 - Missing Git is acceptable only for positively identified non-repositories. Broken Git,
   discovery overrides, ambiguous ownership and topology changes fail closed.
 
+Windows runtimes such as Node 24.0.0 can return device zero from a pathname stat
+while an opened handle reports the volume serial. For that specific gap, the reader
+opens the current descriptor path once more and requires matching nonzero handle
+device/inode, regular-file/link-count checks, size and modification/change times.
+It then rechecks the pathname and parent identities. A nonzero device mismatch is
+still rejected. The extra handle does not reread content or widen the 16 KiB limit.
+Both handles are closed on failure; a close-only failure also blocks admission.
+These remain observations, not atomic fencing against a subsequent external change.
+
+Role configuration and execution-ledger readers apply the same Windows device-zero
+confirmation rule using their existing Number-based stat observations. The ledger
+also confirms the current path immediately before and after appending, with parent
+checks after each confirmation. These checks retain the existing stat precision;
+they are not an atomic fence against external writers. A post-append failure can
+leave the appended bytes on the original file and is not a rollback receipt.
+Role compare-and-replace retains the confirmed pathname identity for its existing
+pathname-to-pathname comparison. Schema, extension preservation, revision checks,
+ledger size limits, tail-read bounds, and provider execution policy are unchanged.
+
 ## Writer operation boundary
 
 `createRuntimeCompatibilityReader(root)` resolves one immutable Git topology snapshot.
@@ -143,6 +162,9 @@ not a new migration manifest or a guarantee about unregistered external writers.
 latch. CLI admission precedes automatic workspace migration and bookkeeping and uses the
 handler's actual target/precedence. MCP telemetry, long-lived REPL turns, known direct
 module writers, I/O paths, retained descriptors and lock heartbeat use the same reader.
+The heartbeat worker receives the holding operation's admission snapshot as plain data and
+re-checks it on every touch (descriptor re-read, topology verified) instead of making a new
+admission, so it starts no Git process; it stops touching once that admission blocks.
 Synchronous filesystem interception is active only inside writer operations; importing
 the module alone does not modify the host's filesystem methods. Windows subprocess-based
 replacement and mutating Git commands have explicit pre-attempt checks.
