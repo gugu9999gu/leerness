@@ -131,6 +131,20 @@ test('observed directory change marks traversal incomplete', () => {
   const r = scan(dir, { io: ioWith({ lstatSync: (file, opts) => { const s = fs.lstatSync(file, opts);if (file === dir && ++calls === 2) { const copy = Object.create(s);copy.mtimeNs += 1n;return copy; }return s; } }) });
   assert.strictEqual(r.coverage.skipped['directory-changed'], 1);assert.strictEqual(r.ok, false);
 });
+// T-0343: an entry added within the directory's timestamp tick leaves its lstat unchanged, so a file the traversal
+// never saw could still be reported as complete coverage. The directory timestamps are held fixed here.
+test('entry added during traversal within one timestamp tick marks traversal incomplete', () => {
+  const dir = fixture({ 'file.md': sample });let first = null, added = false;
+  const r = scan(dir, { io: ioWith({
+    lstatSync: (file, opts) => {
+      const s = fs.lstatSync(file, opts);if (file !== dir) return s;
+      if (!first) first = s;const copy = Object.create(s);copy.mtimeNs = first.mtimeNs;copy.ctimeNs = first.ctimeNs;return copy;
+    },
+    readSync: (...args) => { if (!added) { added = true;fs.writeFileSync(path.join(dir, 'new.md'), Buffer.from([0xff])); }return fs.readSync(...args); },
+  }) });
+  assert.ok(added);assert.strictEqual(r.coverage.skipped['directory-changed'], 1);assert.strictEqual(r.ok, false);
+  assert.notStrictEqual(r.byteValidity.status, 'valid-in-scope');
+});
 test('non-regular selected entries are never opened', () => {
   const dir = fixture({ 'special.md': sample });let opens = 0;
   const r = scan(dir, { io: ioWith({ lstatSync: (file, opts) => { const s = fs.lstatSync(file, opts);if (file.endsWith('special.md')) s.isFile = () => false;return s; }, openSync: () => { opens++;throw new Error('unexpected'); } }) });

@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.36.297 - 2026-10-10
+
+- Fixed: on Windows, `decision`, `lesson` and `memory` writes that replace an existing file could take 20 s or more per file, or fail with "Windows metadata-preserving replacement failed: spawnSync ... powershell.exe ETIMEDOUT" (T-0343). This happened when Leerness ran in an environment with no PSModulePath.
+  - Cause: the replacement starts Windows PowerShell, and its command began with the cmdlet `New-Object`. To find that cmdlet, PowerShell analyzed every module on the machine module path.
+  - Measured on a GitHub Windows runner with 5 or 10 environment variables kept: 21.5-52 s per launch.
+  - The command now creates the same encoding, `[Activator]::CreateInstance([System.Text.UTF8Encoding])` (no BOM), with a .NET call, and contains no command invocation. On the same runner, the .NET call launched in 0.2 s in every environment tested. The call also works on PowerShell 2-4.
+  - On that runner image, with the change, the memory-guard-order probe took 50 s; with the old command it took 8 min 46 s.
+  - On the 1.36.296 public CI, the slow launches made replacements pass the 30 s launch limit. Six concurrent writers then waited past the 35 s lock limit, and stopped without losing data.
+- Fixed: on Linux and macOS, commands no longer act on a file that another writer is publishing (T-0343). Publication there renames the file away and links the new bytes while it holds the file's lock, so for a moment the file is missing. These commands checked whether the file exists before taking that lock. Each one now checks under the lock:
+  - `plan init` ran a full install without the lock and lost its goal.
+  - `plan remove` reported `plan_not_found` for a plan that still had the milestone.
+  - `task add` missed an active task with the same request and added a duplicate. On every platform, two `task add` commands with the same text running at once both added the task; the duplicate check now runs under the lock that assigns the ID.
+  - `idempotency audit --auto-fix` (also used by `drift check --auto-fix`) skipped the tracker deduplication.
+  - `env sync` reported that `.env.example` was missing.
+  - `task update` and `task drop` reported `task_not_found` for a task that existed.
+  - `task add` and `lazy detect --auto-track` assigned a task ID that only the plan held.
+  - `task sync` gave a new item the ID of an existing row and replaced that row, which lost the existing task.
+  - Each of these now assigns the ID and writes the row under the tracker lock, then the plan lock. The tasks that `release pack` and `init` add use the same ID assignment and were changed the same way; no race was run for those two.
+  - `task sync` imported items that already had a row as new tasks. It now also skips an item whose text gained a row since it read the tracker, and reports it as ambiguous.
+  - `lazy detect --auto-track` registered new TODOs even when every one of them was in a file that a task already referenced. A batch that mixes such files with untracked ones still registers all of them, as before; that is a separate follow-up.
+  - `anchors draft --apply` left an empty Goal or Purpose unfilled and reported it as written. `task relink --apply` reported no unlinked milestone. `task fix-evidence --set` reported no candidates. `rule verify` reported no active rule.
+  - `session close` wrote a handoff without the tracker's tasks (measured: the in-progress task was missing, exit 0).
+  - `task export --to` (and `--json`) saved an empty export and an empty sync baseline.
+  - `bugfix start` reported `task_not_found` for a task that existed.
+  - `verify-claim baseline create` reported `boundary_not_found`. It now builds the baseline from one tracker snapshot read under the lock, and judges every claim against that snapshot. `verify-claim --all` judges its claims against one snapshot too.
+  - The commands that only print, such as `task relink` without `--apply`, `task fix-evidence` without `--set` and every `--dry-run`, still take no lock.
+  - Read-only reports such as `handoff`, the summary that `session close` prints, and generated views can still read a file as missing for that moment, as before.
+- Fixed: memory footprint, memory write admission and `encoding check` now see a file added to a directory while they scan it, even when the directory's timestamps do not change (T-0343). Each now lists the scanned directories again and compares the names. Before, these checks compared the directory's lstat only. Measured over 2,000 adds, that lstat stayed the same 1,986-1,990 times on Linux (4 ms timestamp ticks) and 1,478 times on Windows. Before, `encoding check` could report complete coverage while it missed such a file.
+  - The memory recheck also checks the recovery directory again after opening it and after listing it, so a junction put in its place in between is rejected instead of followed.
+  - Recovery content is still never read. A same-size rewrite of a recovery file within one tick is therefore still not seen; it changes no measured value.
+- Tests (T-0343):
+  - `scripts/runtime-layout-probe.js` compares fixture snapshots itself and fails with its own message. Node 18-22's `assert.strictEqual` drops the message for long strings, and the check matched on that message.
+  - `scripts/mcp-presence-probe.js` initializes its fixtures with `--language ko`. Before, the project language came from the runner's locale.
+  - `scripts/memory-recovery-receipt-probe.js` also injects its fault at the POSIX hard-link install (`fs.linkSync`), so the fault fires on Linux.
+  - `scripts/memory-guard-order-probe.js` prints the end of stdout and stderr when setup fails.
+  - `scripts/runtime-replacement-probe.js` (9 checks, was 7):
+    - Counts command invocations in the replacement command with PowerShell's own parser. The count includes cmdlets, aliases such as `echo` and `%`, functions and programs.
+    - Checks that the counter itself sees cmdlets and aliases, and does not count text inside strings.
+    - Runs the replacement once with no PSModulePath.
+  - `scripts/e2e-concurrency.js` (30 races, was 11; the e2e step now expects exactly 30 and allows 600 s, since 26 of them took 181 s here):
+    - Each new race runs a command while another writer holds the file it reads renamed away.
+    - The races cover plan remove, task add deduplication and ID assignment, task update, task drop, task fix-evidence, task sync (duplicate import and ID assignment), task relink, task export, idempotency auto-fix, env sync, anchors draft, lazy detect auto-track, bugfix start, claims baseline create, rule verify and session close.
+    - All of them fail on the code before this change on Linux.
+    - It also adds the same `task add` run twice at once, which fails on the code before this change on Windows and Linux.
+    - `scripts/lock-probe.js` can now stall on a file outside `.leerness`, named by its absolute path. Relative targets still name paths inside `.leerness` only.
+  - `scripts/memory-footprint-race-probe.js` (22 checks, was 19):
+    - Adds a same-tick case: a file added while lstat timestamps are held fixed.
+    - Adds a junction put in place before the recheck listing.
+    - Splits the late recovery-file change into a size change and a timestamp change.
+  - `scripts/encoding-diagnostics-probe.js` (38 checks, was 37): adds a file written during the scan while the directory's timestamps are held fixed.
+  - `scripts/e2e.js`: `task relink --dry-run` must print the same suggestions as `task relink`.
+  - selftest: four source pins follow the new code (three lock pins and the verify-claim --all wiring pin). The task add and task drop pins now search inside the function they pin; the task drop pin used to find its own text first and was always true.
+  - Each new regression case fails on the code before this change. The counter check above tests the test itself.
+  - The `plan init` failure was not reached by CI, whose jobs stopped at earlier failures. It was found by running the full suite step by step on Linux with Node 18, 20 and 22.
+
 ## 1.36.296 - 2026-10-02
 
 - Review control and UI review in deep project folders on Windows now stop with a clear code instead of a Git failure, and Leerness never writes a ref the user's own Git cannot read (T-0326). Every ref Leerness keeps for them (`refs/leerness/<family>/v1/project-<64 hex>/<64 hex>`: the authority floor, review runs, attempts, dispatches, results, proof use, provider observations, locators and review-control batches) has 166 to 176 characters. On Windows, Git without `core.longpaths` cannot lock a ref whose lock file path reaches 260 characters, nor read one whose file path does (measured with Git for Windows 2.54.0: `update-ref` works up to a 259-character lock path, a read up to a 259-character ref path), so with an ordinary `.git` the first calls failed from a 73-character project folder and every one from 88, as `git_failed` or `publication_uncertain`. Before such a call, Leerness now asks the user's own Git to read a ref name of the same path length that Leerness never creates (`git symbolic-ref -q`, which writes nothing); if Git cannot, the call fails `git_long_paths_required` before Git runs and writes no ref. Because Git answers itself, this follows how it combines configuration levels, the reftable format and the path spelling it uses. With `core.longpaths` on (`git config core.longpaths true`; in Git for Windows 2.54.0 a global `false` wins over the repository's `true`) those calls work. Leerness adds no long-path option to its own Git calls: measured with the same Git, the user's own Git without `core.longpaths` cannot read a ref written that way, and `git log --all` (exit 128), `git fsck` (exit 2), `git gc`, `git repack -a -d` and `git prune` (exit 128) and `git maintenance run --task=gc` (exit 1) then fail in that repository. Turning `core.longpaths` off again later brings those failures back for refs already written. In a narrow range of folder depths, where some families fit and a longer one does not, a flow can still stop partway, now with this code. Other platforms are unchanged.

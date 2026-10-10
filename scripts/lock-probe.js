@@ -30,12 +30,17 @@ const relOf = p => (p.split(/[\\/]\.leerness[\\/]/)[1] || p).replace(/\\/g, '/')
 // LOCKPROBE_STALL_TARGET/LOCKPROBE_STALL_MS 를 함께 준 경우에만 최종 rename 직전에 멈춘다.
 // 락이 있는 명령은 이 대기 동안에도 같은 락을 유지하고, 락이 없는 이전 RMW는 뒤늦은 쓰기가 새 데이터를 덮는다.
 const STALL_TARGET = String(process.env.LOCKPROBE_STALL_TARGET || '').replace(/\\/g, '/').replace(/^\.?\/+/, '');
+const STALL_ABSOLUTE = process.env.LOCKPROBE_STALL_TARGET && path.isAbsolute(process.env.LOCKPROBE_STALL_TARGET)
+  ? norm(process.env.LOCKPROBE_STALL_TARGET).replace(/\\/g, '/') : null;
 const STALL_PREFIX = String(process.env.LOCKPROBE_STALL_PREFIX || '').replace(/\\/g, '/').replace(/^\.?\/+/, '');
 const STALL_MS = Math.max(0, Math.min(10000, Number(process.env.LOCKPROBE_STALL_MS) || 0));
 const READY_FILE = process.env.LOCKPROBE_READY_FILE ? path.resolve(process.env.LOCKPROBE_READY_FILE) : null;
 let stalled = false;
 const shouldStall = p => {
   if (stalled || STALL_MS <= 0) return false;
+  // T-0343: a file outside .leerness (such as .env.example) is named by its absolute path and matches only that
+  //   full path; a relative target still names a path inside .leerness.
+  if (STALL_ABSOLUTE) return norm(p).replace(/\\/g, '/') === STALL_ABSOLUTE;
   const rel = relOf(norm(p));
   return (STALL_TARGET && rel === STALL_TARGET) || (STALL_PREFIX && rel.startsWith(STALL_PREFIX));
 };

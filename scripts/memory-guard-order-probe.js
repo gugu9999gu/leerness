@@ -20,8 +20,9 @@ const results = [];
 const run = (root, args) => cp.spawnSync(process.execPath, [cli, ...args, '--path', root, '--json'], {
   cwd: root, env, encoding: 'utf8', timeout: 120000, maxBuffer: 2 * 1024 * 1024,
 });
+// T-0343: with --json the reason is on stdout, so a CI failure printed only "exit=1"; keep the tail of both streams.
 const requireSuccess = result => assert.strictEqual(result.status, 0,
-  `exit=${result.status} signal=${result.signal} error=${result.error?.code} ${(result.stderr || '').slice(-600)}`);
+  `exit=${result.status} signal=${result.signal} error=${result.error?.code} stderr=${(result.stderr || '').slice(-400)} stdout=${(result.stdout || '').slice(-400)}`);
 const snapshot = root => Object.fromEntries([
   'decisions.json', 'decisions.md', 'decisions.archive.md', 'lessons.json',
   'lessons.md', 'lessons.archive.md', 'task-log.md', 'review-evidence.md',
