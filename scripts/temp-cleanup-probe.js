@@ -61,7 +61,9 @@ try {
     const { root, child } = heldTree('long-hold', 4000);
     try {
       const started = Date.now();
-      assert.throws(() => removeTree(root, { recursive: true, force: true }, { timeoutMs: 600 }), error => error.code === 'EPERM');
+      // T-0343: the held tree's error after the bound depends on Node: EBUSY on 20.20 (the 1.36.297 public CI) and
+      //   22.11, EPERM on 26.3 (both measured on Windows). Either is the retryable error, thrown once the bound passed.
+      assert.throws(() => removeTree(root, { recursive: true, force: true }, { timeoutMs: 600 }), error => error.code === 'EPERM' || error.code === 'EBUSY');
       const waited = Date.now() - started;
       assert.ok(waited >= 600 && waited < 2500, `waited ${waited} ms`);
     } finally { child.kill(); }

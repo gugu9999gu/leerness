@@ -2783,8 +2783,11 @@ total++;
 
   // 제안 모드
   const r1 = cp.spawnSync(process.execPath, [CLI, 'task', 'relink', '--path', tmp], { encoding: 'utf8' });
-  const okSuggest = r1.status === 0 && /M-9001/.test(r1.stdout) && /M-9002/.test(r1.stdout) && /최선 후보/.test(r1.stdout);
-  console.log(okSuggest ? '✓ B(1.9.6) task relink 제안: 2개 매칭 발견' : `✗ B(1.9.6) 제안 실패\n${r1.stdout}`);
+  // T-0343 (review round 3): the suggestion-only run, also under --dry-run, takes no lock and prints the same suggestions.
+  const r1d = cp.spawnSync(process.execPath, [CLI, 'task', 'relink', '--dry-run', '--path', tmp], { encoding: 'utf8' });
+  const okSuggest = r1.status === 0 && /M-9001/.test(r1.stdout) && /M-9002/.test(r1.stdout) && /최선 후보/.test(r1.stdout)
+    && r1d.status === 0 && r1d.stdout === r1.stdout;
+  console.log(okSuggest ? '✓ B(1.9.6) task relink 제안: 2개 매칭 발견 (--dry-run 도 같은 제안)' : `✗ B(1.9.6) 제안 실패\n${r1.stdout}\n--dry-run: exit=${r1d.status} ${r1d.stdout}${r1d.stderr}`);
   if (!okSuggest) failed++;
 }
 total++;
@@ -15878,13 +15881,16 @@ total++;
 total++;
 // AO(1.36.152/T-0115, 1.36.169/T-0108 확장) — write 시점의 락 관측만으로는 "읽은 사본도 락 안인가"를 증명할 수 없다.
 // 첫 프로세스의 최종 rename을 강제로 멈추고 두 번째 쓰기를 붙여, 서로 다른 RMW 11쌍이 모두 생존하는지 확인한다.
+// T-0343: plus 19 pairs where the second command decided a write, a skip or an error from a file the first one was
+// publishing (on POSIX the path is missing for that moment); 30 in all.
 {
   let ok = false; const dbg = {};
   try {
     const race = cp.spawnSync(process.execPath, [path.join(__dirname, 'e2e-concurrency.js'), CLI], {
       cwd: path.resolve(__dirname, '..'),
       encoding: 'utf8',
-      timeout: 180000,
+      // T-0343: 30 races (was 11); 26 of them took 181 s on a quiet Windows machine, and the limit leaves room for CI.
+      timeout: 600000,
       env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_LOCK_WARN: '1' }),
       maxBuffer: 16 * 1024 * 1024
     });
@@ -15892,9 +15898,9 @@ total++;
     dbg.exit = race.status; dbg.report = report;
     if (!report) dbg.stderr = String(race.stderr || '').slice(0, 500);
     ok = race.status === 0 && !!report && report.ok === true
-      && Array.isArray(report.results) && report.results.length === 11 && report.results.every(r => r.ok === true);
+      && Array.isArray(report.results) && report.results.length === 30 && report.results.every(r => r.ok === true);
   } catch (e) { dbg.err = String(e && e.message || e).slice(0, 200); }
-  console.log(ok ? '✓ AO(1.36.152/T-0115, 1.36.169/T-0108) 지연 경쟁 11쌍 모두 exit 0 + 양쪽 기록 보존'
+  console.log(ok ? '✓ AO(1.36.152/T-0115, 1.36.169/T-0108, T-0343) 지연 경쟁 30쌍 모두 exit 0 + 양쪽 기록 보존'
     : '✗ 1.36.152 동시 RMW 회귀 ' + JSON.stringify(dbg));
   if (!ok) failed++;
 }

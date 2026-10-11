@@ -24,9 +24,17 @@ test('directory read failure is incomplete and handle is closed',()=>{
   const p=fixture();seed(p);let closed=false;
   patch('opendirSync',raw=>function(file,...args){const h=raw.call(fs,file,...args);return {readSync(){throw Object.assign(new Error('PRIVATE'),{code:'EACCES'});},closeSync(){closed=true;h.closeSync();}};},()=>fail(inspect(p),'observation_failed'));assert(closed);
 });
-for(const change of ['canonical','projection','archive','recovery-file','add-file','remove-file'])test('late '+change+' change invalidates complete measurement',()=>{
+// T-0343: recovery content is never read, so a recovery-file change is seen through its size or its timestamps. A
+// same-size rewrite within one timestamp tick changes neither (nor any measured value) and is not a case here.
+for(const change of ['canonical','projection','archive','recovery-file','recovery-file-time','add-file','remove-file'])test('late '+change+' change invalidates complete measurement',()=>{
   const p=fixture(),f=seed(p);let fired=false;
-  patch('opendirSync',raw=>function(file,...args){const h=raw.call(fs,file,...args);return {readSync:()=>h.readSync(),closeSync(){h.closeSync();if(fired)return;fired=true;if(change==='remove-file')fs.unlinkSync(f);else if(change==='add-file')fs.writeFileSync(f+'new','new');else if(change==='recovery-file')fs.writeFileSync(f,'CHANGED');else fs.writeFileSync(path.join(p,'.leerness',change==='canonical'?'decisions.json':change==='projection'?'decisions.md':'decisions.archive.md'),'CHANGED');}};},()=>fail(inspect(p),change.includes('file')?'recovery_changed':'source_changed'));assert(fired);
+  patch('opendirSync',raw=>function(file,...args){const h=raw.call(fs,file,...args);return {readSync:()=>h.readSync(),closeSync(){h.closeSync();if(fired)return;fired=true;if(change==='remove-file')fs.unlinkSync(f);else if(change==='add-file')fs.writeFileSync(f+'new','new');else if(change==='recovery-file')fs.writeFileSync(f,'CHANGED-SIZE');else if(change==='recovery-file-time'){fs.writeFileSync(f,'CHANGED');fs.utimesSync(f,new Date(1e12),new Date(1e12));}else fs.writeFileSync(path.join(p,'.leerness',change==='canonical'?'decisions.json':change==='projection'?'decisions.md':'decisions.archive.md'),'CHANGED');}};},()=>fail(inspect(p),change.includes('file')?'recovery_changed':'source_changed'));assert(fired);
+});
+// T-0343: an add within the tick of the scan leaves the directory's timestamps as they were; the listing must catch it.
+test('late add-file within one timestamp tick invalidates complete measurement',()=>{
+  const p=fixture(),f=seed(p),dir=directory(p);let fired=false;
+  patch('lstatSync',raw=>function(file,...args){const s=raw.call(fs,file,...args);if(s&&typeof s.mtimeNs==='bigint'&&typeof file==='string'&&file.startsWith(dir))for(const k of ['atime','mtime','ctime','birthtime']){s[k+'Ms']=1000n;s[k+'Ns']=1000000000n;}return s;},()=>
+    patch('opendirSync',raw=>function(file,...args){const h=raw.call(fs,file,...args);return {readSync:()=>h.readSync(),closeSync(){h.closeSync();if(!fired){fired=true;fs.writeFileSync(f+'new','new');}}};},()=>fail(inspect(p),'recovery_changed')));assert(fired);
 });
 test('new recovery directory after absence observation is detected',()=>{
   const p=fixture();fs.mkdirSync(path.join(p,'.leerness/archive'));let absent=false,fired=false;const target=path.join(p,'.leerness/decisions.json');
@@ -46,6 +54,12 @@ test('directory close error invalidates result',()=>{
 test('directory replaced by junction before open is rejected before enumeration',()=>{
   const p=fixture();seed(p);const outside=fixture(),dir=directory(p);let opened=false;
   patch('opendirSync',raw=>function(file,...args){if(file===dir){fs.renameSync(dir,dir+'-saved');fs.symlinkSync(outside,dir,process.platform==='win32'?'junction':'dir');opened=true;}return raw.call(fs,file,...args);},()=>fail(inspect(p),'recovery_changed'));assert(opened);
+});
+// T-0343 (review round 1): the recheck lists the directory again; a junction put in place right before that
+// listing must be rejected, not followed and accepted (an empty outside directory matches an empty recovery one).
+test('directory replaced by junction before the recheck listing is rejected',()=>{
+  const p=fixture(),dir=directory(p),outside=path.join(fixture(),'.leerness','empty');fs.mkdirSync(dir,{recursive:true});fs.mkdirSync(outside);let opens=0,replaced=false;
+  patch('opendirSync',raw=>function(file,...args){if(file===dir&&++opens===2){fs.renameSync(dir,dir+'-saved');fs.symlinkSync(outside,dir,process.platform==='win32'?'junction':'dir');replaced=true;}return raw.call(fs,file,...args);},()=>fail(inspect(p),'recovery_changed'));assert(replaced);
 });
 for(const code of ['__proto__','PRIVATE_ERROR'])test('unexpected failure code remains fixed '+code,()=>{
   const p=fixture();seed(p);patch('opendirSync',()=>()=>{throw Object.assign(new Error('PRIVATE'),{code});},()=>fail(inspect(p),'observation_failed'));

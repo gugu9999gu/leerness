@@ -86,6 +86,42 @@ try {
       assert.strictEqual(fs.readFileSync(target, 'utf8'), 'planned');
       assert.strictEqual(fs.readFileSync(result.backupFile, 'utf8'), 'original');
     });
+    // T-0343: a cmdlet in this command cost 21.5-52 s per launch on a GitHub Windows runner when the environment had no
+    // PSModulePath (Windows PowerShell analyzed every module on the machine path to find New-Object). This machine
+    // does not show that cost, so the command is checked for command invocations and run once without those variables.
+    // PowerShell's own parser counts CommandAst nodes: cmdlets, aliases (echo, %), functions and programs, and not
+    // text inside string literals. The parse itself is a .NET call and invokes no command.
+    const commandInvocations = text => {
+      const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const parse = "$e = $null; $a = [System.Management.Automation.Language.Parser]::ParseInput($env:T0343_COMMAND, [ref]$null, [ref]$e); "
+        + "[Console]::Out.Write(('{0}|{1}' -f @($a.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)).Count, @($e).Count))";
+      const r = original.spawn.call(cp, ps, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', parse],
+        { encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, T0343_COMMAND: text } });
+      assert.strictEqual(r.status, 0, 'PowerShell parse failed: ' + (r.error ? r.error.code : r.stderr));
+      return r.stdout.trim();
+    };
+    test('the command-invocation check sees cmdlets and aliases but not string text', () => {
+      assert.deepStrictEqual(['New-Object System.Text.UTF8Encoding($false); exit 0', 'echo warmup; exit 0', '1 | % { $_ }; exit 0',
+        "[Console]::Out.Write('New-Object'); exit 0"].map(commandInvocations), ['1|0', '1|0', '1|0', '0|0']);
+    });
+    test('actual Windows replacement runs no cmdlet and works without PSModulePath', () => {
+      const root = fixture('no-module-path'), target = path.join(root, 'target.txt');
+      const commands = []; let env = null;
+      cp.spawnSync = function (command, args, options) {
+        if (options?.env?.LEERNESS_REPLACE_TO !== target) return original.spawn.call(this, command, args, options);
+        commands.push(args[args.indexOf('-Command') + 1]);
+        env = { ...options.env };
+        for (const key of Object.keys(env)) if (/^PSModule(Path|AnalysisCachePath)$/i.test(key)) delete env[key];
+        return original.spawn.call(this, command, args, { ...options, env });
+      };
+      const result = runtime.withRuntimeWrites(root, () =>
+        io.writeBufferIfUnchanged(target, Buffer.from('original'), Buffer.from('planned')));
+      assert.strictEqual(commands.length, 1);
+      assert.strictEqual(commandInvocations(commands[0]), '0|0', 'command invocations or parse errors in the replacement command');
+      assert(!Object.keys(env).some(key => /^PSModulePath$/i.test(key)), 'the child must have run without PSModulePath');
+      assert.strictEqual(original.read(target, 'utf8'), 'planned');
+      assert.strictEqual(original.read(result.backupFile, 'utf8'), 'original');
+    });
     test('actual Windows replacement tolerates a controlled 16-second launch delay', () => {
       const root = fixture('delayed-control'), target = path.join(root, 'target.txt');
       let attempts = 0, observation;

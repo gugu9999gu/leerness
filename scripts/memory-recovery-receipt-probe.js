@@ -44,6 +44,20 @@ fs.renameSync = function(from, to) {
   }
   return originalRename(from, to);
 };
+// T-0343: POSIX replaces an existing file by renaming it away and installing the prepared bytes with an exclusive
+//   hard link (lib/memory-output.js publishPosix); a missing file is installed the same way. The rename and
+//   ReplaceFileW hooks above and below are the Windows paths, so on Linux no fault ever fired and every case ran
+//   to success. Fail the link that installs the target instead.
+const originalLink = fs.linkSync.bind(fs);
+fs.linkSync = function(existing, newPath) {
+  if (targetMatches(newPath)) {
+    fired = true;
+    const error = new Error('owned fixture injected link failure');
+    error.code = cfg.code || 'EIO';
+    throw error;
+  }
+  return originalLink(existing, newPath);
+};
 cp.spawnSync = function(command, args, options) {
   const env = options && options.env;
   if (env && targetMatches(env.LEERNESS_REPLACE_TO)) {

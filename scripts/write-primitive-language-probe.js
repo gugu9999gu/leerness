@@ -225,7 +225,9 @@ const seed = lang => {
   return (seeds[lang] = dir);
 };
 let copies = 0;
-const fresh = lang => { const dir = path.join(arena, 'p' + (++copies) + ' 한글'); fs.cpSync(seed(lang), dir, { recursive: true }); return dir; };
+// T-0343: the fixture folders have Korean names, and Node 22.23.3's fs.cpSync crashes on non-ASCII paths on Windows.
+const { copyTreeSync } = require('../lib/copy-tree');
+const fresh = lang => { const dir = path.join(arena, 'p' + (++copies) + ' 한글'); copyTreeSync(seed(lang), dir); return dir; };
 const ws = (P, name) => path.join(P, '.leerness', name);
 const hook = path.join(arena, 'write-hook.cjs');
 // WPL_MODE=race: another writer changes the target right before the compare-and-set replacement checks it (the Windows
