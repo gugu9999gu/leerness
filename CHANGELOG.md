@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.36.298 - 2026-10-11
+
+- Fixed: on Windows, `leerness path-setup --apply` never registered the npm bin folder in the user PATH (T-0351). This was so from 1.9.254.
+  - Cause: the PowerShell command joined its statements with spaces only, so PowerShell refused it as a whole (UnexpectedToken), and the command reported a failure.
+  - The command now edits `HKCU\Environment\Path` itself. It keeps the value's raw text and registry type, so REG_EXPAND_SZ entries such as `%USERPROFILE%\...\WindowsApps` stay unexpanded, and it refuses other types. It also sends the settings-change broadcast that new terminals rely on.
+  - The folder counts as present only when it is written in the Path as such, letter case aside. If the Path names it only through a variable, a second, literal entry is added.
+  - It invokes no PowerShell module cmdlet. Write-Output and Where-Object are gone; on a GitHub Windows runner without PSModulePath, the first such cmdlet cost 21.5-52 s per launch (T-0343).
+  - A bin path with `;` or `%` is not registered automatically. The command says so and names the manual step.
+  - If a user variable named `LEERNESS_PATH_SETUP_NOTIFY` exists, the command stops before changing anything. A failed write ends with exit 1 and is reported as a failure.
+  - The dry-run hint of `path-setup` describes the new method.
+- Fixed: a decisions or lessons restore with an explicit write policy (`--write-policy-json`, or `writePolicyJson` in MCP) was refused with "snapshot does not belong to this file" when the project path was spelled differently from its real path (T-0350, listed under "Not fixed here" in 1.36.297).
+  - Examples are a lowercase drive letter, a junction or symlink, or an 8.3 short name. A restore without a write policy was not affected.
+  - Cause: the memory footprint capture named its files under the resolved (realpath) workspace, and the write admission named the same files under the path as given.
+  - The capture now uses the given spelling, after checking that it resolves to the same workspace. Its recheck still compares the resolved forms.
+- Tests (T-0351, T-0350):
+  - `scripts/path-setup-powershell-probe.js` (18 checks, Windows only) is `npm run test:path-setup`, part of `test`, `test:core` and `test:fast`.
+    - It parses the command with PowerShell's own parser and expects 0 commands and 0 parse errors. The old command has 3 commands and 1 parse error.
+    - It runs the command through `_registerPath` without PSModulePath, against a throwaway registry key, and checks that the real user Path is unchanged.
+    - On the old code it passes 2 of 18: the parser control and one of its own guard tests.
+  - `scripts/memory-policy-root-spelling-probe.js` is part of `npm run test:memory-command-policy`.
+    - By the CLI it restores through each spelling the machine has: as created, and a lowercase drive letter, a junction and the 8.3 short name on Windows, or a symlink on POSIX. Each restore must leave the same files as the restore through the real path.
+    - By MCP it restores once per surface through a lowercase drive letter on Windows, or a symlink on POSIX, and checks the restored entries.
+    - A workspace that resolves to another folder must be refused before any file is read.
+    - On the old code it passes only the two "as created" cases on Windows and on Linux.
+  - selftest: the path-setup pin checks the registry form.
+
 ## 1.36.297 - 2026-10-11
 
 - Fixed: on Windows, `decision`, `lesson` and `memory` writes that replace an existing file could take 20 s or more per file, or fail with "Windows metadata-preserving replacement failed: spawnSync ... powershell.exe ETIMEDOUT" (T-0343). This happened when Leerness ran in an environment with no PSModulePath.

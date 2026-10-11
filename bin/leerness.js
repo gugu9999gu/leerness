@@ -115,7 +115,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.297';
+const VERSION = '1.36.298';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -3992,18 +3992,41 @@ function _pathDiagnose() {
 // 1.9.255 (UR-0019 2단계): Windows User PATH 등록용 PowerShell 스크립트 생성 (순수 함수 — 테스트/디버그 가능)
 //   setx 의 1024자 truncation 회피 위해 [Environment]::SetEnvironmentVariable User scope 사용.
 //   멱등: 현재 User PATH 에 이미 있으면 EXISTS, 없으면 append 후 ADDED. 시스템 PATH 불변 (관리자 권한 불요).
+//   T-0351: from 1.9.254 the lines were joined with spaces only, so `...SetEnvironmentVariable(...)  Write-Output`
+//   was one statement and PowerShell refused the whole script (UnexpectedToken): `path-setup --apply` never ran it on
+//   Windows. Each statement now ends with `;`. Running it showed what [Environment]::Get/SetEnvironmentVariable would
+//   do to the user Path (review round 1): the read expands %VAR% entries with this process's values, and the write
+//   stores REG_SZ, so a REG_EXPAND_SZ Path (the Windows default, e.g. %USERPROFILE%\...\WindowsApps) would lose its
+//   references. The script reads the raw value and its registry type and writes both back. An entry counts as present
+//   only as written (letter case aside): expanding %VAR% here would use this shell's variables, which new terminals may
+//   not have, and could report EXISTS for a directory they cannot reach (review round 3; the owner chose this). The
+//   cost is a harmless second entry when the Path already names the directory through a variable. Deleting a variable
+//   that does not exist through SetEnvironmentVariable(..., 'User') writes nothing but sends the WM_SETTINGCHANGE that
+//   new terminals rely on, as the old write did; if a user variable of that name exists, the script stops before
+//   changing anything (round 2).
+//   The script invokes no command: Write-Output and Where-Object were the module cmdlets that cost 21.5-52 s per launch
+//   without PSModulePath on a GitHub Windows runner (T-0343). Inside `try`, PowerShell treats a .NET exception or a
+//   throw as terminating, so a failure ends the script with exit 1 before ADDED. A bin path with ';' or '%' is
+//   refused by _registerPath before this runs.
 function _winPathPsScript() {
   return [
     // npm prefix is data. JSON double quotes are not PowerShell escaping: $()/backticks execute.
-    "$b = $env:LEERNESS_PATH_BIN;",
-    "$u = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $u) { $u = '' }",
-    "$parts = $u.Split(';') | Where-Object { $_ -ne '' }",
-    "if ($parts -notcontains $b) {",
-    "  $nu = if ($u -eq '') { $b } else { $u.TrimEnd(';') + ';' + $b }",
-    "  [Environment]::SetEnvironmentVariable('PATH', $nu, 'User')",
-    "  Write-Output 'ADDED'",
-    "} else { Write-Output 'EXISTS' }"
-  ].join(' ');
+    "$b = $env:LEERNESS_PATH_BIN",
+    "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)",
+    "if ($null -eq $k) { throw 'HKCU\\Environment cannot be opened for writing' }",
+    "try { $names = $k.GetValueNames(); "
+      + "if ($names -contains 'LEERNESS_PATH_SETUP_NOTIFY') { throw 'the user variable LEERNESS_PATH_SETUP_NOTIFY exists; leerness deletes that name to announce the change, so the Path was left as it is' }; "
+      + "$raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); "
+      + "$kind = [Microsoft.Win32.RegistryValueKind]::ExpandString; "
+      + "if ($names -contains 'Path') { $kind = $k.GetValueKind('Path') }; "
+      + "if ($kind -ne [Microsoft.Win32.RegistryValueKind]::String -and $kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { throw ('the user Path has registry type ' + $kind) }; "
+      + "if ($raw.Split(';') -contains $b) { [Console]::Out.WriteLine('EXISTS') } "
+      + "else { $nu = if ($raw -eq '') { $b } else { $raw.TrimEnd(';') + ';' + $b }; "
+      + "$k.SetValue('Path', $nu, $kind); "
+      + "[Environment]::SetEnvironmentVariable('LEERNESS_PATH_SETUP_NOTIFY', $null, 'User'); "
+      + "[Console]::Out.WriteLine('ADDED') } } "
+      + "finally { $k.Close() }",
+  ].join('; ');
 }
 
 // 1.9.255 (UR-0019 2단계): Unix shell rc 등록 블록 마커 (순수 — 테스트/디버그 가능, 멱등 키)
@@ -4020,7 +4043,10 @@ function _registerPath(diag) {
   if (!bin) return { ok: false, method: 'none', detail: 'npm global bin 경로를 찾을 수 없음' };
   const platform = diag.platform || process.platform;
   if (platform === 'win32') {
-    // Windows: PowerShell [Environment]::SetEnvironmentVariable User scope (멱등, 관리자 권한 불요)
+    // Windows: PowerShell 로 HKCU\Environment 의 Path 원문과 값 종류를 보존해 append (멱등, 관리자 권한 불요)
+    // T-0351: ';' splits a PATH entry and '%' is expanded in a REG_EXPAND_SZ Path, so such a directory cannot be added
+    //   as one literal entry. Registration is refused before PowerShell runs, and the manual step is shown instead.
+    if (/[;%]/.test(bin)) return { ok: false, method: 'powershell-user-path', detail: `npm bin 경로에 ';' 또는 '%' 가 있어 자동 등록하지 않음 (수동 등록 필요): ${bin}` };
     try {
       const ps = _winPathPsScript(bin);
       const r = _spawnPortableArgvSync('powershell', ['-NoProfile', '-Command', ps], {
@@ -4078,7 +4104,7 @@ function pathSetupCmd(root, opts = {}) {
     log(yl(`  ⚠ leerness 가 PATH 에 없습니다 — 'leerness' 명령이 동작하지 않을 수 있음`));
     log(`  ${dm('적용 시 추가될 경로:')} ${diag.globalBin}`);
     if (diag.platform === 'win32') {
-      log(dm(`     방법: PowerShell [Environment]::SetEnvironmentVariable('PATH', ..., 'User')  (관리자 권한 불요)`));
+      log(dm(`     방법: PowerShell 로 HKCU\\Environment 의 Path 끝에 추가 — 원문(%VAR%)과 값 종류 유지 (관리자 권한 불요)`));
     } else {
       log(dm(`     방법: ${diag.shellRc} 에 export PATH 블록 append (멱등)`));
     }
@@ -4191,7 +4217,7 @@ function _selfTestCases() {
     { name: '_classifyCJK: 중국어/일본어 구분', run: () => { const z = Buffer.from('中', 'utf8'), j = Buffer.from('ひ', 'utf8'); return _classifyCJK(z, z.length).chinese > 0 && _classifyCJK(j, j.length).japanese > 0; } },
     { name: '_riskLabel: korean→CP949 / chinese→CP936', run: () => /CP949/.test(_riskLabel({ korean: 3, japanese: 0, chinese: 0, other: 0 }).risk) && /CP936/.test(_riskLabel({ korean: 0, japanese: 0, chinese: 3, other: 0 }).risk) },
     { name: '_dirInPath: 정규화 (trailing slash)', run: () => { const sep = process.platform === 'win32' ? ';' : ':'; const old = process.env.PATH; process.env.PATH = '/usr/bin' + sep + '/opt/x/bin'; const r = _dirInPath('/opt/x/bin/') === true && _dirInPath('/no/such') === false; process.env.PATH = old; return r; } },
-    { name: '_winPathPsScript: User scope + setx 미사용', run: () => { const ps = _winPathPsScript('C:\\npm'); return /SetEnvironmentVariable\('PATH', \$nu, 'User'\)/.test(ps) && !/setx/i.test(ps); } },
+    { name: '_winPathPsScript: HKCU Path 원문·값 종류 보존 + setx 미사용 (T-0351)', run: () => { const ps = _winPathPsScript('C:\\npm'); return ps.includes("OpenSubKey('Environment', $true)") && ps.includes('DoNotExpandEnvironmentNames') && ps.includes("$k.SetValue('Path', $nu, $kind)") && !/SetEnvironmentVariable\('PATH'/i.test(ps) && !/setx/i.test(ps); } },
     { name: '_unixPathBlock: 멱등 마커 + export', run: () => { const b = _unixPathBlock('/x/bin'); return b.includes('managed') && /export PATH="\$PATH:\/x\/bin"/.test(b); } },
     { name: '_shellGuardAnalyze: PS5.1 && → ps5-chain error', run: () => { const r = _shellGuardAnalyze('a && b', { shell: 'powershell', psVersion: '5' }); return r.issues.some(i => i.rule === 'ps5-chain' && i.severity === 'error'); } },
     { name: '_shellGuardAnalyze: bash && → 문제 없음', run: () => _shellGuardAnalyze('a && b', { shell: 'bash' }).issues.length === 0 },

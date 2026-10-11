@@ -195,7 +195,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.36.297 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.36.298 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -249,7 +249,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.297는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **102개 도구**를 노출:
+Leerness v1.36.298는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **102개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -270,7 +270,7 @@ Leerness v1.36.297는 stdio JSON-RPC MCP server를 내장합니다 — Claude Co
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.
 
-현재 사용 중인 하네스 버전: **1.36.297**. 공개 릴리스 여부는 공개 저장소의 태그와 배포 기록에서 별도로 확인합니다.
+현재 사용 중인 하네스 버전: **1.36.298**. 공개 릴리스 여부는 공개 저장소의 태그와 배포 기록에서 별도로 확인합니다.
 
 ### 성능 가이드
 
@@ -308,7 +308,7 @@ leerness release pack --close --auto-main-push
 - `.leerness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.leerness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.297: 2026-09-30
+Last synced by Leerness v1.36.298: 2026-09-30
 <!-- leerness:project-readme:end -->
 GitHub 로그인 계정 확인용 서버 어댑터: [설정·연결·승인과의 구분](docs/github-login.md). 실제 앱 등록/브라우저 세션 연결과 대상별 승인은 후속입니다.
 
