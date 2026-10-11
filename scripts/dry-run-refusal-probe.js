@@ -60,7 +60,9 @@ const seed = lang => {
   return (seeds[lang] = P);
 };
 let copies = 0;
-const fresh = lang => { const P = path.join(arena, 'p' + (++copies) + ' 한글'); fs.cpSync(seed(lang), P, { recursive: true }); return P; };
+// T-0343: the fixture folders have Korean names, and Node 22.23.3's fs.cpSync crashes on non-ASCII paths on Windows.
+const { copyTreeSync } = require('../lib/copy-tree');
+const fresh = lang => { const P = path.join(arena, 'p' + (++copies) + ' 한글'); copyTreeSync(seed(lang), P); return P; };
 // Review round 1: the project's files with their modification times, its directory entries, and the redirected home,
 // app data and temp folders the CLI could write to outside the project.
 const snapshot = P => {

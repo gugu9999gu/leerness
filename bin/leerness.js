@@ -115,7 +115,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.296';
+const VERSION = '1.36.297';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -2020,7 +2020,11 @@ async function install(root, opts = {}) {
       } catch {}
     }
     // 1.9.1 P7: 디폴트 M-0001이 plan에 있고 progress에 row가 없으면 자동 추가
+    // T-0343: decided and written under the tracker lock, then the plan lock. Unlocked, a tracker that another
+    //   writer had renamed away for its POSIX publication read as empty, so nextId could hand out an ID already in
+    //   the tracker and upsertProgress would overwrite that row.
     try {
+      _withTrackerAndPlanLocks(root, () => {
       const planText = exists(planPath(root)) ? read(planPath(root)) : '';
       if (/### M-0001\./.test(planText)) {
         const rows = readProgressRows(root);
@@ -2031,6 +2035,7 @@ async function install(root, opts = {}) {
           upsertProgress(root, { id: tid, status: 'planned', request: _en0 ? 'Organize the project plan' : '프로젝트 계획 정리', evidence: 'init default plan:M-0001', nextAction: _en0 ? 'Fill project-brief.md with the real purpose' : 'project-brief.md를 실제 목적으로 업데이트' });
         }
       }
+      });
     } catch {}
     // 1.9.276: --minimal 시 .claude SessionStart hook 도 건너뜀 (침투성 완화)
     // 1.36.115 (사용자 보고): `init` 이 .claude/* 를 깔면서 **MCP 배선만 빠뜨렸다**.
@@ -4136,7 +4141,9 @@ function _selftestFixture(lang) {
   const base = _stFixtureCache.get(key);
   if (!base) return null;                       // init 실패 시 호출자가 스스로 판단(조용한 통과 금지)
   const dst = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_stuse_'));
-  fs.cpSync(base, dst, { recursive: true });
+  // T-0343: not fs.cpSync, which Node 22.23.3 on Windows ends with an access violation when the temp path has
+  //   non-ASCII letters (a user name in Korean) — see lib/copy-tree.js.
+  require('../lib/copy-tree').copyTreeSync(base, dst);
   return dst;
 }
 
@@ -4264,7 +4271,7 @@ function _selfTestCases() {
     { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /'view', pkg, 'version'/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src) && !/cp\.execFile\('npm', \[[^\]]*\], \{ timeout: 12000, shell:/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
     { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'safe-write' && get('leerness_audit') === 'safe-write' && get('leerness_task_export') === 'project-write'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
-    { name: '_withLock/_updateRun: shared state-store locking + CLI wiring', run: () => { const src = read(__filename); const shared = read(require.resolve('../lib/state-lock')); return typeof _withLock === 'function' && typeof _updateRun === 'function' && src.includes('_stateLocks.withStateLock(targetPath, fn, opts)') && shared.includes('isStateLockHeld(targetPath)') && shared.includes('fs.mkdirSync(lockPath)') && /const id = _withLock\(progressPath\(root\)/.test(src); } },
+    { name: '_withLock/_updateRun: shared state-store locking + CLI wiring', run: () => { const src = read(__filename); const shared = read(require.resolve('../lib/state-lock')); return typeof _withLock === 'function' && typeof _updateRun === 'function' && src.includes('_stateLocks.withStateLock(targetPath, fn, opts)') && shared.includes('isStateLockHeld(targetPath)') && shared.includes('fs.mkdirSync(lockPath)') && (k => k >= 0 && src.slice(k, k + 4000).includes('const id = _withTrackerAndPlanLocks(root, () => {'))(src.lastIndexOf('function taskAdd(root, text)')) && /function _withTrackerAndPlanLocks\(root, fn\) \{\s*return _withLock\(progressPath\(root\), \(\) => _withLock\(planPath\(root\), fn\)\);/.test(src); } },
     { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
     { name: '17th헌트: _claimFileInGit bare-basename 충돌 차단 + scan .json5/.jsonc 포함 (1.35.5)', run: () => { const a = require('../lib/analyzers'); const collisionFixed = a._claimFileInGit('src/test.js', new Set(['test.js'])) !== true; const forwardOk = a._claimFileInGit('test.js', new Set(['src/test.js'])) === true; const exactOk = a._claimFileInGit('src/a.js', new Set(['src/a.js'])) === true; const nestedReverseOk = a._claimFileInGit('x/src/a.js', new Set(['src/a.js'])) === true; const src = read(__filename); const json5Ext = src.includes("'.js" + "on5'") && src.includes("'.js" + "onc'"); return collisionFixed && forwardOk && exactOk && nestedReverseOk && json5Ext; } },
     { name: '위임 범위: _harnessBrief reuses assigned task/current rules and preserves verify-claim + portable dispatch (CTX-01)', run: () => {
@@ -5209,7 +5216,7 @@ function _selfTestCases() {
     { name: 'UR-0025/whats-new BUG-fix: _parseChangelogBetween pure 추출 + "## X — DATE — title" 헤더 파싱 (1.9.393)', run: () => { const m = require('../lib/pure-utils'); if (m._parseChangelogBetween !== _parseChangelogBetween) return false; const cl = '## 1.9.393 — 2026-06-06 — Title\n- `leerness foo`\n- `--flagx`\n- `.leerness/x.md`\n\n## 1.9.392 — 2026-06-05 — Y\n- y\n\n## 1.9.391 — 2026-06-04 — Z\n- z\n'; const r = m._parseChangelogBetween(cl, '1.9.391', '1.9.393'); const rangeOk = r.length === 2 && r[0].version === '1.9.393' && r[1].version === '1.9.392'; const extractOk = r[0].newCommands.includes('foo') && r[0].newFlags.includes('--flagx') && r[0].newFiles.includes('.leerness/x.md'); const titlelessOk = m._parseChangelogBetween('## 1.9.50\n- a\n## 1.9.49\n- b\n', '1.9.49', '1.9.50').length === 1; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/function _parseChangelogBetween\(changelogText/.test(src); return rangeOk && extractOk && titlelessOk && moved; } },
     { name: 'UR-0025 whats-new 완결: whatsNewCmd → lib/diagnostics.js + DI 위임 + 동작 (1.9.394)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.whatsNewCmd === 'function'; const src = read(__filename); const delegated = src.includes('_diag.whatsNewCmd(root,'); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness whats-new') && diagSrc.includes('_parseChangelogBetween'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wn_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, 'CHANGELOG.md'), '## 1.9.50 — 2026-06-06 — A\n- `leerness x`\n\n## 1.9.49 — 2026-06-05 — B\n- old\n'); process.argv = ['node', 'h', 'whats-new', tmp, '--from', '1.9.49', '--to', '1.9.50', '--json']; process.stdout.write = s => { out += s; return true; }; whatsNewCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.from === '1.9.49' && j.to === '1.9.50' && Array.isArray(j.versions) && j.versions.length === 1 && j.versions[0].version === '1.9.50'; } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: '회귀가드: decisions/lessons canonical round-trip 엣지문자(pipe/dash/colon) 무손상 + idempotent (1.9.395)', run: () => { const m = require('../lib/pure-utils'); const d = [{ date: '2026-06-06', title: 'A | pipe', decision: 'use X | Y', reason: 'r—dash', alternatives: 'alt: colon', impact: 'i' }]; const dback = m._decisionsFromMd(m._renderDecisionsMd(d)); const dOk = dback.length === 1 && dback[0].title === 'A | pipe' && dback[0].decision === 'use X | Y' && dback[0].reason === 'r—dash'; const dIdem = JSON.stringify(dback) === JSON.stringify(m._decisionsFromMd(m._renderDecisionsMd(dback))); const l = [{ date: '2026-06-06', text: 'lesson | with — chars: ok', tag: 't' }]; const lback = m._parseLessonEntries(m._renderLessonsMd(l)); const lOk = lback.length === 1 && lback[0].text === 'lesson | with — chars: ok'; const lIdem = JSON.stringify(lback) === JSON.stringify(m._parseLessonEntries(m._renderLessonsMd(lback))); return dOk && dIdem && lOk && lIdem; } },
-    { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.indexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); return body.includes('not found in progress-tracker.md') && body.includes('rows.find(r => r.id === id)') && body.includes('_requireInit'); } },
+    { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.lastIndexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); const j = src.lastIndexOf('function _taskRowExists(root, id)'); return j >= 0 && body.includes('not found in progress-tracker.md') && body.includes('_taskRowExists(root, id)') && body.includes('_requireInit') && src.slice(j, j + 400).includes('_withLock(progressPath(root), found)'); } },
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
     { name: 'T-0077 graph --html: leerness.html 온톨로지 생성 + 노드/엣지/XSS 무결성 (1.34.3)', run: () => { const m = require('../lib/graph'); const expOk = typeof m.graphHtmlCmd === 'function' && typeof m.buildGraphData === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/" + "graph')") && src.includes('function graphHtmlCmd(root) { return ' + '_graph.graphHtmlCmd('); const gSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'graph.js')); const movedToLib = gSrc.includes('buildGraphData') && gSrc.includes('String.raw') && gSrc.includes('/*__DATA__' + '*/null'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_graph_')); const _w = process.stdout.write; try { process.stdout.write = () => true; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.leerness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | first task | - | - | 2026-06-26 |\n| T-0002 | in-progress | follow-up to T-0001 </scr' + 'ipt> | - | - | 2026-06-26 |\n'); const deps = { _roadmapData, _loadDecisions, _loadLessons }; const data = m.buildGraphData(tmp, deps); const dataOk = data.nodes.some(n => n.id === 'T-0001') && data.nodes.some(n => n.id === 'T-0002') && data.counts.task >= 2; const edgeOk = data.edges.some(e => e.source === 'T-0002' && e.target === 'T-0001'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, Object.assign({ has: () => false }, deps, { quiet: true }), out); const html = fs.readFileSync(out, 'utf8'); const placeholderGone = !html.includes('/*__DATA__' + '*/null'); const hasNode = html.includes('T-0002'); const xssSafe = (html.match(/<\/script>/g) || []).length === 1; behavOk = dataOk && edgeOk && placeholderGone && hasNode && xssSafe && !!r && r.ok === true && fs.existsSync(out); } catch (e) { behavOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return expOk && delegated && movedToLib && behavOk; } },
@@ -5287,7 +5294,7 @@ function _selfTestCases() {
       }
     } },
     { name: '8번째 버그헌트 (UR-0114): absRoot 비문자열(--path 값없음 boolean true) → cwd 폴백(raw TypeError 차단) (1.9.410)', run: () => { const io = require('../lib/io'); const cwd = process.cwd(); const tBool = io.absRoot(true) === cwd; const tEmpty = io.absRoot('') === cwd; const tUndef = io.absRoot(undefined) === cwd; const tSpace = io.absRoot('   ') === cwd; const tReal = io.absRoot(os.tmpdir()) === path.resolve(os.tmpdir()); return tBool && tEmpty && tUndef && tSpace && tReal; } },
-    { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
+    { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,1500}?_withTrackerAndPlanLocks\(root, \(\) => \{[\s\S]{0,1500}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
     { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => {
       // 낡은 소스-리터럴(task 의 status 표현이 _normTaskStatus 로 바뀌며 썩음) 대신 **행위 검사**:
@@ -5898,7 +5905,7 @@ function _selfTestCases() {
       //   1.36.125: 여기에 `runMemo` 가 함께 넘어가는 것도 이제 **계약**이다 — 빠지면 같은 테스트 스위트를
       //   done 행 수만큼 반복 실행한다(100주장 × 300초). 그래서 리터럴을 갱신만 하지 않고 메모 배선까지 건다.
       //   ⚠ 실행 횟수 자체는 소스가 아니라 e2e U 블록이 **실제로 세어** 판정한다(소스가드는 배선 유무만).
-      const reuse = src.includes("doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true, runMemo, gitMemo }))")
+      const reuse = src.includes("doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true, runMemo, gitMemo, rows: activeRows }))")
         && src.includes('const runMemo = {};')
         && src.includes('if (_runMemo) _runMemo.result = runResult;');
       // collect 게이팅 부울이 --json/human 경로와 동일 출처(분기 없음) — 정밀 검사를 일괄 모드에서도 그대로 재사용
@@ -8825,30 +8832,38 @@ function anchorsCmd(root, sub) {
     let readmeText = '';
     try { if (exists(path.join(root, 'README.md'))) readmeText = read(path.join(root, 'README.md')).slice(0, 4000); } catch {}
     let milestones = [], tasks = [];
-    try { const rd = _roadmapData(root); milestones = rd.milestones || []; tasks = rd.tasks || []; } catch {}
+    // T-0343: with --apply the milestones and tasks behind the draft are read under the tracker and plan locks, so a
+    //   plan or tracker that another writer is publishing on POSIX does not read as empty (a false no_signal).
+    try { const rd = has('--apply') ? _withTrackerAndPlanLocks(root, () => _roadmapData(root)) : _roadmapData(root); milestones = rd.milestones || []; tasks = rd.tasks || []; } catch {}
     const draft = _draftAnchors({ pkgDescription, readmeText, milestones, tasks, lang: _uiLang(root) });   // 1.36.66 (F11): 초안 언어
     if (!draft.hasSignal) { failJson(json, 'no_signal', '초안을 만들 실신호가 없음 (package.json description / README 산문 / milestone / 활성 task 모두 부재) — 직접 작성 필요'); return; }
     const apply = has('--apply');
     const applied = [];
-    if (briefGap && draft.purpose.length) {
+    // T-0343: with --apply each gap is decided under its file's lock (and reported from there). The unlocked read
+    //   above saw "" while another writer had the file renamed away for its POSIX publication, so a gap read as
+    //   filled and the section was skipped.
+    let briefGapNow = briefGap, planGapNow = planGap;
+    if ((briefGap || apply) && draft.purpose.length) {
       if (apply) {
         // 1.36.169 (T-0108): 초안 계산 뒤 다른 세션이 채운 내용을 낡은 snapshot으로 덮지 않는다.
         _withLock(bf, () => {
           require('../lib/io').assertWriteAllowed(bf);
           const storage = require('../lib/managed-text'), input = storage.captureTextEdit(bf);
           const current = input.text;
-          if (!_briefHasGap(current)) return;
+          briefGapNow = _briefHasGap(current);
+          if (!briefGapNow) return;
           storage.publishTextEdit(input, bf, _replaceMdSection(current, 'Purpose', draft.purpose, { appendIfMissing: true }));
           applied.push('project-brief.md#Purpose');
         });
       }
     }
-    if (planGap && draft.goal.length) {
+    if ((planGap || apply) && draft.goal.length) {
       if (apply) {
         try {
           _withPlanLock(root, input => {
             const current = input.text;
-            if (!_planHasGap(current)) return;
+            planGapNow = _planHasGap(current);
+            if (!planGapNow) return;
             require('../lib/managed-text').publishTextEdit(input, pf, _replaceMdSection(current, 'Goal', draft.goal, { appendIfMissing: true }));
             applied.push('plan.md#Goal');
           });
@@ -8859,11 +8874,11 @@ function anchorsCmd(root, sub) {
         }
       }
     }
-    if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap, draft: { purpose: draft.purpose, goal: draft.goal }, applied, dryRun: !apply }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ briefUnfilled: briefGap || briefGapNow, planGoalUnfilled: planGap || planGapNow, draft: { purpose: draft.purpose, goal: draft.goal }, applied, dryRun: !apply }, null, 2)); return; }
     log(`# leerness anchors draft ${apply ? '(적용)' : '(dry-run — 적용: --apply)'}`);
-    if (briefGap) { log(`\n## project-brief Purpose ${apply ? (applied.includes('project-brief.md#Purpose') ? '← 적용됨' : '← 다른 세션 변경 감지로 건드리지 않음') : '초안'}`); draft.purpose.forEach(l => log('  ' + l)); }
+    if (briefGap || briefGapNow) { log(`\n## project-brief Purpose ${apply ? (applied.includes('project-brief.md#Purpose') ? '← 적용됨' : '← 다른 세션 변경 감지로 건드리지 않음') : '초안'}`); draft.purpose.forEach(l => log('  ' + l)); }
     else log(`\n  ✓ project-brief Purpose 는 이미 작성됨 — 건드리지 않음`);
-    if (planGap) { log(`\n## plan Goal ${apply ? (applied.includes('plan.md#Goal') ? '← 적용됨' : '← 다른 세션 변경 감지로 건드리지 않음') : '초안'}`); draft.goal.forEach(l => log('  ' + l)); }
+    if (planGap || planGapNow) { log(`\n## plan Goal ${apply ? (applied.includes('plan.md#Goal') ? '← 적용됨' : '← 다른 세션 변경 감지로 건드리지 않음') : '초안'}`); draft.goal.forEach(l => log('  ' + l)); }
     else log(`  ✓ plan Goal 은 이미 작성됨 — 건드리지 않음`);
     if (apply && applied.length) log(`\n✓ 적용: ${applied.join(', ')} (초안 표식 주석 포함 — 검토 후 주석 제거로 확정)`);
     return;
@@ -13645,7 +13660,9 @@ function _autoFixIdempotency(root) {
   // 1) progress-tracker.md task 중복
   try {
     const pt = path.join(root, '.leerness', 'progress-tracker.md');
-    if (exists(pt)) {
+    // T-0343: only the directory is checked before the lock. On POSIX a concurrent tracker writer renames the file
+    //   away while it publishes, and an unlocked exists(pt) skipped the dedup (autoFixed: [] with duplicates present).
+    if (exists(path.dirname(pt))) {
       // 1.36.130 (P2-a, 실측 3/3 유실): 이 구획은 **락 없이** 읽고 다시 썼다 — 그 사이에 착지한
       //   동시 `task add` 의 행이 통째로 사라졌고 양쪽 모두 exit 0 이었다(조용한 유실).
       //   진입점은 둘: `idempotency audit --auto-fix` 와 `drift check --auto-fix`
@@ -15362,6 +15379,12 @@ function planShow(root) { const p = planPath(root); const has_ = exists(p); cons
 function _withPlanLock(root, fn) {
   return _withLock(planPath(root), () => fn(require('../lib/managed-text').captureTextEdit(planPath(root))));
 }
+// T-0343: the tracker lock, then the plan lock (the order of _withPlanTransaction), with no capture of either file.
+//   For ID assignment and decisions that read plan.md and the tracker: under these locks neither file can be in
+//   another writer's POSIX publication, where the path is missing for a moment.
+function _withTrackerAndPlanLocks(root, fn) {
+  return _withLock(progressPath(root), () => _withLock(planPath(root), fn));
+}
 function _withPlanTransaction(root, fn) {
   return _withLock(progressPath(root), () => {
     // Refuse an invalid tracker before the paired plan mutation begins. This
@@ -15372,10 +15395,18 @@ function _withPlanTransaction(root, fn) {
 }
 function planInit(root) {
   const goal = arg('--goal', '');
-  if (!exists(planPath(root))) return install(root);
+  if (!exists(path.dirname(planPath(root)))) return install(root);
   // 1.36.169 (T-0108): plan add/drop/remove/restore와 같은 plan.md 락을 쓴다.
   // 종전 append는 성공했어도 동시에 진행된 plan remove의 낡은 전체파일 rename에 지워졌다.
-  _withPlanLock(root, input => require('../lib/managed-text').publishTextEdit(input, planPath(root), input.text + `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`));
+  // T-0343: "plan.md is missing" is decided under that lock. On POSIX a writer publishing plan.md renames it away
+  //   and links the new bytes while it holds the lock (lib/memory-output.js), so the unlocked check this used to do
+  //   could see it missing mid-publication; plan init then ran a full install without the lock and lost its goal.
+  let missing = false;
+  _withPlanLock(root, input => {
+    if (!input.exists) { missing = true; return; }
+    require('../lib/managed-text').publishTextEdit(input, planPath(root), input.text + `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`);
+  });
+  if (missing) return install(root);
   ok('plan goal appended');
 }
 // 1.9.119: plan list — plan.md 의 모든 milestone (M-XXXX) 조회 (CLI + --json + MCP)
@@ -15521,7 +15552,9 @@ function planRemoveCmd(root, target) {
   root = absRoot(root);
   if (!target) return failJson(has('--json'), 'missing_target', 'plan remove <M-XXXX|title-substring> 필요 — 매칭되는 milestone 블록을 제거하고 .leerness/plan.archive.md에 보존');
   const pp = planPath(root);
-  if (!exists(pp)) return failJson(has('--json'), 'plan_not_found', 'plan.md 없음');
+  // T-0343: a missing plan.md is decided under the lock below (input.exists). On POSIX another plan writer renames
+  //   plan.md away while it publishes, so an unlocked check here reported plan_not_found for a plan that had the milestone.
+  if (!exists(path.dirname(pp))) return failJson(has('--json'), 'plan_not_found', 'plan.md 없음');
   let removed = 0;
   let disappeared = false;
   // 1.36.152 (T-0115): plan restore/add와 archive를 공유한다. 락 안에서 다시 읽어야 새 milestone을 덮지 않는다.
@@ -15669,6 +15702,13 @@ function _requireInit(root, cmdLabel) {
   log(`   워크스페이스 마커(HARNESS_VERSION/AGENTS.md) 없음 — write 가 반쪽 상태를 만들지 않도록 차단했습니다.`);
   return false;
 }
+// T-0343: "the task does not exist" is confirmed under the tracker lock. An unlocked read alone reported
+//   task_not_found while another writer had progress-tracker.md renamed away for its POSIX publication.
+//   Under --dry-run no lock is taken (taking one is refused there), so the unlocked answer stands, as before.
+function _taskRowExists(root, id) {
+  const found = () => readProgressRows(root).some(r => r.id === id);
+  return found() || (!has('--dry-run') && exists(path.dirname(progressPath(root))) && _withLock(progressPath(root), found));
+}
 function taskAdd(root, text) {
   // 1.9.311 (UR-0047): init 가드 — 미초기화 디렉토리 write 차단 (--force 우회)
   if (!_requireInit(root, 'task add')) return;
@@ -15676,34 +15716,34 @@ function taskAdd(root, text) {
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }
   // 1.9.212: 멱등성 — 같은 request 텍스트 + 활성 상태 (requested/in-progress) 이미 존재 시 skip (사용자 명시)
   // progress-tracker.md 포맷: | T-XXXX | status | request | evidence | nextAction | date |
-  if (!has('--force') && text && text.trim()) {
-    try {
-      const pt = path.join(absRoot(root), '.leerness', 'progress-tracker.md');
-      if (exists(pt)) {
-        const content = read(pt);
-        const norm = text.trim();
-        const lines = content.split(/\r?\n/);
-        for (const line of lines) {
-          if (!/^\|\s*T-\d{4,}\s*\|/.test(line)) continue;
-          const cells = line.split('|').slice(1, -1).map(s => s.trim());
-          if (cells.length < 3) continue;
-          const id = cells[0];
-          const status = (cells[1] || '').toLowerCase();
-          const request = cells[2];
-          if (request === norm && !/^(done|dropped|blocked|completed)$/i.test(status)) {
-            ok(`task exists (skip): ${id} request="${norm.slice(0, 60)}…"  (--force 로 덮어쓰기)`);
-            return;
-          }
-        }
-      }
-    } catch {}
-  }
+  // T-0343: the duplicate check runs under the ID allocation's lock. Unlocked, it missed a matching task while
+  //   another tracker writer had progress-tracker.md renamed away for its POSIX publication (and while a concurrent
+  //   `task add` of the same text had not landed yet), and both adds created a task.
+  const norm = !has('--force') && text && text.trim() ? text.trim() : null;
+  let existing = null;
+  const activeWithRequest = () => {
+    const pt = path.join(absRoot(root), '.leerness', 'progress-tracker.md');
+    if (!exists(pt)) return null;
+    for (const line of read(pt).split(/\r?\n/)) {
+      if (!/^\|\s*T-\d{4,}\s*\|/.test(line)) continue;
+      const cells = line.split('|').slice(1, -1).map(s => s.trim());
+      if (cells.length < 3) continue;
+      const status = (cells[1] || '').toLowerCase();
+      if (cells[2] === norm && !/^(done|dropped|blocked|completed)$/i.test(status)) return cells[0];
+    }
+    return null;
+  };
   // 1.9.303 (UR-0043): ID 할당 + write 를 하나의 락으로 — 동시 task add 의 ID 충돌(lost-update) 방지.
-  const id = _withLock(progressPath(root), () => {
+  // T-0343: the tracker lock, then the plan lock, because nextId also counts the IDs in plan.md, and plan.md read
+  //   without its lock was missing while another writer published it on POSIX. (No extra capture: upsertProgress's
+  //   capture stays the first read of the tracker, which is the parsing input it checks before publishing.)
+  const id = _withTrackerAndPlanLocks(root, () => {
+    if (norm) { try { existing = activeWithRequest(); } catch {} if (existing) return null; }
     const newId = nextId(root, 'T');
     upsertProgress(root, { id: newId, status: _normTaskStatus(arg('--status','requested')), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next', _uiLang(root) === 'en' ? 'write the next action' : '다음 액션 작성') });   // 1.36.63: 기본값 언어 인지
     return newId;
   });
+  if (existing) { ok(`task exists (skip): ${existing} request="${norm.slice(0, 60)}…"  (--force 로 덮어쓰기)`); return; }
   // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 시 구조화 출력(코어 데이터는 이미 영속). 사람용 ok + cosmetic roadmap/interactive review 는 스킵.
   if (has('--json')) { log(JSON.stringify({ ok: true, id, status: _normTaskStatus(arg('--status', 'requested')), request: text })); return; }
   ok(`task added: ${id}`);
@@ -16034,8 +16074,7 @@ function taskUpdate(root, id) {
     }
   }
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
-  const rows = readProgressRows(root);
-  if (!rows.find(r => r.id === id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
+  if (!_taskRowExists(root, id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
   const patch = { id };
   if (arg('--status') !== null) patch.status = _normTaskStatus(arg('--status'));  // 1.11.3 (UR-0178): completed/verified → done 정규화
   if (arg('--evidence') !== null) patch.evidence = arg('--evidence');
@@ -16076,9 +16115,8 @@ function taskUpdate(root, id) {
 function taskDrop(root, id) {
   if (!_requireInit(root, 'task drop')) return;  // 1.9.396 (6번째 외부평가/codex P1-B): init 가드
   if (!id) return failJson(has('--json'), 'missing_id', 'id required');
-  const rows = readProgressRows(root);
   // 1.9.396 (6번째 외부평가/codex P1-B): 없는 task drop 시 가짜 row(request undefined) 생성 = 데이터 손상 → task update 와 동일하게 존재 확인 후 fail(no-op).
-  if (!rows.find(r => r.id === id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
+  if (!_taskRowExists(root, id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
   const _tdEn = _uiLang(root) === 'en';   // 1.36.63 (검수 #2)
   const evidence = arg('--reason', _tdEn ? 'dropped by user request' : '사용자 요청으로 제외');
   const nextAction = _tdEn ? 'none' : '없음';
@@ -16753,7 +16791,16 @@ function _jaccard(a, b) {
 
 function taskRelink(root) {
   root = absRoot(root);
-  const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+  if (!exists(path.dirname(planPath(root)))) return ok('미연결 milestone 없음');
+  // T-0343: with --apply, plan and tracker are read and the evidence written under the tracker lock, then the plan
+  //   lock. Read without them, plan.md was missing while another writer published it on POSIX, and relink reported
+  //   no unlinked milestone and applied nothing. Without --apply relink only prints suggestions and takes no lock
+  //   (as before; --dry-run takes no lock either).
+  const readPlan = () => exists(planPath(root)) ? read(planPath(root)) : '';
+  if (!has('--apply')) return _taskRelinkFrom(root, readPlan());
+  return _withTrackerAndPlanLocks(root, () => _taskRelinkFrom(root, readPlan()));
+}
+function _taskRelinkFrom(root, planText) {
   const milestones = [...planText.matchAll(/^### (M-\d{4,})\.[ \t]*(.+?)$/gm)]
     .map(m => ({ id: m[1], text: m[2].trim() }));
   const rows = readProgressRows(root);
@@ -16801,7 +16848,10 @@ function taskFixEvidence(root) {
   root = absRoot(root);
   // T-0333: 프로젝트 언어를 따른다(다른 명령과 같은 선택: --language · LEERNESS_LANG · manifest). 한국어 문구는 그대로.
   const t = (ko, en) => (_uiLang(root) === 'en' ? en : ko);
-  const rows = readProgressRows(root);
+  // T-0343: with --set the candidates come from a tracker snapshot read under its lock (unlocked, a tracker another
+  //   writer was publishing on POSIX read as empty and the command reported no candidates and wrote nothing). The
+  //   listing alone stays a lock-free read.
+  const rows = arg('--set', null) && exists(path.dirname(progressPath(root))) ? _withLock(progressPath(root), () => readProgressRows(root)) : readProgressRows(root);
   const candidates = rows.filter(r =>
     _isDoneStatus(r.status) && (   // T-0332: lazy detect 가 보고하는 done 행과 같은 술어
       !r.evidence ||
@@ -17439,10 +17489,17 @@ function lazyDetect(root, opts = {}) {
         // 1.9.411 (8번째 버그헌트, UR-0115): TODO 일괄 등록을 단일 read-modify-write 로 직렬화.
         //   종전: TODO 마다 nextId(plan+progress 전체 스캔) + upsertProgress(전체 read+write) → O(T × tracker크기) (다수 TODO 자동등록 시 O(N²) 행걸림).
         //   개선: 락 1회 안에서 rows 1회 읽고, 최대 T-id 1회 계산, 전부 push, 1회 write → O(N + T).
-        _withLock(progressPath(root), () => {
+        // T-0343: the plan's task IDs are read under the plan lock too (tracker lock, then plan lock). Read without it
+        //   while another writer published plan.md on POSIX, the file was missing and an ID that only the plan
+        //   referenced was assigned again.
+        //   The "untracked" decision is made again from the tracker read under the lock: the one above came from an
+        //   unlocked read, which saw an empty tracker during such a publication and called every TODO untracked.
+        const registered = _withTrackerAndPlanLocks(root, () => {
           const input = require('../lib/managed-text').captureTextEdit(progressPath(root));
           const header = progressHeader(root, input.text);
           const rows2 = readProgressRows(root, input.text);
+          const lockedText = rows2.map(r => `${r.request || ''} ${r.evidence || ''}`).join('\n');
+          if (!newTodos.some(t => !lockedText.includes(t.file))) return false;
           let maxT = _historyRetention.reservedTaskMax(root); const idRe = /\bT-(\d{4,})\b/g;
           const scanSrc = (exists(planPath(root)) ? read(planPath(root)) : '') + '\n' + rows2.map(r => r.id).join('\n');
           let mm; while ((mm = idRe.exec(scanSrc))) maxT = Math.max(maxT, Number(mm[1]));
@@ -17452,11 +17509,14 @@ function lazyDetect(root, opts = {}) {
             rows2.push({ id: `T-${String(maxT).padStart(4, '0')}`, status: 'requested', request: `TODO ${t.file}:${t.line}`, evidence: 'auto-tracked', nextAction: t.text.slice(0, 80), updated: today() });
           }
           writeProgressRows(root, header, rows2, { input });
+          return true;
         });
-        // known-todos에 추가 — 다음 detect에서 재카운트 안 하도록
-        const merged = [...knownList, ...newTodos.map(t => ({ ...t, ackAt: now() }))];
-        writeUtf8(knownPath, JSON.stringify(merged, null, 2) + '\n');
-        if (!jsonMode) ok(`${newTodos.length}개 TODO를 progress-tracker에 자동 등록 + known-todos.json 갱신`);
+        if (registered) {
+          // known-todos에 추가 — 다음 detect에서 재카운트 안 하도록
+          const merged = [...knownList, ...newTodos.map(t => ({ ...t, ackAt: now() }))];
+          writeUtf8(knownPath, JSON.stringify(merged, null, 2) + '\n');
+          if (!jsonMode) ok(`${newTodos.length}개 TODO를 progress-tracker에 자동 등록 + known-todos.json 갱신`);
+        }
       } else if (newTodos.length && !jsonMode) {
         log(`    💡 자동 등록: leerness lazy detect --auto-track`);
       }
@@ -20095,7 +20155,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
   // 1.33.2: opts.collect — verify-claim --all 집계 모드. 렌더/exit 없이 verdict 객체만 반환 (per-task 경로 무변경, collect 일 때만 분기).
   if (!taskId) { if (opts.collect) return { id: taskId, ok: false, reasons: ['no-id'] }; return failJson(_j, 'missing_args', _uiLang(root) === 'en' ? 'verify-claim <T-ID> required. ex: leerness verify-claim T-0008' : 'verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008'); }  // 1.30.5 (#156 F4)
-  const rows = readProgressRows(root);
+  const rows = opts.rows || readProgressRows(root);
   const activeRow = rows.find(r => r.id === taskId) || null;
   const retainedRow = /^T-\d{4,}$/.test(taskId) ? _historyRetention.findArchivedTask(root, taskId) : null;
   if (activeRow && retainedRow) {
@@ -20658,7 +20718,9 @@ function verifyClaimCmd(root, taskId, opts = {}) {
 //   정책상 승인한다. 행/사유 변경·새 실패·손상 파일은 fail-closed. --raw 는 원판정을 계속 감사한다.
 function _verifyClaimsAll(root, options = {}) {
   root = absRoot(root);
-  const activeRows = readProgressRows(root);
+  // T-0343: one tracker snapshot for the whole sweep, given by a caller that read it under the tracker lock
+  //   (baseline create) or read here; each claim below is judged against this snapshot, not a fresh read.
+  const activeRows = options.activeRows || readProgressRows(root);
   const retainedRows = _historyRetention.listArchivedTasks(root);
   _historyRetention.combineTaskRows(activeRows.filter(r => /^T-/.test(r.id || '')), retainedRows);
   const rows = [...activeRows, ...retainedRows];
@@ -20669,7 +20731,7 @@ function _verifyClaimsAll(root, options = {}) {
   // T-0302: the read-only sweep uses a single, lazily captured working-tree
   // view. Do not snapshot when project tests or a referee may edit that tree.
   const gitMemo = has('--run-tests') || has('--referee') ? null : {};
-  const results = doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true, runMemo, gitMemo }));
+  const results = doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true, runMemo, gitMemo, rows: activeRows }));
   const failed = results.filter(x => x && !x.ok);
   const raw = { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };
   return _claimsBaseline.applyBaseline(rows, raw, options.raw ? null : _claimsBaseline.loadBaseline(root), { raw: !!options.raw });
@@ -20744,8 +20806,11 @@ function claimBaselineCmd(root, sub) {
     failJson(json, 'baseline_exists', t('기존 claims-baseline.json은 불변 정책으로 취급되어 다시 계산하거나 덮어쓰지 않습니다. 새 정책이 필요하면 tracked 파일 변경을 별도 코드리뷰로 승인하세요.', 'existing claims-baseline.json is treated as immutable policy and will not be recalculated or overwritten. Approve any tracked policy-file change in a separate code review.'));
     return;
   }
-  const rows = readProgressRows(root);
-  const raw = _verifyClaimsAll(root, { raw: true });
+  // T-0343: the baseline is built from one tracker snapshot read under the tracker lock, and every claim is judged
+  //   against it. Read without the lock during another writer's POSIX publication, the tracker was missing and
+  //   create reported boundary_not_found.
+  const rows = _withLock(progressPath(root), () => readProgressRows(root));
+  const raw = _verifyClaimsAll(root, { raw: true, activeRows: rows });
   let built;
   try { built = _claimsBaseline.buildBaseline(rows, raw, { beforeTaskId, version: VERSION, createdAt: now() }); }
   catch (error) {
@@ -24527,16 +24592,18 @@ function captureProjectState(root) {
 
 function verifyRules(root) {
   root = absRoot(root);
+  // T-0343: the rules are read under the rules lock (and not nested in the cache lock below). Read without it while
+  //   another writer published the rules file on POSIX, it was missing and verify reported no active rule.
+  const rules = exists(rulesPath(root)) || exists(rulesPath(root) + '.lock') ? _withLock(rulesPath(root), () => readRules(root)) : [];
   // 활성 룰이 없으면 읽기 전용으로 끝낸다. cache 디렉터리를 잠금 부작용만으로 만들지 않는다.
-  if (!readRules(root).some(r => r.status === 'active')) return [];
+  if (!rules.some(r => r.status === 'active')) return [];
   // 1.36.169 (T-0108): baseline read → project capture → rule merge → baseline write를 한
   // cache transaction으로 직렬화한다. 종전에는 오래된 verify가 늦게 끝나 최신 baseline을
   // 되돌려 다음 세션이 이미 수행한 version/changelog 변경을 다시 pass로 오인할 수 있었다.
-  return _withLock(rulesCachePath(root), () => _verifyRulesLocked(root));
+  return _withLock(rulesCachePath(root), () => _verifyRulesLocked(root, rules));
 }
 
-function _verifyRulesLocked(root) {
-  const rules = readRules(root);
+function _verifyRulesLocked(root, rules) {
   const active = rules.filter(r => r.status === 'active');
   if (!active.length) return [];
   let prev = {};
@@ -25329,13 +25396,20 @@ async function releasePackCmd(root) {
   if (taskTitle && dryRun) log(`  (dry-run) task add 스킵: ${taskTitle}`);
   if (taskTitle && !dryRun) {
     const v = getCurrentVersion(root) || VERSION;
-    const id = nextId(root, 'T');
-    upsertProgress(root, {
-      id,
-      status: 'done',
-      request: taskTitle,
-      evidence: `release pack ${v} · ${new Date().toISOString().slice(0, 10)}`,
-      nextAction: '다음 라운드 후보 검토'
+    // T-0343: the ID is assigned and the row written under the tracker lock, then the plan lock, as task add does.
+    //   Unlocked, nextId could miss rows of a tracker another writer was publishing and reuse an ID.
+    //   The done gate inside upsertProgress returns at once for an ID with no bugfix receipt (lib/bugfix.js), so no
+    //   probe runs under these locks unless a receipt was declared for the ID before its task existed.
+    const id = _withTrackerAndPlanLocks(root, () => {
+      const newId = nextId(root, 'T');
+      upsertProgress(root, {
+        id: newId,
+        status: 'done',
+        request: taskTitle,
+        evidence: `release pack ${v} · ${new Date().toISOString().slice(0, 10)}`,
+        nextAction: '다음 라운드 후보 검토'
+      });
+      return newId;
     });
     ok(`task added: ${id} · ${taskTitle}`);
   }
@@ -31713,7 +31787,10 @@ function _writeTaskExportBaseline(root, items) {
 function taskExportCmd(root) {
   root = absRoot(root || process.cwd());
   const out = arg('--to', null);
-  const rows = readProgressRows(root);
+  // T-0343: an export that saves (--to, --json: the export and the sync baseline) reads the tracker under its lock.
+  //   Read without it during another writer's POSIX publication, the tracker was missing and [] was saved to both.
+  //   The summary output saves nothing and stays a lock-free read.
+  const rows = (out || has('--json')) && exists(path.dirname(progressPath(root))) ? _withLock(progressPath(root), () => readProgressRows(root)) : readProgressRows(root);
   const todos = rows.map(r => ({
     content: r.request,
     status: _todoStatusOf(r.status),
@@ -31784,7 +31861,10 @@ function taskSyncCmd(root) {
   let baselineChanged = false;
   const conflicts = [], ambiguous = [];
   const items = todos.filter(t => t && t.content);
-  const rows = readProgressRows(root);
+  // T-0343: tracker snapshots are read under the tracker lock. Read without it while another writer published the
+  //   tracker on POSIX, the file was missing, every item looked new and was imported again.
+  const lockedRows = () => _withLock(progressPath(root), () => readProgressRows(root));
+  const rows = lockedRows();
   const rowIds = new Set(rows.map(r => r.id));
   const fileCount = new Map();
   for (const t of items) fileCount.set(t.content, (fileCount.get(t.content) || 0) + 1);
@@ -31831,7 +31911,7 @@ function taskSyncCmd(root) {
     const status = t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'in-progress' : t.status === 'cancelled' ? 'dropped' : 'planned';
     // 결정은 지금의 행으로 한다 — 교차 검수 3차 P2: 시작할 때 읽은 상태로 정해, 앞 항목의 완료 게이트 probe 를 기다리는 사이
     //   다른 명령이 바꾼 행을 덮어썼다. 쓰기는 그 상태가 트래커 락 안에서도 그대로일 때만 한다(upsertProgress 의 expectStatus).
-    const existing = ids.length ? readProgressRows(root).find(r => r.id === ids[0]) || null : null;
+    const existing = ids.length ? lockedRows().find(r => r.id === ids[0]) || null : null;
     if (ids.length && !existing) continue;   // 그 사이 행이 없어졌다 — 쓰지 않는다
     let base = null;
     try {
@@ -31861,8 +31941,18 @@ function taskSyncCmd(root) {
           if (baseline && !mine.length) { baseline.push({ id: existing.id, request: String(t.content), status: after, todo: String(t.status) }); baselineChanged = true; }
         }
       } else {
-        const id = nextId(root, 'T');
-        upsertProgress(root, { id, status, request: t.content, evidence: 'todowrite-sync', nextAction: t.activeForm || '다음 액션' });
+        // T-0343: the ID is assigned and the row written under the tracker lock, then the plan lock, as task add
+        //   does. A row with this text that appeared since the snapshot is not imported a second time; it is
+        //   reported as ambiguous.
+        let now = [];
+        const id = _withTrackerAndPlanLocks(root, () => {
+          now = readProgressRows(root).filter(r => r.request === t.content).map(r => r.id);
+          if (now.length) return null;
+          const newId = nextId(root, 'T');
+          upsertProgress(root, { id: newId, status, request: t.content, evidence: 'todowrite-sync', nextAction: t.activeForm || '다음 액션' });
+          return newId;
+        });
+        if (!id) { ambiguous.push({ request: String(t.content), ids: now, items: fileCount.get(t.content) }); continue; }
         imported++;
         if (baseline) { baseline.push({ id, request: String(t.content), status, todo: String(t.status) }); baselineChanged = true; }
       }
@@ -33646,7 +33736,9 @@ async function main(runtimeEntered = false) {
     // _withLock: 동시 등록이 서로를 지우면 게이트가 조용히 꺼진다(실측 4→2)
     // _taskExists: 존재하지 않는 id 로 등록되면 오타 하나로 "보호받는 줄 아는" 무보호 상태가 된다(출하전 헌트 #3)
     return require('../lib/bugfix').bugfixCmd(_bfRoot || process.cwd(), _bfSub, _bfRest,
-      { has, arg, _withLock, _taskExists: (r, id) => readProgressRows(r).some(x => x.id === id), uiLang: _uiLang(_bfRoot || process.cwd()) });
+      // T-0343: a missing task is confirmed under the tracker lock (_taskRowExists), as task update/drop do; read
+      //   without it during another writer's POSIX publication, bugfix start reported task_not_found.
+      { has, arg, _withLock, _taskExists: (r, id) => _taskRowExists(r, id), uiLang: _uiLang(_bfRoot || process.cwd()) });
   }
   // 1.36.90 (P-0006, 사용자 승인 범위=대시보드만): .leerness 읽기 전용 대시보드. 코드는 npm 패키지가 소유하고
   //   `.leerness` 는 데이터만 갖는다 — 실행 코드를 설치 프로젝트에 복사하지 않는다(업그레이드 드리프트 차단).

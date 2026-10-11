@@ -5,7 +5,9 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
-const arena = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'leerness-ml02-'));
+// T-0343: the native real path, as the product resolves memory parents (lib/memory-parent.js). fs.realpathSync keeps an
+// 8.3 short name such as GitHub's C:\Users\RUNNER~1\..., and hooks that compare a renamed path by text then never fire.
+const arena = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'leerness-ml02-'));
 const entry = path.resolve(__dirname, '../bin/leerness.js');
 const PRIVATE = 'SYNTHETIC_PRIVATE_ML02';
 let count = 0, failed = 0, sequence = 0;

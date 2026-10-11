@@ -47,7 +47,9 @@ function check(label, condition, detail = '') {
 function fresh(name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `leerness-mcp-presence-${name}-`));
   roots.push(root);
-  const result = cp.spawnSync(process.execPath, [CLI, 'init', root, '--yes', '--minimal'], {
+  // T-0343: a new empty project takes the system locale's language (LANG on Linux, the Intl locale on Windows), and
+  //   the checks below read Korean text ("다른 세션 1"). Pin it, or an English-locale machine (every CI runner) fails.
+  const result = cp.spawnSync(process.execPath, [CLI, 'init', root, '--yes', '--minimal', '--language', 'ko'], {
     cwd: root,
     encoding: 'utf8',
     timeout: 120000,

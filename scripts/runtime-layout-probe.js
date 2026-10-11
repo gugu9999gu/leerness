@@ -111,7 +111,13 @@ function snapshot(root, heartbeatLock = null) {
 function noWrites(fn, heartbeatLock = null) {
   const before = snapshot(arena, heartbeatLock);
   try { return fn(); }
-  finally { assert.strictEqual(snapshot(arena, heartbeatLock), before, 'diagnosis changed fixture bytes or mtimes'); }
+  finally {
+    // T-0343: on Node 18-22, assert.strictEqual drops its message when the strings are longer than util.inspect
+    //   shows ("Values have same structure but are not reference-equal"), and the checks below match the message.
+    //   Compare here and fail with the message on every Node version (an AssertionError built with the strictEqual
+    //   operator drops it too).
+    if (snapshot(arena, heartbeatLock) !== before) assert.fail('diagnosis changed fixture bytes or mtimes');
+  }
 }
 function contract(report) {
   assert.strictEqual(report.schema, 'leerness.runtime-compatibility/v1');

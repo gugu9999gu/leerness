@@ -841,7 +841,9 @@ test('dangling execution-ledger symlinks are rejected without creating their tar
     assert.strictEqual(actual, base);
     assert.strictEqual(path.dirname(actual), temp);
     assert.match(path.basename(actual), /^leerness-ledger-dangling-[A-Za-z0-9]{6}$/);
-    removeFixture(actual);
+    // T-0343: removeFixture accepts paths below os.tmpdir() as spelled. On GitHub's Windows runners that is the 8.3
+    // form (C:\Users\RUNNER~1\...) and `actual` is below the long real path, so pass the same entry by that spelling.
+    removeFixture(path.join(os.tmpdir(), path.basename(actual)));
   }
 });
 

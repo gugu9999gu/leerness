@@ -103,7 +103,9 @@ const seed = lang => {
 let copies = 0;
 // Project folders have Hangul in their names, as a Korean user's folders may (review round 1), so the language checks
 // below read the output without them: the messages print full paths.
-const fresh = lang => { const dir = path.join(arena, 'p' + (++copies) + ' 한글'); fs.cpSync(seed(lang), dir, { recursive: true }); return dir; };
+// T-0343: the fixture folders have Korean names, and Node 22.23.3's fs.cpSync crashes on non-ASCII paths on Windows.
+const { copyTreeSync } = require('../lib/copy-tree');
+const fresh = lang => { const dir = path.join(arena, 'p' + (++copies) + ' 한글'); copyTreeSync(seed(lang), dir); return dir; };
 const withoutPaths = (text, ...dirs) => dirs.reduce((t, d) => t.split(d).join('<dir>').split(JSON.stringify(d).slice(1, -1)).join('<dir>'), String(text));
 const run = (args, extraEnv = {}, cwd = arena) => cp.spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true, env: { ...env, ...extraEnv } });
 const show = r => `exit ${r.status}\n${String(r.stdout || '').slice(0, 1500)}${String(r.stderr || '').slice(0, 600)}`;
