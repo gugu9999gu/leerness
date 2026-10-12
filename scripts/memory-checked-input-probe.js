@@ -63,7 +63,7 @@ function run(project,args,config) {
 }
 let serial=0;
 function fixture(surface,legacy=false) {
-  const project=path.join(temp,'case-'+(++serial)); fs.cpSync(seed,project,{recursive:true});
+  const project=path.join(temp,'case-'+(++serial)); require('../lib/copy-tree').copyTreeSync(seed,project);
   const p=ext=>path.join(project,'.leerness',surface+'.'+ext);
   const item=value=>surface==='decisions'?{date:'2026-01-01',title:value,decision:value,reason:null,alternatives:null,impact:null,extension:{keep:'line1\nline2'}}:{date:'2026-01-01',text:value,tag:null,extension:{keep:'line1\nline2'}};
   const body=value=>surface==='decisions'?`### 2026-01-01 — ${value}\n- Decision: ${value}\n`:`### 2026-01-01\n- Lesson: ${value}\n`;

@@ -36,7 +36,7 @@ const snapshot = root => Object.fromEntries([
 let sequence = 0;
 const fixture = () => {
   const root = path.join(temp, `case-${++sequence}`);
-  fs.cpSync(seed, root, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, root);
   return root;
 };
 const check = (name, fn) => {

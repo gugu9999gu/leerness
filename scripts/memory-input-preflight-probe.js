@@ -52,7 +52,7 @@ const syncProjection = (root, surface, entries) => fs.writeFileSync(projection(r
 let sequence = 0;
 function fixture() {
   const root = path.join(temp, `case-${String(++sequence).padStart(3, '0')}`);
-  fs.cpSync(seed, root, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, root);
   return root;
 }
 function run(root, args) {

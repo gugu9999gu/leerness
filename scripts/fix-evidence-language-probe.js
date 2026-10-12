@@ -31,7 +31,7 @@ const seed = lang => {
   return (seeds[lang] = dir);
 };
 let copies = 0;
-const fresh = lang => { const dir = path.join(arena, 'p' + (++copies)); fs.cpSync(seed(lang), dir, { recursive: true }); return dir; };
+const fresh = lang => { const dir = path.join(arena, 'p' + (++copies)); require('../lib/copy-tree').copyTreeSync(seed(lang), dir); return dir; };
 const runIn = (cwd, args, extraEnv = {}) => cp.spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true, env: { ...env, ...extraEnv } });
 const show = r => `exit ${r.status}\n${String(r.stdout || '').slice(0, 1500)}${String(r.stderr || '').slice(0, 600)}`;
 const addDone = (dir, title, evidence) => {

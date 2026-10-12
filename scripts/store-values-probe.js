@@ -31,6 +31,11 @@ const filter = process.argv.includes('--match') ? process.argv[process.argv.inde
 const test = (name, fn) => { if (filter && !name.includes(filter)) return; try { fn(); passed++; console.log('PASS ' + name); } catch (e) { failed++; console.error('FAIL ' + name + ': ' + (e && e.stack || e)); } };
 const run = (dir, args, extra = {}) => cp.spawnSync(process.execPath, [CLI, ...args], { cwd: dir, encoding: 'utf8', timeout: 300000, windowsHide: true, env: { ...env, ...extra } });
 const both = r => String(r.stdout || '') + String(r.stderr || '');
+// T-0347: the language checks read messages with the arena path masked. Below a temp folder with Hangul in its path
+//   (a Windows user name in Korean), a path in an English message is not Korean text, and in a Korean one it is not
+//   proof of Korean text.
+const arenaSpellings = [...new Set([arena, fs.realpathSync.native(arena)])];
+const prose = text => arenaSpellings.reduce((s, a) => s.split(a).join('<arena>'), String(text));
 const must = (r, label) => { assert.ifError(r.error); assert.strictEqual(r.status, 0, label + ' exit ' + r.status + '\n' + both(r)); return String(r.stdout || ''); };
 const json = (r, label) => { const out = must(r, label); try { return JSON.parse(out); } catch (e) { throw new Error(label + ': stdout is not one JSON object\n' + out.slice(0, 800)); } };
 // init takes most of the run time, so it runs once; each test works on its own copy, with no installed skills.
@@ -44,7 +49,7 @@ const project = () => {
     fs.mkdirSync(path.join(template, '.leerness', 'skills'));
   }
   const dir = path.join(arena, 'p' + (++seq));
-  fs.cpSync(template, dir, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(template, dir);
   return dir;
 };
 const store = (dir, ...parts) => path.join(dir, '.leerness', ...parts);
@@ -128,7 +133,7 @@ test('array fields that are not arrays do not crash skill commands, and skill le
     const r = run(dir, ['skill', 'learn', 'str-caps', '--capability', 'zebra import', '--language', lang, '--path', dir]);
     assert.strictEqual(r.status, 1, 'learn into a non-list must fail\n' + both(r));
     assert.ok(/capabilities/.test(both(r)) && !JS_ERROR.test(both(r)), both(r));
-    assert.ok(lang === 'en' ? !/[가-힣]/.test(both(r)) : /[가-힣]/.test(both(r)), lang + ' message: ' + both(r));
+    assert.ok(lang === 'en' ? !/[가-힣]/.test(prose(both(r))) : /[가-힣]/.test(prose(both(r))), lang + ' message: ' + both(r));
   }
   assert.strictEqual(fs.readFileSync(store(dir, 'skills', 'str-caps', 'skill.json'), 'utf8'), before);
   // skill use counts from zero when there is no count (it saved NaN as null); a count that is not a number and optimizations
@@ -295,9 +300,9 @@ test('malformed platform-constraints.json entries are reported as an invalid sto
   const dir = project();
   constraints(dir, shapes['aliases is a string']);
   const add = run(dir, ['constraints', 'add', 'acme', '--constraint', 'cost:x', '--language', 'en', '--path', dir]);
-  assert.ok(add.status === 1 && /damaged/.test(both(add)) && !/[가-힣]/.test(both(add)), both(add));
+  assert.ok(add.status === 1 && /damaged/.test(both(add)) && !/[가-힣]/.test(prose(both(add))), both(add));
   const note = json(run(dir, ['constraints', 'list', '--json', '--language', 'en', '--path', dir]), 'list --json en').note;
-  assert.ok(/damaged/.test(note) && !/[가-힣]/.test(note), note);
+  assert.ok(/damaged/.test(note) && !/[가-힣]/.test(prose(note)), note);
 });
 
 test('the graph page reads skill fields as text', () => {

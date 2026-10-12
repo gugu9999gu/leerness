@@ -140,7 +140,7 @@ function normalizedJson(label, result) {
 function cloneProjectState(target) {
   fs.mkdirSync(target, { recursive: true });
   fs.copyFileSync(path.join(project, 'package.json'), path.join(target, 'package.json'));
-  fs.cpSync(path.join(project, '.leerness'), path.join(target, '.leerness'), { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(path.join(project, '.leerness'), path.join(target, '.leerness'));
 }
 
 const surfaces = [

@@ -44,7 +44,7 @@ const project = () => {
     fs.mkdirSync(path.join(template, '.leerness', 'skills'));
   }
   const dir = path.join(arena, 'p' + (++seq));
-  fs.cpSync(template, dir, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(template, dir);
   return dir;
 };
 const store = (dir, name) => path.join(dir, '.leerness', name);

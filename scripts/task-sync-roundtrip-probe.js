@@ -37,7 +37,7 @@ const seed = () => {
   return (seedDir = dir);
 };
 let copies = 0;
-const fresh = () => { const dir = path.join(arena, 'p' + (++copies)); fs.cpSync(seed(), dir, { recursive: true }); return dir; };
+const fresh = () => { const dir = path.join(arena, 'p' + (++copies)); require('../lib/copy-tree').copyTreeSync(seed(), dir); return dir; };
 const runIn = (cwd, args) => cp.spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', timeout: 300000, windowsHide: true, env });
 const show = r => `exit ${r.status}\n${String(r.stdout || '').slice(0, 1500)}${String(r.stderr || '').slice(0, 600)}`;
 const jsonOf = (r, label) => { const out = String(r.stdout || ''); try { return JSON.parse(out.slice(out.indexOf('{'))); } catch { throw new Error(label + ': no JSON — ' + show(r)); } };

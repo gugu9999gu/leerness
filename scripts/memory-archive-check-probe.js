@@ -37,7 +37,7 @@ const code = r => { try { return JSON.parse(r.stdout).code; } catch { return '(n
 // A project holding `rows` (canonical JSON and its generated Markdown), dropped by `target`: the drop is the product's.
 function dropped(surface, rows, target) {
   const project = path.join(temp, `case-${++sequence}`);
-  fs.cpSync(seed, project, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, project);
   const hd = path.join(project, '.leerness');
   const f = { project, surface, json: path.join(hd, `${surface}.json`), md: path.join(hd, `${surface}.md`), archive: path.join(hd, `${surface}.archive.md`) };
   fs.writeFileSync(f.json, JSON.stringify(rows, null, 2) + '\n');

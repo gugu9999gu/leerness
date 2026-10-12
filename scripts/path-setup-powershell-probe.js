@@ -127,8 +127,14 @@ function hookRegistration(options = {}) {
   };
   return seen;
 }
+// T-0353: the parser check is a precondition for every run below. A script with a command in it (an appended
+// `reg.exe add HKCU\Environment ...`, say) would pass the text rewrite, and the final Path hash would only see the
+// damage afterwards; so when the script does not parse to zero commands, no registry run happens at all.
+let commandCheck = null;
+const scriptIsCommandFree = () => (commandCheck === null ? (commandCheck = commandsAndErrors(SCRIPT)) : commandCheck) === '0|0';
 // Runs _registerPath with the spawn hook. Returns its result, what the child printed, and the throwaway Path after.
 function register(bin, preset, options = {}) {
+  assert(scriptIsCommandFree(), 'the PATH script must parse to zero commands before any registry run: ' + commandCheck);
   presetTestPath(...preset);
   const seen = hookRegistration(options);
   let result;
@@ -192,6 +198,15 @@ try {
     assert.strictEqual(r.seen[0].stderr, word === 'ADDED' ? 'NOTIFY;' : '', 'the settings broadcast follows a write only');
     assert.strictEqual(r.after, after);
     assert.deepStrictEqual({ ok: r.result.ok, method: r.result.method }, { ok: true, method: word === 'ADDED' ? 'powershell-user-path' : 'already' });
+  });
+  // T-0353: the match is ordinal. PowerShell's -eq and -contains compare with the culture and ignore a soft hyphen,
+  // so an entry that only looks like the bin path counted as present.
+  test('an entry that differs from the bin path by an ignorable character is not taken as present', () => {
+    const softHyphen = String.fromCharCode(0xad);
+    const lookalike = BIN.slice(0, -1) + softHyphen + BIN.slice(-1);
+    const r = register(BIN, ['String', 'C:\\a;' + lookalike]);
+    assert.strictEqual(r.seen[0].stdout.toString(), 'ADDED\r\n', r.seen[0].stderr);
+    assert(r.after.startsWith('String=C:\\a;') && r.after.endsWith(';' + BIN), r.after);
   });
   test('a bin path with PowerShell syntax is added as text', () => {
     const hostile = "C:\\safe $(Write-Output INJECTED) `tick 'q' t\\";

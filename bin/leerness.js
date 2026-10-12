@@ -115,7 +115,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.298';
+const VERSION = '1.36.299';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -3998,7 +3998,7 @@ function _pathDiagnose() {
 //   do to the user Path (review round 1): the read expands %VAR% entries with this process's values, and the write
 //   stores REG_SZ, so a REG_EXPAND_SZ Path (the Windows default, e.g. %USERPROFILE%\...\WindowsApps) would lose its
 //   references. The script reads the raw value and its registry type and writes both back. An entry counts as present
-//   only as written (letter case aside): expanding %VAR% here would use this shell's variables, which new terminals may
+//   only as written (ordinal, letter case aside): expanding %VAR% here would use this shell's variables, which new terminals may
 //   not have, and could report EXISTS for a directory they cannot reach (review round 3; the owner chose this). The
 //   cost is a harmless second entry when the Path already names the directory through a variable. Deleting a variable
 //   that does not exist through SetEnvironmentVariable(..., 'User') writes nothing but sends the WM_SETTINGCHANGE that
@@ -4020,7 +4020,10 @@ function _winPathPsScript() {
       + "$kind = [Microsoft.Win32.RegistryValueKind]::ExpandString; "
       + "if ($names -contains 'Path') { $kind = $k.GetValueKind('Path') }; "
       + "if ($kind -ne [Microsoft.Win32.RegistryValueKind]::String -and $kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { throw ('the user Path has registry type ' + $kind) }; "
-      + "if ($raw.Split(';') -contains $b) { [Console]::Out.WriteLine('EXISTS') } "
+      // T-0353: ordinal, case-insensitive. -contains compares with the culture, which ignores characters such as a
+      //   soft hyphen (U+00AD), so 'C:\np<U+00AD>m' counted as 'C:\npm' (measured in Windows PowerShell 5.1 and 7).
+      + "$found = $false; foreach ($p in $raw.Split(';')) { if ([string]::Equals($p, $b, [StringComparison]::OrdinalIgnoreCase)) { $found = $true } }; "
+      + "if ($found) { [Console]::Out.WriteLine('EXISTS') } "
       + "else { $nu = if ($raw -eq '') { $b } else { $raw.TrimEnd(';') + ';' + $b }; "
       + "$k.SetValue('Path', $nu, $kind); "
       + "[Environment]::SetEnvironmentVariable('LEERNESS_PATH_SETUP_NOTIFY', $null, 'User'); "
@@ -26493,7 +26496,12 @@ function _createArchive(cwd, sourceDir, outPath) {
   // 1) tar.gz (POSIX 환경에서 가장 안정)
   if (/\.(tgz|tar\.gz)$/i.test(outPath)) {
     tried.push('tar');
-    const r = _spawnPortableArgvSync('tar', ['-czf', outPath, sourceDir], {
+    // T-0352: the archive is named relative to cwd, with forward slashes. Git for Windows' GNU tar, first on PATH in
+    //   Git Bash, reads the drive letter of an absolute Windows path as a remote host ("Cannot connect to C:") and
+    //   failed, so the .zip fallback ran instead. bsdtar accepts either form. A path on another drive stays absolute.
+    const relativeOut = path.relative(cwd, outPath);
+    const tarOut = relativeOut && !path.isAbsolute(relativeOut) ? relativeOut.split(path.sep).join('/') : outPath;
+    const r = _spawnPortableArgvSync('tar', ['-czf', tarOut, sourceDir], {
       encoding: 'utf8', timeout: 30000, shell: false, cwd
     });
     if (r.status === 0 && exists(outPath)) return { ok: true, path: outPath, method: 'tar', tried };
@@ -34146,6 +34154,8 @@ module.exports = {
   _cliMutationClass, _mustRemainReadOnly, _runtimeProjectRoot,
   _npmGlobalBin, _dirInPath, _leernessResolvable, _pathDiagnose, _registerPath,
   _winPathPsScript, _unixPathBlock, pathSetupCmd,
+  // T-0352: the skill publish archive chain (tar, then the zip fallbacks), for scripts/skill-archive-probe.js.
+  _createArchive,
   _isSecretKey, compareVer, parseHarnessVersion,
   // 1.9.257: CJK 인코딩 분류 (UR-0014 계열) 순수 함수 — 단위 테스트
   _classifyCJK, _riskLabel,

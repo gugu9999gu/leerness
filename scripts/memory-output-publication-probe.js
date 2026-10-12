@@ -107,7 +107,7 @@ function entry(surface, value) {
 function render(surface, entries) { return surface === 'decisions' ? _renderDecisionsMd(entries) : _renderLessonsMd(entries); }
 function fixture(surface, options = {}) {
   const project = path.join(temp, `case-${++sequence}`);
-  fs.cpSync(seed, project, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, project);
   const hd = path.join(project, '.leerness');
   const json = path.join(hd, `${surface}.json`);
   const md = path.join(hd, `${surface}.md`);

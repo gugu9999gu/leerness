@@ -5,7 +5,9 @@ const os=require('os'),runtime=require('../lib/runtime-writes'),{attachMemoryRec
 // Node 18 writeFileSync dispatches through the later intercepted writeSync.
 // Capture primitive fixture writers before installing interception, so descriptor
 // changes represent an external writer rather than the guarded operation itself.
-const rawOpen=fs.openSync.bind(fs),rawWriteSync=fs.writeSync.bind(fs),rawClose=fs.closeSync.bind(fs);
+const rawOpen=fs.openSync.bind(fs),rawWriteSync=fs.writeSync.bind(fs),rawClose=fs.closeSync.bind(fs),rawRename=fs.renameSync.bind(fs);
+const rawSymlink=fs.symlinkSync.bind(fs),rawUnlink=fs.unlinkSync.bind(fs),rawRmdir=fs.rmdirSync.bind(fs);
+const rawUnlinkLink=link=>{try{rawUnlink(link);}catch{rawRmdir(link);}};
 function rawWrite(file,text){const fd=rawOpen(file,'w');try{rawWriteSync(fd,Buffer.from(text));}finally{rawClose(fd);}}
 const descriptor={schema:'leerness.runtime-layout/v1',schemaVersion:1,scope:'project-local',generation:1,layout:'legacy',requiredWriterProtocol:1};
 // Begin in the supported implicit legacy layout. Creating an incompatible
@@ -34,6 +36,71 @@ test('latched recovery writes bytes outside the project and leaves the latch in 
 test('a temp directory inside the project is rejected before producer work',()=>{
   const p=project(),original=os.tmpdir;let called=false;latch(p,()=>{
     os.tmpdir=()=>p;try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{os.tmpdir=original;}
+  });assert.equal(called,false);
+});
+// T-0349: the same folder spelled so that its text is outside the project: through a link placed outside it, and
+// on Windows by its 8.3 short name. The guard compared spellings only and let both through.
+function shortName(p){const r=cp.spawnSync(process.env.ComSpec||'cmd.exe',['/d','/s','/c',`"for %I in ("${p}") do @echo %~sI"`],{encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true});const out=String(r.stdout||'').trim();return r.status===0&&out&&!out.includes('"')&&out.toLowerCase()!==p.toLowerCase()?out:null;}
+const insideSpellings=[['a link outside the project',(p,inside)=>{const link=p+'-temp-link';fs.symlinkSync(inside,link,process.platform==='win32'?'junction':'dir');return link;}],
+  ...(process.platform==='win32'?[['its 8.3 short name',(p,inside)=>shortName(inside)]]:[])];
+for(const [name,spell] of insideSpellings){
+  const p=project(),inside=path.join(p,'temp-folder-with-a-long-name');fs.mkdirSync(inside);const spelled=spell(p,inside);
+  if(!spelled){console.log('SKIP a temp folder inside the project named by '+name+' (no such spelling here)');continue;}
+  test('a temp folder inside the project named by '+name+' is rejected before producer work',()=>{
+    assert(path.relative(p,spelled).startsWith('..'),'the spelling must look outside the project: '+spelled);
+    const original=os.tmpdir;let called=false;latch(p,()=>{
+      os.tmpdir=()=>spelled;try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{os.tmpdir=original;}
+    });assert.equal(called,false);assert.deepEqual(fs.readdirSync(inside),[]);
+  });
+}
+// T-0349 review: a project folder renamed away while the operation runs has no real path. Its recovery must still be
+// written outside it, as before; only a temp folder that does not resolve is refused.
+test('a project renamed away during the operation still gets its recovery outside it',()=>{
+  const p=project(),moved=p+'-moved';let dir;latch(p,()=>{
+    rawRename(p,moved);try{dir=runtime.writeExternalRecoveryStream(p,sink=>sink.write('before.bin',put=>put(Buffer.from('before'))),8);}finally{rawRename(moved,p);}
+  });
+  external.push(dir);assert(path.relative(p,dir).startsWith('..'));assert.equal(fs.readFileSync(path.join(dir,'before.bin'),'utf8'),'before');
+});
+// Review round 1: a child folder whose name starts with two dots is inside the project, named directly and through a
+// link outside the project (only the real paths then show it).
+for(const [name,spell] of [['directly',(p,inside)=>inside],['through a link outside the project',(p,inside)=>{const link=p+'-dots-link';fs.symlinkSync(inside,link,process.platform==='win32'?'junction':'dir');return link;}]]){
+  test('a temp folder inside the project whose name starts with two dots, named '+name+', is rejected before producer work',()=>{
+    const p=project(),inside=path.join(p,'..temp');fs.mkdirSync(inside);const spelled=spell(p,inside),original=os.tmpdir;let called=false;latch(p,()=>{
+      os.tmpdir=()=>spelled;try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{os.tmpdir=original;}
+    });assert.equal(called,false);assert.deepEqual(fs.readdirSync(inside),[]);
+  });
+}
+test('a project path that fails to resolve for a reason other than absence is refused',()=>{
+  const p=project(),original=fs.realpathSync.native;let called=false;latch(p,()=>{
+    fs.realpathSync.native=function(q,...rest){if(path.resolve(String(q))===path.resolve(p))throw Object.assign(new Error('EIO: simulated'),{code:'EIO'});return original.call(this,q,...rest);};
+    try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{fs.realpathSync.native=original;}
+  });assert.equal(called,false);
+});
+// Review round 2: the temp link is retargeted into the project after it was checked (here, while the guard resolves
+// the project path). The bundle must still go below the folder that was checked.
+test('a temp link retargeted into the project after the check still gets the recovery outside the project',()=>{
+  const p=project(),inside=path.join(p,'temp-after-retarget');fs.mkdirSync(inside);
+  const safe=fs.mkdtempSync(path.join(path.dirname(p),'safe-temp-')),link=p+'-temp-retarget-link',type=process.platform==='win32'?'junction':'dir';
+  rawSymlink(safe,link,type);
+  const originalTmp=os.tmpdir,originalReal=fs.realpathSync.native;let dir,retargeted=false;
+  latch(p,()=>{
+    os.tmpdir=()=>link;
+    fs.realpathSync.native=function(q,...rest){if(!retargeted&&path.resolve(String(q))===path.resolve(p)){retargeted=true;rawUnlinkLink(link);rawSymlink(inside,link,type);}return originalReal.call(this,q,...rest);};
+    try{dir=runtime.writeExternalRecoveryStream(p,sink=>sink.write('before.bin',put=>put(Buffer.from('before'))),8);}finally{os.tmpdir=originalTmp;fs.realpathSync.native=originalReal;}
+  });
+  external.push(dir);assert(retargeted,'the link must have been retargeted during the check');
+  assert.deepEqual(fs.readdirSync(inside),[]);assert.equal(fs.readFileSync(path.join(dir,'before.bin'),'utf8'),'before');
+  assert(path.relative(fs.realpathSync.native(p),fs.realpathSync.native(dir)).split(path.sep)[0]==='..','the recovery must be outside the project: '+dir);
+});
+test('a missing temp folder is refused when the project path is gone too',()=>{
+  const p=project(),moved=p+'-moved-too',original=os.tmpdir;let called=false;latch(p,()=>{
+    rawRename(p,moved);os.tmpdir=()=>path.join(path.dirname(p),'missing-temp-folder');
+    try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{os.tmpdir=original;rawRename(moved,p);}
+  });assert.equal(called,false);
+});
+test('a temp folder that does not resolve is refused before producer work',()=>{
+  const p=project(),original=os.tmpdir;let called=false;latch(p,()=>{
+    os.tmpdir=()=>path.join(path.dirname(p),'missing-temp-folder');try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{os.tmpdir=original;}
   });assert.equal(called,false);
 });
 test('invalid chunk admission occurs before creating an external namespace',()=>{

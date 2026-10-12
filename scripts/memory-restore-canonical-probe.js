@@ -54,7 +54,7 @@ function check(name, fn) {
 }
 function fixture(surface) {
   const project = path.join(temp, `case-${++sequence}`);
-  fs.cpSync(seed, project, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, project);
   const file = ext => path.join(project, '.leerness', `${surface}.${ext}`);
   const identity = surface === 'decisions' ? 'title' : 'text';
   const item = (value, extra = {}) => surface === 'decisions'

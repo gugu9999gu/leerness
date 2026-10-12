@@ -39,7 +39,7 @@ function run(project, args) {
 function success(r) { assert.strictEqual(r.status, 0, String(r.stdout || r.stderr).slice(-1000)); }
 function fixture(surface) {
   const project = path.join(temp, `case-${++sequence}`);
-  fs.cpSync(seed, project, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, project);
   const hd = path.join(project, '.leerness');
   const p = ext => path.join(hd, `${surface}.${ext}`);
   const entry = surface === 'decisions'

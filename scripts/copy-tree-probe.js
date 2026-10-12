@@ -50,6 +50,23 @@ try {
     assert.throws(() => copyTreeSync(from, to), error => error.code === 'EEXIST');
     assert.strictEqual(fs.readFileSync(path.join(to, 'bytes.bin'), 'utf8'), 'kept');
   });
+  // T-0347: a relative directory link must still name its sibling inside the copy. On Windows the copy is a junction,
+  // whose target must be absolute; Node resolved the relative one against the process cwd.
+  {
+    const from = path.join(arena, 'src-relative-link'), to = path.join(arena, 'dst-relative-link');
+    fs.mkdirSync(path.join(from, 'sibling'), { recursive: true });
+    fs.writeFileSync(path.join(from, 'sibling', 'mark.txt'), 'source');
+    let made = true;
+    try { fs.symlinkSync('sibling', path.join(from, 'link'), 'dir'); }
+    catch (error) { if (error.code !== 'EPERM') throw error; made = false; }
+    if (!made) console.log('SKIP a relative directory link (creating one needs the symlink privilege here)');
+    else test('a relative directory link names its sibling inside the copy', () => {
+      copyTreeSync(from, to);
+      fs.writeFileSync(path.join(to, 'sibling', 'mark.txt'), 'copy');
+      assert.strictEqual(fs.readFileSync(path.join(to, 'link', 'mark.txt'), 'utf8'), 'copy');
+      assert.strictEqual(fs.realpathSync.native(path.join(to, 'link')), fs.realpathSync.native(path.join(to, 'sibling')));
+    });
+  }
   test('a missing source is an error, not an empty copy', () => {
     assert.throws(() => copyTreeSync(path.join(arena, 'missing'), path.join(arena, 'dst-missing')), error => error.code === 'ENOENT');
     assert.ok(!fs.existsSync(path.join(arena, 'dst-missing')));

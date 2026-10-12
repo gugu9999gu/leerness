@@ -52,11 +52,18 @@ function restoreMcp(spelled, s) {
   assert(!r.error && !r.signal, r.error && r.error.message); assert.equal(r.status,0,r.stderr);
   return JSON.parse(r.stdout.trim().split(/\r?\n/)[0]);
 }
+// T-0355: a spelling this machine cannot give counts as absent: a test arena on a UNC path has no drive letter, and
+// a link may be refused there. The MCP and resolve-check tests take the first non-canonical spelling that exists.
+const trySpell = (spell, p) => { try { return spell(p); } catch { return null; } };
+function alternate(p) {
+  for (const [name, spell] of spellings.slice(1)) { const spelled = trySpell(spell, p); if (spelled && spelled !== p) return [name, spelled]; }
+  return null;
+}
 
 for (const s of ['decisions','lessons']) {
   let expected = null;
   for (const [name, spell] of spellings) {
-    const p = make(s), spelled = spell(p);
+    const p = make(s), spelled = trySpell(spell, p);
     if (spelled === null) { console.log(`SKIP ${s}: policy restore through ${name} (this volume or path gives no such spelling)`); continue; }
     test(`${s}: policy restore through ${name} matches the restore through the real path`, () => {
       if (name !== 'as created') assert.notStrictEqual(spelled, p, 'the spelling must differ from the real path');
@@ -68,10 +75,11 @@ for (const s of ['decisions','lessons']) {
       if (expected === null) expected = after; else assert.deepEqual(after, expected);
     });
   }
-  const [mcpName, mcpSpell] = spellings[1]; // a lowercase drive letter on Windows, a symlink elsewhere
+  const pm = make(s), alt = alternate(pm);
+  if (!alt) { console.log(`SKIP ${s}: MCP policy restore (this volume or path gives no non-canonical spelling)`); continue; }
+  const [mcpName, spelled] = alt; // a lowercase drive letter on Windows when there is one, a symlink elsewhere
   test(`${s}: MCP policy restore through ${mcpName}`, () => {
-    const p = make(s), spelled = mcpSpell(p);
-    assert(spelled && spelled !== p, 'the MCP case needs a non-canonical spelling');
+    const p = pm;
     const reply = restoreMcp(spelled, s);
     assert(reply.result, JSON.stringify(reply)); assert.equal(reply.result.isError, false, JSON.stringify(reply));
     assert.deepEqual(state(p, s).rows.map(entry => entry.title || entry.text), ['base','revive']);
@@ -80,9 +88,11 @@ for (const s of ['decisions','lessons']) {
 // The capture names files under the given spelling only after that spelling's workspace resolves to the resolved
 // one. Make it resolve elsewhere (as a swapped link would between the two resolutions) and the capture must refuse
 // before reading a file; without the check the files of the other folder would be measured as this project's.
-test('a spelled workspace that resolves to another folder is refused before any file is read', () => {
+const resolveCheckProject = make('decisions'), resolveCheckAlternate = alternate(resolveCheckProject);
+if (!resolveCheckAlternate) console.log('SKIP a spelled workspace that resolves to another folder (no non-canonical spelling here)');
+else test('a spelled workspace that resolves to another folder is refused before any file is read', () => {
   const { inspectMemoryFootprint } = require('../lib/memory-footprint');
-  const p = make('decisions'), other = make('decisions'), spelled = spellings[1][1](p);
+  const p = resolveCheckProject, other = make('decisions'), spelled = resolveCheckAlternate[1];
   const limits = JSON.stringify(options().observation);
   assert.equal(inspectMemoryFootprint(spelled,'decisions',limits).ok, true, 'control: the spelling itself is accepted');
   const workspace = path.join(spelled,'.leerness'), same = (a, b) => win ? a.toLowerCase() === b.toLowerCase() : a === b;

@@ -20,7 +20,7 @@ function versionFromSource(file) {
 }
 
 function copyFixture(root) {
-  for (const dir of ['bin', 'lib']) fs.cpSync(path.join(sourceRoot, dir), path.join(root, dir), { recursive: true });
+  for (const dir of ['bin', 'lib']) require('../lib/copy-tree').copyTreeSync(path.join(sourceRoot, dir), path.join(root, dir));
   for (const file of ['package.json', 'README.md']) fs.copyFileSync(path.join(sourceRoot, file), path.join(root, file));
   fs.mkdirSync(path.join(root, '.leerness'), { recursive: true });
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;

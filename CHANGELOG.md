@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.36.299 - 2026-10-12
+
+- Fixed: on Windows, `leerness skill publish` made a `.zip` instead of the `.tgz` when Git for Windows' GNU tar came first on PATH, as it does in Git Bash and in agent shells built on it (T-0352).
+  - Cause: the archive step gave `tar -czf` the absolute output path, and GNU tar reads the drive letter `C:` as a remote host ("Cannot connect to C:"). The step failed, and the Compress-Archive fallback made a `.zip`.
+  - The archive is now named relative to the `.leerness` folder, with forward slashes (`skills-publish-tarball/leerness-skills-<version>.tgz`). Windows' own tar (bsdtar) accepts that form too.
+- Fixed: on Windows, `leerness path-setup --apply` could take a different folder for the npm bin folder and not add it (T-0353).
+  - Cause: it compared Path entries with PowerShell's `-contains`. That comparison uses the culture and ignores characters such as a soft hyphen (U+00AD), so an entry that differed from the bin folder only by such a character counted as present. Measured in Windows PowerShell 5.1 and PowerShell 7.
+  - Entries are now compared by ordinal value, letter case aside.
+- Fixed: the recovery bundle that a memory write saves to the temp folder after a runtime-layout failure could be written inside the project (T-0349). The check that keeps it out compared the project and the temp folder as spelled.
+  - When the temp folder was named by an 8.3 short name (GitHub's Windows runners use `C:\Users\RUNNER~1\...`) or reached through a link, it could lie inside the project while its spelling did not.
+  - The check also took a folder inside the project whose name starts with two dots, such as `..temp`, for a folder outside it.
+  - The check now also compares their real paths, and only a first path part of exactly `..` counts as outside. A temp folder that does not resolve is refused, and so is a project path that fails to resolve for any reason other than being gone. A project path that no longer exists, because the project was renamed or removed during the operation, is compared as spelled only, as before, so its recovery is still saved.
+  - The bundle is now written below the temp folder's real path, the one that was checked, and the recovery folder it reports is named by that path. A temp link retargeted into the project after the check can no longer carry the bundle there.
+- Tests (T-0347, T-0349, T-0352, T-0353, T-0354, T-0355):
+  - `scripts/skill-archive-probe.js` (`npm run test:skill-archive`, in `test`, `test:core` and `test:fast`) asks the archive step for the `.tgz` with each tar the machine has first on PATH, and checks that tar made it, with the expected entries. Here that is Windows' bsdtar and Git for Windows' GNU tar. With the old absolute path it passes 2 of 6.
+  - `scripts/memory-recovery-external-probe.js` (21 tests) adds nine. The old check fails eight of them:
+    - A temp folder inside the project, named through a link outside the project or by its 8.3 short name, must be refused before any recovery work. So must a folder inside the project whose name starts with two dots, named directly or through a link.
+    - A temp folder that does not resolve must be refused, also when the project path is gone. So must a project path that fails to resolve with an error other than "not found" (simulated). With the old check, an unresolvable temp folder failed the recovery later, with ENOENT.
+    - A temp link retargeted into the project while the check runs (simulated) must not carry the bundle into the project.
+    - A project renamed away during the operation must still get its recovery outside it. The old check passes this one.
+  - `scripts/path-setup-powershell-probe.js` (19 checks):
+    - An entry that differs from the bin folder by a soft hyphen must not count as present. The old script fails it.
+    - Every registry run now requires the parser check first. With a command injected into the script, no registry run happened. With that requirement removed, the injected command ran.
+  - `scripts/memory-policy-root-spelling-probe.js`: the MCP checks and the resolve check use the first non-canonical spelling the machine has. Before, they always used the lowercase drive letter, which a UNC path does not have. They print SKIP when there is none.
+  - The shared support of the memory probes (`scripts/memory-migration-test-support.js`) now removes its temp arena when every test passed, and keeps it when one failed. Links inside the arena are removed as links first, so their targets are left alone. An arena, or a folder in it, that was replaced with a link is neither walked nor removed. This holds also when the replacement happens while `finish()` runs: each folder must still resolve inside the arena just before it is listed and before a link in it is removed. A process that kept replacing folders during `finish()` could still race those checks; `finish()` runs after the tests.
+    - Before, every run left one arena (1,206 were in this machine's temp folder on 2026-10-11).
+    - `scripts/memory-arena-cleanup-probe.js` (`npm run test:memory-arena-cleanup`, in `test`, `test:core` and `test:fast`) checks five cases with links to folders outside the arena, three of them with a replacement before or during `finish()`. On the old support all five fail: the removal case because nothing is removed, the failing-run and replace-before cases only on the note that `finish()` now prints, and the two replacement-during cases because the old `finish()` never looks at the arena, so the replacement never happens.
+  - The 24 `fs.cpSync` copies in 21 test files now use `lib/copy-tree.js` (T-0347). On Windows with Node 22.23.3, `fs.cpSync` ends the process with an access violation when a path has non-ASCII letters, as the temp folder does for a Windows user name in Korean.
+    - Measured with the temp folder set to `...\AppData\Local\Temp\임시한글` on Node 22.23.3: on the old code all 21 files crashed (Segmentation fault, exit 139 in Git Bash). With the change, 20 passed.
+    - The 21st, `scripts/store-values-probe.js`, failed one language check, which read the Hangul in the temp path as Korean text. Its language checks now mask the test folder's path first, and it passes.
+  - On Windows, `lib/copy-tree.js` now resolves a relative directory link against the copy's own folder, so the copied link names its sibling in the copy. Before, Node resolved the junction target against the process's working folder. On POSIX the relative link is copied as written and names the same sibling. `fs.cpSync` instead points such a link back into the source tree.
+    - `scripts/copy-tree-probe.js` checks this where links can be made. A Windows machine without the symlink privilege skips it.
+
 ## 1.36.298 - 2026-10-11
 
 - Fixed: on Windows, `leerness path-setup --apply` never registered the npm bin folder in the user PATH (T-0351). This was so from 1.9.254.

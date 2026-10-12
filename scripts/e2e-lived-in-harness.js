@@ -225,7 +225,7 @@ if (require.main === module) {
     ]) {
       const copy = path.join(root, 'copy-' + (++n));
       covered.push(what);
-      fs.cpSync(dir, copy, { recursive: true });
+      require('../lib/copy-tree').copyTreeSync(dir, copy);
       t(`fixture: ${what} changed alone is the one reported missing (#${n})`, () => {
         change(copy);
         assert.deepStrictEqual(livedInMissing(copy).map(m => m.split(' (')[0]), [what]);
@@ -235,7 +235,7 @@ if (require.main === module) {
     // Control for the whole-id match: the id in Markdown emphasis still names the task.
     t('fixture: a handoff naming the task as __id__ still counts', () => {
       const copy = path.join(root, 'copy-emphasis');
-      fs.cpSync(dir, copy, { recursive: true });
+      require('../lib/copy-tree').copyTreeSync(dir, copy);
       edit(copy, 'session-handoff.md', built.ids.task1, '__' + built.ids.task1 + '__');
       assert.deepStrictEqual(livedInMissing(copy), []);
     });

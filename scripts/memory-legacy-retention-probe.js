@@ -44,7 +44,7 @@ function fileState(file) {
 }
 function fixture(surface) {
   const project = path.join(temp, `case-${++sequence}`);
-  fs.cpSync(seed, project, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, project);
   const p = ext => path.join(project, '.leerness', `${surface}.${ext}`);
   const entry = value => surface === 'decisions'
     ? { date: '2026-09-12', title: value, decision: value, reason: 'reason', alternatives: null, impact: null }
@@ -131,7 +131,7 @@ try {
     });
     check(`${surface} fresh init remains usable and retains its template`, () => {
       const project = path.join(temp, `case-${++sequence}`);
-      fs.cpSync(seed, project, { recursive: true });
+      require('../lib/copy-tree').copyTreeSync(seed, project);
       const md = path.join(project, '.leerness', `${surface}.md`);
       const original = fs.existsSync(md) ? fs.readFileSync(md, 'utf8') : '';
       success(run(project, commands(surface).add));

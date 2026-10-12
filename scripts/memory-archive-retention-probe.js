@@ -40,7 +40,7 @@ function run(project, args) {
 function success(r) { assert.strictEqual(r.status, 0, String(r.stdout || r.stderr).slice(-1000)); }
 function fixture(surface, entry) {
   const project = path.join(temp, `case-${++sequence}`);
-  fs.cpSync(seed, project, { recursive: true });
+  require('../lib/copy-tree').copyTreeSync(seed, project);
   const hd = path.join(project, '.leerness');
   const json = path.join(hd, `${surface}.json`);
   const md = path.join(hd, `${surface}.md`);
@@ -176,7 +176,7 @@ try {
   });
   check('a lesson saved with surrounding spaces through the CLI drops and restores exactly', () => {
     const project = path.join(temp, `case-${++sequence}`);
-    fs.cpSync(seed, project, { recursive: true });
+    require('../lib/copy-tree').copyTreeSync(seed, project);
     const json = path.join(project, '.leerness', 'lessons.json');
     success(run(project, ['lesson', 'save', ' existing ']));
     const saved = JSON.parse(fs.readFileSync(json, 'utf8'));
