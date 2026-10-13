@@ -115,7 +115,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.300';
+const VERSION = '1.36.301';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -1582,8 +1582,11 @@ function syncReadme(root, versionOverride = null) {
       const e2ePath = path.join(root, 'scripts', 'e2e.js');
       if (exists(e2ePath)) {
         // 1.9.271: e2e 테스트 수 = `total++;` 블록 + `run(...)` 호출 (run 헬퍼가 내부에서 total++ 수행) → 실제 결과와 일치.
+        // T-0359: leerness's own e2e.js counts each case inside its CI shard guard (`if (e2eShard.take('<key>')) {`
+        //   followed by `  total++;`). Those count too, so guarding the cases does not shrink the estimate.
         const body = read(e2ePath);
-        const total = (body.match(/^total\+\+;/gm) || []).length + (body.match(/^run\(/gm) || []).length;
+        const total = (body.match(/^total\+\+;/gm) || []).length + (body.match(/^run\(/gm) || []).length
+          + (body.match(/^if \(e2eShard\.take\('[^'\r\n]+'\)\) \{\r?\n {2}total\+\+;/gm) || []).length;
         if (total > 0) {
           updated = updated.replace(/badge\/e2e-(\d+)%2F(\d+)-success/g, `badge/e2e-${total}%2F${total}-success`);
         }

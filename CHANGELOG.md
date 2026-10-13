@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.36.301 - 2026-10-14
+
+- Changed: public CI runs its long work in parallel shards (T-0359). 1.36.300's CI run (38332288454) took five hours: each Windows gate job (199-300 min) ran e2e.js after `test:commands`, and the Windows fast job took 46 min (79 min in 1.36.299's run 38193803239).
+  - `scripts/ci-shard.js` splits the work. Every shard of a job computes the same split from the same inputs: the units in source order, weighted by measured seconds (`scripts/ci-shard-weights.json`), placed largest first on the least-loaded shard. So the shards of one job run each unit exactly once.
+  - e2e.js: each top-level case now starts with `if (e2eShard.take('<key>')) {`, with its `total++;` inside. `LEERNESS_E2E_SHARD=i/k` runs shard i of k; without it every case runs, as before.
+  - Cases that mention the shared fixture project or its helpers (`tmp`, `run`, `dsPath`, `dsText`, `secretFile`; 104 of 423, a text match that errs toward grouping) run together in one shard, in file order, because one case leaves state for the next. A first version without this group failed three of them on Linux.
+  - The cases start after the line `// e2e-shard: cases start here`. An e2e run fails when a guard is malformed or repeated, a guard is not reached exactly once, or code below that line and outside a case opens a block, a control-flow block or an immediately invoked function, or counts a case. Whatever wraps a case that lost its guard, its `total++` is outside a guard. Each shard still runs the smoke preamble above the line and the run-wide checks at the end (runtime DEP0190 warnings, repository isolation); those checks end the file, and each of their counters is marked `// e2e-shard: run-wide check`.
+  - `test:commands` and `test:fast` run as leaves: `node ./scripts/ci-shard.js npm <script> i/k` expands `npm run` steps and runs that shard's `node` leaves in order. It refuses any other step shape and any script with a `pre` or `post` lifecycle script. Unlike an `&&` chain, it runs every leaf of its shard and then fails if any failed.
+  - The workflow: e2e in 4 shards on each Windows Node version and 2 on each Ubuntu one; `test:commands` in 2 shards on Windows; the Windows fast job in 3; the other gate steps in one `gate core` job per configuration. The OS/Node configurations and steps are those of 1.36.300.
+  - From the per-case times of run 38193803239, an e2e shard should take about 56 min on Windows Node 18 (226 min unsharded), 43-48 min on Node 20-24 and at most 25 min on Ubuntu, plus job setup. This release's CI run is the first measurement.
+  - CONTRIBUTING.md describes the case form and how to refresh weights (`LEERNESS_E2E_TIMES`, `LEERNESS_CI_SHARD_TIMES`, `ci-shard.js weights`).
+- Fixed: a command waiting for a workspace migration failed when the migration took longer than the lock wait (T-0348). Such a migration is another command moving a legacy `.harness` workspace to `.leerness`.
+  - Measured on this PC: a first migration of 400 files of 8 KiB took 13.1-14.7 s on Windows with Node 20.20.2 and 22.23.3, against 4.7 s on 26.3.0. That is past the 10 s that waiting commands allowed.
+  - Most of that time went to reading each fresh copy back to verify it. The first read of a file just written cost about 10 ms on Node 20 and 22 there. Copying took 0.4 s.
+  - The migrating process now refreshes the lock file's modification time while it works, at most every 500 ms: in every loop over the migrated files (the walk and its sorting, mapping, collision and destination checks, copies, hashes, comparisons, reference rewrites and rollback). Not covered: one built-in call whose time grows with the file count, such as listing a folder of a million files; at the size of real legacy workspaces such calls take milliseconds. Waiting commands keep waiting while the lock changes. With every wrappable file call of a migration of 60 files slowed by 30 ms, the lock never stays unchanged for 1.5 s; with 15 ms per call on 80 files, the longest unchanged time measured was 588 ms.
+  - The list of files to copy no longer searches the already-present files once per file. That search grew with the square of the file count: 11.6 s for 60,000 files on this PC, now 30 ms.
+  - `LEERNESS_WORKSPACE_MIGRATION_LOCK_WAIT_MS` (default 10 s) is now the longest wait without progress. A lock left by a process that died stops changing, and its waiters still fail after that time. The whole wait is capped at 15 minutes. A positive value below 1.5 s counts as 1.5 s, three refresh intervals, so a short wait does not expire between two refreshes; 0 still does not wait. The refresh interval and the waits are measured on a monotonic clock, so setting the system clock back or forward neither stops the refreshes nor ends a wait.
+  - On this PC, `simultaneous-first-migrations-converge-with-lock-wait` in `scripts/workspace-dir-migration-probe.js` now passes; before, it failed here, while the GitHub runner passed it.
+  - `docs/runtime-compatibility-api.md` describes the wait.
+- Fixed: `leerness readme sync` counted only column-0 `total++;` lines for a README e2e badge, so a case whose counter sits inside a shard guard was not counted. Projects without guards count as before.
+- Tests (T-0348): `scripts/workspace-migration-heartbeat-probe.js` (`npm run test:migration-heartbeat`, in `test`, `test:core` and `test:fast`) has thirteen cases:
+  - every loop of the migration functions must refresh the lock unless it waits for another process's lock or walks a fixed list (a check of the source: the CPU-only loops cannot be slowed from outside);
+  - the list of files to copy for 60,000 files must take under 2 s;
+  - a waiter set to 100 ms must still outlast a migration slowed to 40 ms per copy, and a positive wait is at least 1.5 s while 0 does not wait (fake clock);
+  - the owner's wall clock set back 30 s after its tenth copy must not stop the refreshes, and a waiter's wall clock jumping 60 s forward must not end a 5 s wait;
+  - a migration with every wrappable file call slowed (lstat and stat are left alone: the runtime layout refuses a wrapped one): the lock must not stay unchanged for 1.5 s;
+  - migrations slowed in one step at a time, 40 ms per copy, per reference rewrite or per destination check, each with another migration waiting 1.5 s for it;
+  - a writer waiting 1 s on a lock refreshed for 3.5 s and then released;
+  - a lock that never changes, and one that stops changing after 4 s.
+  - On the old code it passes only the never-changing case (1 of 13). With the migrating process's refresh turned off it passes 7 of 13: the six cases with a slowed or clock-shifted migration fail. Without the 1.5 s minimum, the two short-wait cases fail; with the wall clock instead of the monotonic one, both clock cases fail in 5 of 5 runs.
+- Tests (T-0359):
+  - `scripts/ci-shard-probe.js` (`npm run test:ci-shard`, in `test`, `test:core` and `test:fast`), 13 checks: the split is a deterministic partition for 1-8 shards; every leaf of the sharded npm scripts and every e2e case runs in exactly one shard for 1-6 shards; the shared-fixture cases stay in one shard; the guard parser, the runtime check, the npm step parser, the leaf runner and the workflow's shard lists each catch their broken inputs; `readme sync` counts guarded cases. 24 mutants of the runner and the badge count each fail it.
+  - `scripts/release-runtime-probe.js` reads the workflow's shard lists: Windows Node 24 must list every e2e shard. A dropped shard, a mismatched shard count, a missing shard variable and a changed e2e command each fail it.
+  - Linux (Docker node:20): HEAD's e2e.js 468/468 and this release's 469/469 print the same result labels apart from the new check. The final version's 3 shards pass (249/150/162), and every case label falls in exactly one shard. The first reviewed version also passed in 3 (259/149/153) and in 2 shards (313/202).
+  - Windows (this PC, Node 26.3.0, 4 shards in parallel, first reviewed version): 223/122/136/126, and the labels match the Windows Node 24 e2e step of run 38332288454. Since then e2e.js changed only by comments: the cases-start line and the run-wide marks.
+  - Reviewed by codex gpt-6.1-sol and gpt-6-astra over nine rounds; each finding got a test that fails on the reviewed code (rounds 4-9 by owner decision).
+
 ## 1.36.300 - 2026-10-13
 
 - Fixed: `leerness lazy detect --auto-track` registered TODOs that a task already covered (T-0345).

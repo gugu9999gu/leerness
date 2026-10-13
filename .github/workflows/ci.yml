@@ -2,6 +2,12 @@ name: CI
 
 # Public release CI on GitHub-hosted runners.
 # Public CI result raises trust: the e2e badge in README reflects this workflow.
+#
+# T-0359: the long work runs in parallel shards. Until 1.36.300 one Windows gate job ran e2e.js (167-226 min) after
+# the command-surface leaves (43-52 min), so a release waited about five hours. Each sharded job below lists every
+# shard of every OS/Node configuration; scripts/ci-shard.js gives each shard the same assignment, so the shards of
+# one configuration run every e2e case and every npm-script leaf exactly once. scripts/ci-shard-probe.js checks
+# these lists (each configuration has shards 1..k, and the three gate jobs cover the same configurations).
 
 on:
   push:
@@ -11,42 +17,124 @@ on:
   workflow_dispatch:
 
 jobs:
-  fast:
+  test:
     if: github.repository == 'gugu9999gu/leerness'
-    name: fast (${{ matrix.os }}, selftest + smoke)
+    name: gate e2e (${{ matrix.os }}, node ${{ matrix.node }}, ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # DEP0190 becomes a runtime warning on Node 24. Keep the compatibility
+        # matrix and add one full Windows E2E (all of its shards) where the warning gate is live.
+        include:
+          - { os: windows-latest, node: 18, shard: 1, shards: 4 }
+          - { os: windows-latest, node: 18, shard: 2, shards: 4 }
+          - { os: windows-latest, node: 18, shard: 3, shards: 4 }
+          - { os: windows-latest, node: 18, shard: 4, shards: 4 }
+          - { os: windows-latest, node: 20, shard: 1, shards: 4 }
+          - { os: windows-latest, node: 20, shard: 2, shards: 4 }
+          - { os: windows-latest, node: 20, shard: 3, shards: 4 }
+          - { os: windows-latest, node: 20, shard: 4, shards: 4 }
+          - { os: windows-latest, node: 22, shard: 1, shards: 4 }
+          - { os: windows-latest, node: 22, shard: 2, shards: 4 }
+          - { os: windows-latest, node: 22, shard: 3, shards: 4 }
+          - { os: windows-latest, node: 22, shard: 4, shards: 4 }
+          - { os: windows-latest, node: 24, shard: 1, shards: 4 }
+          - { os: windows-latest, node: 24, shard: 2, shards: 4 }
+          - { os: windows-latest, node: 24, shard: 3, shards: 4 }
+          - { os: windows-latest, node: 24, shard: 4, shards: 4 }
+          - { os: ubuntu-latest, node: 18, shard: 1, shards: 2 }
+          - { os: ubuntu-latest, node: 18, shard: 2, shards: 2 }
+          - { os: ubuntu-latest, node: 20, shard: 1, shards: 2 }
+          - { os: ubuntu-latest, node: 20, shard: 2, shards: 2 }
+          - { os: ubuntu-latest, node: 22, shard: 1, shards: 2 }
+          - { os: ubuntu-latest, node: 22, shard: 2, shards: 2 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      # Each shard runs its cases plus the shared smoke preamble and the run-wide checks (runtime DEP0190 warnings,
+      # repository isolation, and that every case guard was reached exactly once).
+      - name: e2e
+        env:
+          LEERNESS_OFFLINE: "1"
+          LEERNESS_E2E_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
+        run: node ./scripts/e2e.js
+
+  commands:
+    if: github.repository == 'gugu9999gu/leerness'
+    name: gate commands (${{ matrix.os }}, node ${{ matrix.node }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, node: 18, shard: 1, shards: 2 }
+          - { os: windows-latest, node: 18, shard: 2, shards: 2 }
+          - { os: windows-latest, node: 20, shard: 1, shards: 2 }
+          - { os: windows-latest, node: 20, shard: 2, shards: 2 }
+          - { os: windows-latest, node: 22, shard: 1, shards: 2 }
+          - { os: windows-latest, node: 22, shard: 2, shards: 2 }
+          - { os: windows-latest, node: 24, shard: 1, shards: 2 }
+          - { os: windows-latest, node: 24, shard: 2, shards: 2 }
+          - { os: ubuntu-latest, node: 18, shard: 1, shards: 1 }
+          - { os: ubuntu-latest, node: 20, shard: 1, shards: 1 }
+          - { os: ubuntu-latest, node: 22, shard: 1, shards: 1 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: e2e-command-surface
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: node ./scripts/ci-shard.js npm test:commands ${{ matrix.shard }}/${{ matrix.shards }}
+
+  fast:
+    if: github.repository == 'gugu9999gu/leerness'
+    name: fast (${{ matrix.os }}, selftest + smoke, ${{ matrix.shard }}/${{ matrix.shards }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, shard: 1, shards: 3 }
+          - { os: windows-latest, shard: 2, shards: 3 }
+          - { os: windows-latest, shard: 3, shards: 3 }
+          - { os: ubuntu-latest, shard: 1, shards: 1 }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 20
           package-manager-cache: false
-      # Bounded quick feedback — full e2e runs in the `test` matrix below.
+      # Bounded quick feedback — full e2e runs in the `test` matrix above.
       - name: E2E observation controls
+        if: matrix.shard == 1
         run: npm run test:e2e-observation
       - name: test:fast
         env:
           LEERNESS_OFFLINE: "1"
-        run: npm run test:fast
+        run: node ./scripts/ci-shard.js npm test:fast ${{ matrix.shard }}/${{ matrix.shards }}
 
-  test:
+  core:
     if: github.repository == 'gugu9999gu/leerness'
-    name: gate (selftest + e2e)
+    name: gate core (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        node: [18, 20, 22]
-        # DEP0190 becomes a runtime warning on Node 24. Keep the compatibility
-        # matrix and add one full Windows E2E job where the warning gate is live.
         include:
-          - os: windows-latest
-            node: 24
+          - { os: windows-latest, node: 18 }
+          - { os: windows-latest, node: 20 }
+          - { os: windows-latest, node: 22 }
+          - { os: windows-latest, node: 24 }
+          - { os: ubuntu-latest, node: 18 }
+          - { os: ubuntu-latest, node: 20 }
+          - { os: ubuntu-latest, node: 22 }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -85,18 +173,10 @@ jobs:
         env:
           LEERNESS_OFFLINE: "1"
         run: node ./scripts/mutation-integrity-probe.js
-      - name: e2e-command-surface
-        env:
-          LEERNESS_OFFLINE: "1"
-        run: npm run test:commands
       - name: e2e-handoff-enforcement
         env:
           LEERNESS_OFFLINE: "1"
         run: npm run test:handoff
-      - name: e2e
-        env:
-          LEERNESS_OFFLINE: "1"
-        run: node ./scripts/e2e.js
 
   installed:
     if: github.repository == 'gugu9999gu/leerness'

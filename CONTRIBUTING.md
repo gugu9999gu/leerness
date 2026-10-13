@@ -35,6 +35,8 @@ Prefer **behavioral** tests over source-grep guards. A source-grep guard asserts
 
 When you add a guard, construct the **discriminating case**: an input where the old code passes and only the new check catches it. If you cannot construct one, the check may not be measuring what you think.
 
+Each top-level case in `scripts/e2e.js` starts with `if (e2eShard.take('<unique key>')) {` and counts itself with `total++;` inside the block. CI runs that file, `test:commands` and `test:fast` in parallel shards (`scripts/ci-shard.js`): every shard computes the same split from `scripts/ci-shard-weights.json`, so the shards of one job run each case and leaf exactly once. A top-level block without the guard, a repeated key, or a guard that is not reached exactly once fails the e2e run. `node ./scripts/ci-shard.js plan e2e 4` shows the split; a run with `LEERNESS_E2E_TIMES=<file>` (e2e) or `LEERNESS_CI_SHARD_TIMES=<file>` (npm leaves) writes measured seconds, and `node ./scripts/ci-shard.js weights e2e <file>` stores them.
+
 ## Release
 
 `npm test` (gate) → bump `VERSION` in `bin/leerness.js` **and** `version` in `package.json` (selftest asserts they match) → CHANGELOG entry → commit → publish → push.

@@ -11,6 +11,14 @@ const { spawnNpmSync } = require('../lib/npm-process');
 const { gitSpawn } = require('../lib/git');
 const { EXTERNAL_AGENTS } = require('../lib/agent-registry');
 const { withRedirectWarnings } = require('./runtime-warning-gate');
+// T-0359: CI runs this file in parallel shards (LEERNESS_E2E_SHARD=i/k, scripts/ci-shard.js). Each top-level case is
+//   `if (e2eShard.take('<unique key>')) {` with its `total++;` inside; a shard runs the cases assigned to it and an
+//   unsharded run runs all of them. The check next to the E2E result fails the run when a top-level block has no
+//   guard, a key repeats, or a guard was not reached exactly once. Case weights: scripts/ci-shard-weights.json.
+//   The names below are top-level state that one case leaves for the next: the shared fixture project `tmp`, `run()`
+//   (which works in it), and files in it. Every case that mentions one runs in one shard, in this file's order.
+//   A new top-level variable that cases change or read across cases belongs in this list.
+const e2eShard = require('./ci-shard').e2eShard(__filename, ['tmp', 'run', 'dsPath', 'dsText', 'secretFile']);
 
 // 1.9.12: e2e 안정성을 위해 자식 프로세스의 npm 호출 차단 (hang 방지)
 // 1.36.87: 일부 e2e 타임아웃을 상향했다 — 격리 실측(agents list 5.2s · init --language 8.5s) 대비
@@ -178,8 +186,11 @@ run('lazy detect',         ['lazy', 'detect', tmp]);
 run('memory search',       ['memory', 'search', '마일스톤', '--path', tmp]);
 
 const offline = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' });
-total++;
-{
+// e2e-shard: cases start here. Below this line, top-level code outside a case only prepares later cases: a case
+//   counter (total++), a block or a control-flow block there fails the run (scripts/ci-shard.js). Smoke checks that
+//   every shard runs belong above it.
+if (e2eShard.take('update --check (offline): 조회 실패를')) {
+  total++;
   // 1.36.102: 이 단언이 결함을 고정하고 있었다 — 오프라인(레지스트리 조회 불가)에서 "up to date" 가 나오는 것을
   //   정답으로 못박고 있었다. 모르는 것을 안다고 말하는 게 정답일 수 없다. 계약을 바꾼다:
   //   조회에 실패하면 '확인 불가' 여야 하고, 마이그레이션이 필요하면 그건 조회와 무관하니 그대로 인정한다.
@@ -191,8 +202,8 @@ total++;
 }
 
 run('auto-update install', ['auto-update', 'install', tmp]);
-total++;
-{
+if (e2eShard.take('SessionStart hook for update --check ins')) {
+  total++;
   const settingsFile = path.join(tmp, '.claude/settings.local.json');
   if (fs.existsSync(settingsFile)) {
     const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
@@ -203,8 +214,8 @@ total++;
 }
 
 // 1.9.1 P6 회귀: evidence가 plan:M-XXXX + 검증 키워드면 lazy detect가 통과해야 한다.
-total++;
-{
+if (e2eShard.take('B(P6)')) {
+  total++;
   const trackerPath = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath, 'utf8');
   cur = cur.replace(/^\| T-0001 \|.*$/m, '| T-0001 | done | mile A | tests:32/32 (plan:M-0002) | next | 2026-05-08 |');
@@ -215,8 +226,8 @@ total++;
   if (!ok) failed++;
 }
 // 1.9.1 P6 negative: plan:M-XXXX 단독은 여전히 경고
-total++;
-{
+if (e2eShard.take('B(P6 neg)')) {
+  total++;
   const trackerPath = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath, 'utf8');
   cur = cur.replace(/^\| T-0001 \|.*$/m, '| T-0001 | done | mile A | plan:M-0002 | next | 2026-05-08 |');
@@ -231,8 +242,8 @@ total++;
 }
 
 // 1.9.1 P1 회귀: legacy leerness-plus hook이 있으면 auto-update install이 정리해야 한다.
-total++;
-{
+if (e2eShard.take('B(P1)')) {
+  total++;
   const settingsFile = path.join(tmp, '.claude/settings.local.json');
   const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
   s.hooks.SessionStart = [{ matcher: '*', command: 'leerness-plus update --check' }];
@@ -247,8 +258,8 @@ total++;
 }
 
 // 1.9.1 P4 회귀: NA 마커가 있으면 audit이 placeholder 경고를 스킵.
-total++;
-{
+if (e2eShard.take('B(P4)')) {
+  total++;
   const ds = path.join(tmp, '.leerness/design-system.md');
   fs.appendFileSync(ds, '\n<!-- leerness:na CLI 프로젝트라 디자인 토큰 없음 -->\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'audit', tmp], { encoding: 'utf8' });
@@ -258,8 +269,8 @@ total++;
 }
 
 // 1.9.1 P7 회귀: init 직후 progress에 M-0001 연결 row가 자동으로 있다.
-total++;
-{
+if (e2eShard.take('B(P7)')) {
+  total++;
   const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-p7-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmp2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8' });
   const tracker = fs.readFileSync(path.join(tmp2, '.leerness/progress-tracker.md'), 'utf8');
@@ -280,15 +291,15 @@ run('skill use (new)',     ['skill', 'use', 'open-meteo', '--note', 'first call'
 run('skill use (catalog)', ['skill', 'use', 'feature-implementation', '--note', 'catalog skill materialize', '--path', tmp]);
 run('skill optimize',      ['skill', 'optimize', 'open-meteo', '--before', 'no cache', '--after', 'If-Modified-Since', '--note', 'e2e opt', '--path', tmp]);
 
-total++;
-{
+if (e2eShard.take('skill.json optimizations 누적')) {
+  total++;
   const f = path.join(tmp, '.leerness/skills/open-meteo/skill.json');
   const ok = fs.existsSync(f) && JSON.parse(fs.readFileSync(f, 'utf8')).optimizations.length === 1;
   console.log(ok ? '✓ skill.json optimizations 누적' : '✗ skill.json optimizations 누적 실패');
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('skill usage/sources/patterns 누적')) {
+  total++;
   const data = JSON.parse(fs.readFileSync(path.join(tmp, '.leerness/skills/open-meteo/skill.json'), 'utf8'));
   const ok = data.usage.count === 1 && data.sources.length >= 1 && data.patterns.length >= 1;
   console.log(ok ? '✓ skill usage/sources/patterns 누적' : '✗ skill usage/sources/patterns 누적 실패');
@@ -297,8 +308,8 @@ total++;
 
 run('skill consolidate',   ['skill', 'consolidate', '--threshold', '0.1', '--path', tmp]);
 run('skill remove (user)', ['skill', 'remove', 'open-meteo', '--path', tmp]);
-total++;
-{
+if (e2eShard.take('skill remove: 디렉토리 삭제')) {
+  total++;
   const ok = !fs.existsSync(path.join(tmp, '.leerness/skills/open-meteo'));
   console.log(ok ? '✓ skill remove: 디렉토리 삭제' : '✗ skill remove: 디렉토리 잔존');
   if (!ok) failed++;
@@ -324,8 +335,8 @@ run('impact: Card.html → home/about',  ['impact', 'src/components/Card.html', 
 run('reuse find: Card 후보',           ['reuse', 'find', 'Card', '--path', tmp]);
 run('reuse register: Card',            ['reuse', 'register', 'Card', '--where', 'src/components/Card.html', '--kind', 'component', '--note', 'e2e card', '--path', tmp]);
 
-total++;
-{
+if (e2eShard.take('reuse-map.md에 Card row 자동 추가')) {
+  total++;
   const reuse = fs.readFileSync(path.join(tmp, '.leerness/reuse-map.md'), 'utf8');
   const ok = /\| Card \| src\/components\/Card\.html \| component \|/.test(reuse);
   console.log(ok ? '✓ reuse-map.md에 Card row 자동 추가' : '✗ Card row 미등록');
@@ -336,8 +347,8 @@ run('ui consistency: pass (토큰 외 색상 없음)', ['ui', 'consistency', tmp
 
 // 의도적 일탈: 토큰 외 색상 추가 → ui consistency 경고
 fs.writeFileSync(path.join(tmp, 'src/pages/contact.html'), `<style>.box { color: #abcdef; background: #123456; }</style>\n`);
-total++;
-{
+if (e2eShard.take('ui consistency: 일탈 색상 #abcdef 검출 + 비0 종료')) {
+  total++;
   const r = cp.spawnSync(process.execPath, [CLI, 'ui', 'consistency', tmp, '--fail-on-violation'], { encoding: 'utf8' });
   const ok = r.status === 1 && /토큰 외 값/.test(r.stdout) && /#abcdef/i.test(r.stdout);
   console.log(ok ? '✓ ui consistency: 일탈 색상 #abcdef 검출 + 비0 종료' : '✗ ui consistency 일탈 미검출');
@@ -348,8 +359,8 @@ run('graph: mermaid 출력',             ['graph', tmp]);
 run('guide: 통합 가이드',               ['guide', 'src/components/Card.html', '--path', tmp]);
 
 // 1.9.4 회귀: impact strong/weak 구분
-total++;
-{
+if (e2eShard.take('B(A)')) {
+  total++;
   // home.html에 "Card"라는 식별자가 plain text로 들어가도록 (false positive 시드)
   fs.appendFileSync(path.join(tmp, 'src/pages/home.html'), '\n<!-- 카드 콘텐츠는 Cards 배열로 -->\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'impact', 'src/components/Card.html', '--path', tmp], { encoding: 'utf8' });
@@ -360,8 +371,8 @@ total++;
 }
 
 // 1.9.16 회귀: brainstorm --all-apps / --json / session close 워크스페이스 안내
-total++;
-{
+if (e2eShard.take('B(1.9.16)')) {
+  total++;
   // brainstorm --all-apps
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bsa-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bsb-'));
@@ -375,8 +386,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.16) #2')) {
+  total++;
   // --json 단일 brainstorm
   const tmpJ = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-json-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpJ, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -389,8 +400,8 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.16) #3')) {
+  total++;
   // retro --json
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rj-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -402,8 +413,8 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.16) #4')) {
+  total++;
   // insights --json (workspace)
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iwsa-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iwsb-'));
@@ -417,8 +428,8 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.16) #5')) {
+  total++;
   // session close 끝에 워크스페이스 안내 (다른 leerness 프로젝트 시뮬)
   const wsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ws-'));
   fs.mkdirSync(path.join(wsRoot, '_apps'), { recursive: true });
@@ -435,8 +446,8 @@ total++;
 }
 
 // 1.9.17 회귀: handoff --all-apps / reuse-map --all-apps (워크스페이스 오케스트레이션)
-total++;
-{
+if (e2eShard.take('B(1.9.17)')) {
+  total++;
   // handoff --include
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ha-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hb-'));
@@ -448,8 +459,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.17) #2')) {
+  total++;
   // handoff --include --json
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-haj-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hbj-'));
@@ -463,8 +474,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.17) #3')) {
+  total++;
   // reuse-map 단일 + 워크스페이스 모드 + 중복 감지
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rma-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rmb-'));
@@ -492,8 +503,8 @@ total++;
 }
 
 // 1.9.18 회귀: handoff --since / reuse-map --strict-elements + depends-on / verify-claim
-total++;
-{
+if (e2eShard.take('B(1.9.18)')) {
+  total++;
   // handoff --since: 최근 변경 강조
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sincea-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sinceb-'));
@@ -508,8 +519,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.18) #2')) {
+  total++;
   // handoff --since 형식 오류 → fail
   const tmpE = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sincee-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpE, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -519,8 +530,8 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.18) #3')) {
+  total++;
   // reuse-map --strict-elements: 같은 함수명 다른 capability 감지
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-strict-a-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-strict-b-'));
@@ -545,8 +556,8 @@ total++;
   if (!ok) { failed++; console.log(r2.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.18) #4')) {
+  total++;
   // reuse-map depends-on: notes 컬럼에서 의존 추출
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-deps-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -559,8 +570,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('pass (실측 ≥ 주장)')) {
+  total++;
   // verify-claim: 파일 존재 + 테스트 카운트 검증
   const tmpV = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpV, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -592,8 +603,8 @@ total++;
 }
 
 // 1.9.19 회귀: verify-claim --run-tests + --strict-elements same-file 구분
-total++;
-{
+if (e2eShard.take('B(1.9.19)')) {
+  total++;
   // verify-claim --run-tests: npm test 자동 실행 + 주장 vs 실행 결과 대조
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rt-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -619,8 +630,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.19) #2')) {
+  total++;
   // --run-tests 실패 케이스: 5/5 주장 vs 실제 3/5 실행 → 불일치 + exit 1
   const tmpF = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rtf-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpF, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -640,8 +651,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.19) #3')) {
+  total++;
   // --strict-elements: same-file ⚠ vs diff-file ℹ 구분
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-strict2-a-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-strict2-b-'));
@@ -668,8 +679,8 @@ total++;
 }
 
 // 1.9.20 회귀: verify-claim file regex 확장 + jest/mocha 파싱 + --bench
-total++;
-{
+if (e2eShard.take('B(1.9.20)')) {
+  total++;
   // verify-claim regex: 도메인 폴더 (scenes/scripts) + 루트 메타 파일 (project.godot)
   const tmpG = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-godot-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpG, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -691,8 +702,8 @@ total++;
 }
 
 // 1.9.21 회귀: 설정 파일 확장자 (.cfg/.ini/.env/.toml/.lock) 추가
-total++;
-{
+if (e2eShard.take('B(1.9.21)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cfg-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.writeFileSync(path.join(tmpC, 'export_presets.cfg'), '[preset.0]\n');
@@ -710,8 +721,8 @@ total++;
 }
 
 // 1.9.25 회귀: memory search --include-code + brainstorm --include-code + register-pending
-total++;
-{
+if (e2eShard.take('B(1.9.25)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-incode-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpC, 'src'), { recursive: true });
@@ -725,8 +736,8 @@ total++;
   if (!ok) { failed++; console.log(r2.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.25) #2')) {
+  total++;
   // register-pending
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-regp-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -741,8 +752,8 @@ total++;
 }
 
 // 1.9.26 회귀: optimism-check (낙관적 표시 자동 감지) + verify-claim --strict-claims
-total++;
-{
+if (e2eShard.take('B(1.9.26)')) {
+  total++;
   const tmpO = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-optm-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpO, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpO, 'src'), { recursive: true });
@@ -765,8 +776,8 @@ total++;
   if (!ok) { failed++; console.log('--- 거짓 case ---\n' + r1.stdout.slice(0, 300) + '\n--- 정상 case ---\n' + r2.stdout.slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.26) #2')) {
+  total++;
   // verify-claim --strict-claims 통합
   const tmpS = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-stct-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpS, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -781,8 +792,8 @@ total++;
 }
 
 // 1.9.27 회귀: URL/메서드 매핑 + 신뢰도 점수 + 신규 카테고리 (FileIO/Queue/Cache/Notify/Storage)
-total++;
-{
+if (e2eShard.take('B(1.9.27)')) {
+  total++;
   // T-9001 false negative 해결 검증: 코드에 다른 목적의 http.request 있어도 URL 미매치로 잡아냄
   const tmpU = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-url-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpU, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -801,8 +812,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.27) #2')) {
+  total++;
   // 신규 카테고리 (Slack/Notify)
   const tmpN = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-notify-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpN, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -816,8 +827,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.27) #3')) {
+  total++;
   // 신뢰도 점수 — 정상 케이스는 1.0
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-conf-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -834,8 +845,8 @@ total++;
 }
 
 // 1.9.28 회귀: 한국형 PG (카카오페이) 패턴 + confidence floor 0.15
-total++;
-{
+if (e2eShard.take('B(1.9.28)')) {
+  total++;
   const tmpK = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-kpay-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpK, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpK, 'src'), { recursive: true });
@@ -853,8 +864,8 @@ total++;
 }
 
 // 1.9.29 회귀: 페르소나 시스템 + review 명령
-total++;
-{
+if (e2eShard.take('B(1.9.29)')) {
+  total++;
   // persona list — 5 내장
   const r1 = cp.spawnSync(process.execPath, [CLI, 'persona', 'list'], { encoding: 'utf8', timeout: 10000 });
   const okList = r1.status === 0
@@ -874,8 +885,8 @@ total++;
   if (!ok) { failed++; console.log(r1.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.29) #2')) {
+  total++;
   // review <file> --persona X
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rev-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -901,8 +912,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.29) #3')) {
+  total++;
   // 사용자 정의 페르소나 add
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-padd-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -919,8 +930,8 @@ total++;
 }
 
 // 1.9.30 회귀: 외부 CLI 오케스트레이션 (agents list/check/dispatch)
-total++;
-{
+if (e2eShard.take('B(1.9.30+1.9.277)')) {
+  total++;
   // agents list — claude가 환경변수 + PATH 둘 다 충족 시 ready
   const env1 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0' };
   const r1 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list'], { encoding: 'utf8', timeout: 90000, env: env1 });
@@ -945,8 +956,8 @@ total++;
   if (!ok) { failed++; console.log(r1.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.30)')) {
+  total++;
   // agents dispatch — 활성 미충족 시 거부
   const env = { ...process.env, LEERNESS_ENABLE_CODEX: '0' };
   // 1.30.2: timeout 10s→30s flake 하드닝(1.9.375 계열) — 전체 e2e 부하(수백 spawn) 하에서 짧은 타임아웃이 간헐 빈-stdout→오판.
@@ -964,8 +975,8 @@ total++;
 }
 
 // 1.36.185 회귀: agents quota는 설치·활성·인증·로컬 라우팅·모델 호출·잔여량을 분리하고 추정하지 않는다
-total++;
-{
+if (e2eShard.take('B(1.36.185)')) {
+  total++;
   // agents quota — env=0 시 인증 확인을 실행하지 않고 disabled/not-installed를 정직하게 표시
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (/^LEERNESS_ENABLE_/i.test(key)) delete env[key];
@@ -1020,8 +1031,8 @@ total++;
   console.log(ok ? '✓ B(1.36.185) agents quota: 관측 축 분리·비밀 비출력·비활성 인증 무실행·추정 금지' : `✗ quota 실패 (text=${okText} json=${okJson})`);
   if (!ok) { failed++; console.log((r.stdout + '\n' + r2.stdout + '\n' + r2.stderr).slice(0, 1400)); }
 }
-total++;
-{
+if (e2eShard.take('B(1.9.31)')) {
+  total++;
   // 사용법 메시지에 quota 포함
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'foo'], { encoding: 'utf8', timeout: 10000 });
   const usage = r.stdout + r.stderr;
@@ -1033,8 +1044,8 @@ total++;
 }
 
 // Historical banner checks and the removed CLI-agent activation surface.
-total++;
-{
+if (e2eShard.take('B(1.9.32)')) {
+  total++;
   // --version --banner: LEERNESS ASCII + 신규 슬로건 (1.9.144+ "AI 에이전트 검수·기억·드리프트 방지 하네스")
   const r = cp.spawnSync(process.execPath, [CLI, '--version', '--banner'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, TERM: 'dumb' } });
   const ok = r.status === 0
@@ -1046,8 +1057,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.32) #2')) {
+  total++;
   // LEERNESS_NO_BANNER=1: 배너 스킵
   const r = cp.spawnSync(process.execPath, [CLI, '--version', '--banner'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, LEERNESS_NO_BANNER: '1' } });
   const ok = r.status === 0 && !/███████╗/.test(r.stdout) && /^1\./m.test(r.stdout.trim());
@@ -1055,8 +1066,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('init: 에이전트 활성화 문항/기본값 없이 지침 설치')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-setup-removed-'));
   const r = cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended', '--minimal', '--no-banner'], { encoding: 'utf8', timeout: 30000 });
   const configPath = path.join(tmpC, '.leerness', 'leerness-config.json');
@@ -1068,8 +1079,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('--help: 제거된 설정 명령 없음')) {
+  total++;
   // Removed command is not advertised.
   const r = cp.spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status === 0 && !/setup-agents|CLI 에이전트 활성화/.test(r.stdout);
@@ -1077,8 +1088,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('제거된 setup-agents 명령은 설정을 변경하지 않음')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-setup-disabled-'));
   const tmpEnv = path.join(tmpC, '.env');
   fs.writeFileSync(tmpEnv, 'EXISTING=1\nLEERNESS_ENABLE_CLAUDE=1\n', 'utf8');
@@ -1090,8 +1101,8 @@ total++;
 }
 
 // 1.9.33 회귀: npx 캐시 함정 — stale 버전 실행 시 경고
-total++;
-{
+if (e2eShard.take('B(1.9.33)')) {
+  total++;
   // 캐시에 미래 버전을 심어 stale 시뮬레이션 → 경고 출력 + init은 계속 진행
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-stale-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended', '--no-stale-check'], { stdio: 'ignore', timeout: 30000 });
@@ -1109,8 +1120,8 @@ total++;
 }
 
 // 1.9.63/64 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.63)')) {
+  total++;
   // audit --strict
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-st-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1120,8 +1131,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.63) #2')) {
+  total++;
   // audit --strict --threshold 10 → exit 0
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-st2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1131,8 +1142,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(-300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.64)')) {
+  total++;
   // install 별칭
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iv-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1146,8 +1157,8 @@ total++;
 }
 
 // 1.9.60/61/62 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.60)')) {
+  total++;
   // task export → TodoWrite JSON 호환
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tex-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1160,8 +1171,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.61)')) {
+  total++;
   // MCP cursor 페이지네이션 (chunkSize override)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1173,8 +1184,8 @@ total++;
   if (!ok) { failed++; console.log(JSON.stringify(resp).slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.62)')) {
+  total++;
   // audit npm CVE — OFFLINE 또는 package.json 없을 때 graceful
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ac-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1186,8 +1197,8 @@ total++;
 }
 
 // 1.9.58/59 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.58)')) {
+  total++;
   // fuzzy 매칭 — 어간 변형 (webhook ↔ webhooks)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fz-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1200,8 +1211,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.59)')) {
+  total++;
   // session close default suggest
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sd-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1212,8 +1223,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.59) #2')) {
+  total++;
   // --no-suggest 비활성 (이전 동작 보존)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ns-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1224,8 +1235,8 @@ total++;
 }
 
 // 1.9.56/57 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.56)')) {
+  total++;
   // handoff 자동 lessons 재상기
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ha-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1238,8 +1249,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.57)')) {
+  total++;
   // session close --suggest
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1250,8 +1261,8 @@ total++;
 }
 
 // 1.9.54/55 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.54)')) {
+  total++;
   // lessons --auto 키워드 자동 추출
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-la-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1264,8 +1275,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.55)')) {
+  total++;
   // MCP server tools/list 12 도구 (1.9.55)
   const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], {
     encoding: 'utf8', timeout: 8000,
@@ -1281,8 +1292,8 @@ total++;
 }
 
 // 1.9.53 회귀: skill suggest 자동 학습
-total++;
-{
+if (e2eShard.take('B(1.9.53)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sg-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // 반복 키워드 6회
@@ -1298,8 +1309,8 @@ total++;
 }
 
 // 1.9.51/52 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.51)')) {
+  total++;
   // benchmark --scenario all → 4개 시나리오 모두 감지
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1311,8 +1322,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.51) #2')) {
+  total++;
   // benchmark --scenario 알 수 없는 ID → 친절 안내
   const r = cp.spawnSync(process.execPath, [CLI, 'benchmark', '--scenario', 'unknown-x'], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status !== 0 && /알 수 없는 scenario/.test(r.stdout + r.stderr);
@@ -1320,8 +1331,8 @@ total++;
   if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.52)')) {
+  total++;
   // _parseSkillCatalog 4 형식 인식 — 1.9.370 (UR-0025): lib/pure-utils 직접 require (이전: harness 소스 regex+eval, 모듈 이동으로 전환)
   const fn = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'))._parseSkillCatalog;
   if (typeof fn !== 'function') {
@@ -1340,8 +1351,8 @@ total++;
 }
 
 // 1.9.48~50 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.48)')) {
+  total++;
   // 1.9.48 cross-platform archive — PowerShell ZIP or tar
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-arc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
@@ -1354,8 +1365,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.49)')) {
+  total++;
   // 1.9.49 benchmark --measure 인자 검증
   const r = cp.spawnSync(process.execPath, [CLI, 'benchmark', '--measure'], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status !== 0 && /사용법|task/.test(r.stdout + r.stderr);
@@ -1363,8 +1374,8 @@ total++;
   if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.50)')) {
+  total++;
   // 1.9.50 skill match --embedding (Ollama URL 없을 때 거부)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-emb-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1377,8 +1388,8 @@ total++;
 }
 
 // 1.9.45 회귀: skill match — 키워드 매칭 추천 (jaccard)
-total++;
-{
+if (e2eShard.take('B(1.9.45)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-match-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'match', '기능 구현 재사용 검사', '--path', tmpC, '--json'], { encoding: 'utf8', timeout: 15000 });
@@ -1392,8 +1403,8 @@ total++;
 }
 
 // 1.9.46 회귀: benchmark — 자체 6차원 점수 + 타도구 비교
-total++;
-{
+if (e2eShard.take('B(1.9.46)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bench-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'benchmark', tmpC, '--json'], { encoding: 'utf8', timeout: 15000 });
@@ -1410,8 +1421,8 @@ total++;
 }
 
 // 1.9.47 회귀: skill publish — 9개 SKILL.md export + manifest.json
-total++;
-{
+if (e2eShard.take('B(1.9.47)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pub-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only'], { encoding: 'utf8', timeout: 30000 });
@@ -1429,8 +1440,8 @@ total++;
 }
 
 // 1.9.44 회귀: BOM SKILL.md 처리 (stress-v2 G2 발견)
-total++;
-{
+if (e2eShard.take('B(1.9.44)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bom-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const src = path.join(tmpC, 'bom.md');
@@ -1445,8 +1456,8 @@ total++;
 }
 
 // 1.9.43 회귀: MCP server + skill export-all + _reports 비공개
-total++;
-{
+if (e2eShard.take('B(1.9.43)')) {
+  total++;
   // skill export-all: 모든 내장 skill을 SKILL.md로 일괄 export
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-exall-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
@@ -1459,8 +1470,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.43) #2')) {
+  total++;
   // MCP server initialize: stdio JSON-RPC 정상 응답
   const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], {
     encoding: 'utf8', timeout: 10000,
@@ -1478,8 +1489,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.43) #3')) {
+  total++;
   // MCP server tools/list: 10개 도구 노출
   const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], {
     encoding: 'utf8', timeout: 10000,
@@ -1498,7 +1509,7 @@ total++;
 
 // 1.36.55 (외부감사 이식성): .gitignore/.npmignore 는 npm files 화이트리스트에서 의도적으로 제외되는 저장소-전용 파일 —
 //   게시 아티팩트에서는 검사 자체가 성립 안 하므로 명시 SKIP (조용한 누락이 아니라 사유 로그).
-{
+if (e2eShard.take('B(1.9.43) #4')) {
   const giPath = path.join(__dirname, '..', '.gitignore');
   if (!fs.existsSync(giPath)) console.log('⊘ SKIP(아티팩트 프로필): leerness-pkg/.gitignore 검사 — 저장소 체크아웃 전용');
   else {
@@ -1510,7 +1521,7 @@ total++;
   }
 }
 
-{
+if (e2eShard.take('B(1.9.43) #5')) {
   const niPath = path.join(__dirname, '..', '.npmignore');
   if (!fs.existsSync(niPath)) console.log('⊘ SKIP(아티팩트 프로필): leerness-pkg/.npmignore 검사 — 저장소 체크아웃 전용');
   else {
@@ -1523,8 +1534,8 @@ total++;
 }
 
 // 1.9.42 회귀: agentskills.io 표준 호환 (skill install/discover/export + .env opt-in)
-total++;
-{
+if (e2eShard.take('B(1.9.42)')) {
+  total++;
   // skill discover: env 없으면 opt-in 안내로 거부
   const env = { ...process.env };
   delete env.LEERNESS_SKILL_DISCOVER_URL;
@@ -1534,8 +1545,8 @@ total++;
   if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.42) #2')) {
+  total++;
   // skill export → SKILL.md frontmatter 정확 생성
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skex-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1551,8 +1562,8 @@ total++;
   if (!ok) { failed++; console.log(body.slice(0, 300) || r.stdout.slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.42) #3')) {
+  total++;
   // skill install: 로컬 SKILL.md import → .leerness/skills/<id>/SKILL.md 자동 배치
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skin-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1568,8 +1579,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.42) #4')) {
+  total++;
   // skill install이 skill.json도 자동 작성 (자체 catalog 호환)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skin2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1587,8 +1598,8 @@ total++;
 }
 
 // 1.9.41 회귀: whats-new 명령 + migrate 차분 AI must re-read + handoff fresh 알림
-total++;
-{
+if (e2eShard.take('B(1.9.41)')) {
+  total++;
   // whats-new --from 큰 점프 → 신규 명령 추출
   // 1.36.69: 기본 응답은 최신 30개로 제한됨 — 전체 차분 검증은 --all (대용량이라 maxBuffer 명시)
   const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', '--from', '1.9.33', '--json', '--all'], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 });
@@ -1603,8 +1614,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.41) #2')) {
+  total++;
   // migrate가 fromV가 있는 경우 AI must re-read 블록을 stdout에 출력
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mig-'));
   // 1.9.30 표시로 init한 척 (HARNESS_VERSION 직접 작성)
@@ -1619,8 +1630,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(-800)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.41) #3')) {
+  total++;
   // migration-report.md에 AI must re-read 섹션 영구 기록
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mig2-'));
   fs.mkdirSync(path.join(tmpC, '.leerness'), { recursive: true });
@@ -1633,8 +1644,8 @@ total++;
   if (!ok) { failed++; console.log(body.slice(0, 600)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.41) #4')) {
+  total++;
   // handoff가 fresh migration-report (24h 내) 시 자동 알림
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fresh-'));
   fs.mkdirSync(path.join(tmpC, '.leerness'), { recursive: true });
@@ -1652,8 +1663,8 @@ total++;
 }
 
 // 1.9.40 회귀: release pack 통합 명령 + audit README mismatch 감지
-total++;
-{
+if (e2eShard.take('B(1.9.40/1.36.144)')) {
+  total++;
   // release pack --dry-run --task-add: 자동 task 등록
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rp-'));
   // init 후 가벼운 package.json 흉내 (release pack은 npm pack 시도하므로 dry-run으로 우회)
@@ -1681,8 +1692,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); console.log('--- real ---'); console.log(r2.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.40)')) {
+  total++;
   // release pack --parent-migrate (인공 parent .leerness 생성)
   const tmpParent = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rp-parent-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpParent, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1696,8 +1707,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.40) #2')) {
+  total++;
   // audit README version mismatch 감지
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mm-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1710,8 +1721,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.40) #3')) {
+  total++;
   // audit --fix가 README 자동 갱신
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mm2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1725,8 +1736,8 @@ total++;
 }
 
 // 1.9.39 회귀: session workflow 가이드 + auto-fix + auto-recover
-total++;
-{
+if (e2eShard.take('B(1.9.39)')) {
+  total++;
   // handoff 끝에 워크플로 6단계 가이드 자동 표시
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wf-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1739,8 +1750,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.39) #2')) {
+  total++;
   // session-workflow.md 파일이 init 시 생성
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wf2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1752,8 +1763,8 @@ total++;
   if (!ok) { failed++; if (fs.existsSync(wfFile)) console.log(fs.readFileSync(wfFile, 'utf8').slice(0, 300)); else console.log('파일 없음'); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.39) #3')) {
+  total++;
   // AGENTS.md / CLAUDE.md에 session-workflow.md 참조 포함
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wf3-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1764,8 +1775,8 @@ total++;
   if (!ok) { failed++; }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.39) #4')) {
+  total++;
   // drift check --auto-fix: critical 시 session close 자동 실행 (시뮬은 어려우니 옵션 인식만)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-af-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1779,8 +1790,8 @@ total++;
 }
 
 // 1.9.38 회귀: usage stats, task sync, drift reminder, drift skip learning
-total++;
-{
+if (e2eShard.take('B(1.9.38)')) {
+  total++;
   // B. usage stats: 빈 상태 + 호출 후 카운터 증가
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-usage-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1799,8 +1810,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.38) #2')) {
+  total++;
   // C. task sync — TodoWrite JSON 임포트
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tasksync-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1818,8 +1829,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.38) #3')) {
+  total++;
   // A. drift reminder 파일 자동 생성 (인공 stale 시뮬)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rem-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1840,8 +1851,8 @@ total++;
   if (!ok) { failed++; if (fs.existsSync(remPath)) console.log(fs.readFileSync(remPath, 'utf8').slice(0, 400)); else console.log('(reminder 파일 없음)'); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.38) #4')) {
+  total++;
   // D. drift 학습 — --no-drift-check 5회 호출 후 임계 완화
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-learn-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1856,8 +1867,8 @@ total++;
 }
 
 // 1.9.37 회귀: drift detection
-total++;
-{
+if (e2eShard.take('B(1.9.37)')) {
+  total++;
   // drift check: 신규 init 직후 (메타파일은 fresh) → healthy 또는 attention
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-drift-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1869,8 +1880,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.37) #2')) {
+  total++;
   // drift check --json: 점수/신호 구조 검증
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-drift2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1887,8 +1898,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.37) #3')) {
+  total++;
   // handoff 자동 drift 경고 — 인공 stale 시뮬 (session-handoff.md의 Last generated를 옛 날짜로)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-drift3-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1907,8 +1918,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.37) #4')) {
+  total++;
   // LEERNESS_NO_DRIFT_CHECK=1: 자동 경고 스킵
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-drift4-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -1928,8 +1939,8 @@ total++;
 }
 
 // 1.9.36 회귀: dispatch 권장 플래그 + bench + 작업 유형 추천
-total++;
-{
+if (e2eShard.take('B(1.9.36)')) {
+  total++;
   // dispatch --write 시 agy --yolo 자동 추가
   const env = { ...process.env, LEERNESS_ENABLE_AGY: '1' };
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '코드 분석해서 요약', '--to', 'agy', '--write'], { encoding: 'utf8', timeout: 15000, env });
@@ -1940,8 +1951,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.36) #2')) {
+  total++;
   // dispatch read-only (기본) — --yolo/--dangerously 같은 위험 플래그 없음
   const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1' };
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '번역해줘', '--to', 'claude'], { encoding: 'utf8', timeout: 15000, env });
@@ -1952,8 +1963,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.36) #3')) {
+  total++;
   // 작업 유형 추천 — 비활성 CLI에도 추천 메시지 우선 출력
   const env = { ...process.env, LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_CLAUDE: '0' };
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '번역해줘 한국어를 영어로', '--to', 'agy'], { encoding: 'utf8', timeout: 15000, env });
@@ -1963,8 +1974,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.36) #4')) {
+  total++;
   // bench 명령: ready CLI 없을 때 거부
   // 빌트인 provider가 늘어나도 상속 환경에서 실제 agent가 실행되지 않도록 레지스트리 전체를 끈다.
   // PATH 선두의 실행 마커는 disabled provider가 version probe조차 받지 않는지를 검증한다.
@@ -1983,8 +1994,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.36) #5')) {
+  total++;
   // 사용법 메시지에 bench 포함
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'unknown'], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status !== 0 && /bench/.test(r.stdout + r.stderr);
@@ -1993,8 +2004,8 @@ total++;
 }
 
 // 1.9.35 회귀: 5개 신규 기능
-total++;
-{
+if (e2eShard.take('B(1.9.35)')) {
+  total++;
   // 개선#1: handoff 시 .leerness 부재 자동 경고
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC], { encoding: 'utf8', timeout: 10000 });
@@ -2003,8 +2014,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.35) #2')) {
+  total++;
   // 개선#5: audit --fix 옵션 (플래그 인식만 검증, 실 fix는 통합 환경 필요)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fix-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2014,8 +2025,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.35) #3')) {
+  total++;
   // 개선#3: contract verify
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-contract-'));
   const specFile = path.join(tmpDir, 'spec.md');
@@ -2033,8 +2044,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.35) #4')) {
+  total++;
   // 개선#2: reuse autodetect — src/*.js의 module.exports 스캔
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-autodetect-'));
   fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
@@ -2048,8 +2059,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.35) #5')) {
+  total++;
   // 개선#4: agents dispatch 안내문에 mtime/contract 안전 규칙 추가
   const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1' };
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'test task', '--to', 'claude'], { encoding: 'utf8', timeout: 15000, env });
@@ -2063,8 +2074,8 @@ total++;
 }
 
 // 1.9.34 회귀: 인터랙티브 multi-select (방향키/스페이스) — 비-TTY 폴백
-total++;
-{
+if (e2eShard.take('B(1.9.34)')) {
+  total++;
   // 비-TTY에서는 _selectOne/_selectMany가 defaults 또는 첫 옵션 반환
   // → init이 --yes 없이도 비대화형이면 기본 스킬셋(recommended)로 진행
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-multi-'));
@@ -2077,8 +2088,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.34) #2')) {
+  total++;
   // 1.9.34 배너 256색 그라데이션 — TTY 강제 + --banner (1.9.144+ 신규 슬로건)
   const r = cp.spawnSync(process.execPath, [CLI, '--version', '--banner'], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status === 0
@@ -2090,8 +2101,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.34) #3')) {
+  total++;
   // 1.9.34 LEERNESS_NO_INTERACTIVE=1: 구식 숫자 prompt 사용 (TTY 일 때만 의미 있음; 비-TTY는 어차피 --yes 폴백)
   // 검증: --no-interactive-select 플래그가 인식되고 에러 안 남
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noint-'));
@@ -2101,8 +2112,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 300)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.33) #2')) {
+  total++;
   // --no-stale-check / LEERNESS_NO_STALE_CHECK=1: 경고 스킵
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-stale2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended', '--no-stale-check'], { stdio: 'ignore', timeout: 30000 });
@@ -2121,8 +2132,8 @@ total++;
 }
 
 // 1.9.22 회귀: handoff --compact + orchestrate opt-in 정책 + llm-bench record
-total++;
-{
+if (e2eShard.take('B(1.9.22/1.36.255)')) {
+  total++;
   // handoff --compact: 1줄 요약 출력
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-compact-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2139,8 +2150,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.22)')) {
+  total++;
   // orchestrate: LEERNESS_OLLAMA_BASE_URL 없으면 거부 (자동 적용 금지 정책)
   const tmpO = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-orch-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpO, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2156,8 +2167,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.22) #2')) {
+  total++;
   // orchestrate: .env 파일 자동 로드 (단, fake URL이라 실제 호출은 실패)
   const tmpE = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-orch-env-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpE, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2171,8 +2182,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.22) #3')) {
+  total++;
   // llm-bench record: 히스토리 누적
   const tmpL = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-llmb-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpL, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2184,8 +2195,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.20) #2')) {
+  total++;
   // jest 출력 파싱
   const tmpJ = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tparse-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpJ, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2204,8 +2215,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.20) #3')) {
+  total++;
   // mocha "N passing"
   const tmpM = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mocha-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpM, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2222,8 +2233,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.20) #4')) {
+  total++;
   // verify-code --bench: scripts.bench 자동 실행 + evidence 누적
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bench-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2246,8 +2257,8 @@ total++;
 }
 
 // 1.9.15 회귀: brainstorm 라인번호 / --all-apps / --include
-total++;
-{
+if (e2eShard.take('B(1.9.15)')) {
+  total++;
   const tmpL = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-line-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpL, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.appendFileSync(path.join(tmpL, '.leerness/decisions.md'), '\n### 2026-05-13 — 캐시 정책 결정\n- Reason: rate limit 회피\n');
@@ -2257,8 +2268,8 @@ total++;
   console.log(ok ? '✓ B(1.9.15) brainstorm: 파일:라인 + 매치 필드 표시' : `✗ 1.9.15 brainstorm 위치 실패\n${r.stdout.slice(0,500)}`);
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.15) #2')) {
+  total++;
   // --include 다중 경로 통합
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wsA-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wsB-'));
@@ -2271,8 +2282,8 @@ total++;
   console.log(ok ? '✓ B(1.9.15) retro --include: 2개 통합' : '✗ 1.9.15 retro --include 실패');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
-total++;
-{
+if (e2eShard.take('B(1.9.15) #3')) {
+  total++;
   // insights --include
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iA-'));
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iB-'));
@@ -2283,8 +2294,8 @@ total++;
   console.log(ok ? '✓ B(1.9.15) insights --include: 표 형식 통합' : '✗ 1.9.15 insights --include 실패');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
-total++;
-{
+if (e2eShard.take('B(1.9.15) #4')) {
+  total++;
   // 잘못된 --include 경로 — warn 출력 + .leerness 있는 것만 처리
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bad-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2296,8 +2307,8 @@ total++;
 }
 
 // 1.9.14 회귀: A(Template 제외) / B(word boundary) / C(planned 포함) / D(코드블록 템플릿)
-total++;
-{
+if (e2eShard.take('B(1.9.14-A)')) {
+  total++;
   // A: init 직후 decisions.md의 Template이 결정으로 카운트되지 않아야 함
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-A-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2306,8 +2317,8 @@ total++;
   console.log(ok ? '✓ B(1.9.14-A) Template 제외: 누적 결정 0건' : `✗ A 실패\n${r.stdout.slice(0, 500)}`);
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.14-B)')) {
+  total++;
   // B: brainstorm 토큰 매칭 — "API"는 매치, "AP"는 부분 매치라 안 잡힘
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-B-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2320,8 +2331,8 @@ total++;
   console.log(ok ? '✓ B(1.9.14-B) brainstorm word boundary: limit 매치 / lim 부분매치 안 잡힘' : `✗ B 실패\n${r1.stdout.slice(0, 200)}\n${r2.stdout.slice(0, 200)}`);
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.14-C)')) {
+  total++;
   // C: retro 다음 우선 작업에 planned 포함
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-C-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2332,8 +2343,8 @@ total++;
   console.log(ok ? '✓ B(1.9.14-C) retro 다음 우선 작업에 planned 포함' : '✗ C 실패');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
-total++;
-{
+if (e2eShard.take('B(1.9.14-D)')) {
+  total++;
   // D: init decisions.md가 ```md 코드블록으로 감싸짐
   const tmpD = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-D-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpD, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2344,8 +2355,8 @@ total++;
 }
 
 // 1.9.13: retro / insights / brainstorm
-total++;
-{
+if (e2eShard.take('B(1.9.13)')) {
+  total++;
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-retro-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '캐시 helper', '--status', 'done', '--path', tmpR], { stdio: 'ignore', timeout: 10000 });
@@ -2360,8 +2371,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.13) #2')) {
+  total++;
   const tmpI = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ins-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpI, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'insights', tmpI], { encoding: 'utf8', timeout: 15000 });
@@ -2370,8 +2381,8 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.13) #3')) {
+  total++;
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brain-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.appendFileSync(path.join(tmpB, '.leerness/decisions.md'), `\n### 2026-05-13 — 캐시 차등 TTL 결정\n- Reason: open-meteo 응답 최적화\n`);
@@ -2382,8 +2393,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.13) #4')) {
+  total++;
   // session close 한 줄 요약 자동 출력
   const tmpS = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-summary-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpS, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2393,8 +2404,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(-600)); }
 }
 
-total++;
-{
+if (e2eShard.take('B(1.9.13) #5')) {
+  total++;
   // 5세션 마일스톤 — 자동 깊은 회고
   const tmpD = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-deep-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpD, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
@@ -2410,8 +2421,8 @@ total++;
 // 1.9.284: roadmap 전용 테스트 블록 — roadmap 생성 일시 ON (이후 다시 OFF)
 process.env.LEERNESS_NO_AUTO_ROADMAP = '0';
 // 1.9.12: auto roadmap — install 직후 자동 생성
-total++;
-{
+if (e2eShard.take('B(1.9.12)')) {
+  total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto1-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   const ok = fs.existsSync(path.join(tmpA, 'leerness.html'));
@@ -2420,8 +2431,8 @@ total++;
 }
 
 // 1.9.12: session close 후 자동 갱신
-total++;
-{
+if (e2eShard.take('B(1.9.12) #2')) {
+  total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   // 첫 mtime 캡처
@@ -2439,8 +2450,8 @@ total++;
 }
 
 // 1.9.12: roadmap auto off → 더 이상 자동 갱신 안 함
-total++;
-{
+if (e2eShard.take('B(1.9.12) #3')) {
+  total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto3-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'off', '--path', tmpA], { stdio: 'ignore' });
@@ -2456,8 +2467,8 @@ total++;
 }
 
 // 1.9.12: --on-every-change 옵트인 시 task add만으로 갱신
-total++;
-{
+if (e2eShard.take('B(1.9.12) #4')) {
+  total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto4-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'on', '--on-every-change', '--path', tmpA], { stdio: 'ignore' });
@@ -2474,8 +2485,8 @@ total++;
 process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
 
 // 1.9.12: status 출력
-total++;
-{
+if (e2eShard.take('B(1.9.12) #5')) {
+  total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto5-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   const r = cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'status', '--path', tmpA], { encoding: 'utf8' });
@@ -2485,8 +2496,8 @@ total++;
 }
 
 // 1.9.11: roadmap 명령 통합 + 화이트보드/토큰/중앙정렬 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.11)')) {
+  total++;
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   const r = cp.spawnSync(process.execPath, [CLI, 'roadmap', tmpR], { encoding: 'utf8' });
@@ -2495,8 +2506,8 @@ total++;
   console.log(ok ? '✓ B(1.9.11) roadmap: 명령 + 파일 생성' : `✗ roadmap 실패\n${r.stdout}\n${r.stderr}`);
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.11) #2')) {
+  total++;
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   cp.spawnSync(process.execPath, [CLI, 'roadmap', tmpR], { stdio: 'ignore' });
@@ -2505,8 +2516,8 @@ total++;
   console.log(ok ? '✓ B(1.9.11) roadmap: 화이트보드 (panning/zoom JS)' : '✗ 화이트보드 부재');
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.11) #3')) {
+  total++;
   // 사용자 design-system 토큰 주입
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm3-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
@@ -2519,8 +2530,8 @@ total++;
   console.log(ok ? '✓ B(1.9.11) roadmap: design-system 토큰 자동 주입' : '✗ 토큰 주입 실패');
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.11) #4')) {
+  total++;
   // recommended에 project-roadmap-generator 자동 포함
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm4-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
@@ -2532,8 +2543,8 @@ total++;
 
 // 1.9.10 A: skillpack 동적 로드 (LEERNESS_SKILLPACK_PATH로 시뮬)
 // 1.36.55 (외부감사 이식성): 형제 디렉토리 가정 제거 — 없으면 최소 catalog.json 픽스처를 테스트가 직접 생성 (자기완결)
-total++;
-{
+if (e2eShard.take('B(1.9.10)')) {
+  total++;
   let skillpackDir = path.resolve(__dirname, '..', '..', 'leerness-skillpack');
   if (!fs.existsSync(path.join(skillpackDir, 'catalog.json'))) {
     skillpackDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-spfix-'));
@@ -2551,8 +2562,8 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 // 1.9.10 A: skillpack 없을 때 builtin fallback
-total++;
-{
+if (e2eShard.take('B(1.9.10) #2')) {
+  total++;
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'list', '--path', tmp], {
     encoding: 'utf8',
     env: Object.assign({}, process.env, { LEERNESS_SKILLPACK_PATH: '' })
@@ -2563,8 +2574,8 @@ total++;
 }
 
 // 1.9.10 B: detectGitRemote (가짜 git remote 시뮬은 어려움 — 실제 git 명령으로 확인)
-total++;
-{
+if (e2eShard.take('B(1.9.10) #3')) {
+  total++;
   // tmp는 git init이 없음 → detectGitRemote는 null → publish 호출 시 'Git remote: 없음' 출력
   // 시뮬: tmp에 git init + remote add
   gitSpawn(['init'], { cwd: tmp, encoding: 'utf8' });
@@ -2580,8 +2591,8 @@ total++;
 }
 
 // 1.9.8: rule add/list/pause/resume/remove
-total++;
-{
+if (e2eShard.take('B(1.9.8)')) {
+  total++;
   const r1 = cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '매 업데이트마다 버전 patch bump', '--trigger', 'every-update', '--path', tmp], { encoding: 'utf8' });
   const r2 = cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '매 업데이트마다 패치노트 추가', '--trigger', 'every-update', '--path', tmp], { encoding: 'utf8' });
   const r3 = cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '세션 종료마다 배포', '--trigger', 'session-close', '--path', tmp], { encoding: 'utf8' });
@@ -2590,8 +2601,8 @@ total++;
   console.log(ok ? '✓ B(1.9.8) rule add/list: 3개 등록' : '✗ B(1.9.8) rule add/list 실패');
   if (!ok) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.8) #2')) {
+  total++;
   // pause + handoff에서 paused는 안 보여야 함
   cp.spawnSync(process.execPath, [CLI, 'rule', 'pause', 'R-0001', '--path', tmp], { encoding: 'utf8' });
   const hr = cp.spawnSync(process.execPath, [CLI, 'handoff', tmp], { encoding: 'utf8' });
@@ -2600,8 +2611,8 @@ total++;
   if (!ok) { failed++; console.log(hr.stdout); }
   cp.spawnSync(process.execPath, [CLI, 'rule', 'resume', 'R-0001', '--path', tmp], { encoding: 'utf8' });
 }
-total++;
-{
+if (e2eShard.take('B(1.9.8) #3')) {
+  total++;
   // rule stop / resume-all
   cp.spawnSync(process.execPath, [CLI, 'rule', 'stop', '--path', tmp], { encoding: 'utf8' });
   const rl = cp.spawnSync(process.execPath, [CLI, 'rule', 'list', '--path', tmp], { encoding: 'utf8' });
@@ -2614,8 +2625,8 @@ total++;
 }
 
 // 1.9.8: release bump
-total++;
-{
+if (e2eShard.take('B(1.9.8) #4')) {
+  total++;
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rel-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   fs.writeFileSync(path.join(tmpR, 'package.json'), JSON.stringify({ name: 't', version: '1.0.0' }));
@@ -2633,8 +2644,8 @@ total++;
 }
 
 // T-0122: --patch는 경고 없이 수용하고, leerness 패키지의 package/bin/README 버전 표면을 함께 갱신한다.
-total++;
-{
+if (e2eShard.take('B(T-0122)')) {
+  total++;
   const probe = cp.spawnSync(process.execPath, [path.join(__dirname, 'release-bump-probe.js')], {
     cwd: path.resolve(__dirname, '..'), encoding: 'utf8', timeout: 30000
   });
@@ -2644,8 +2655,8 @@ total++;
 }
 
 // 1.9.8: release note → CHANGELOG.md 자동 갱신
-total++;
-{
+if (e2eShard.take('B(1.9.8) #5')) {
+  total++;
   const tmpN = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-note-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpN, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   fs.writeFileSync(path.join(tmpN, 'package.json'), JSON.stringify({ name: 't', version: '0.1.0' }));
@@ -2657,8 +2668,8 @@ total++;
 }
 
 // 1.9.8: session close가 rule verification 보고
-total++;
-{
+if (e2eShard.take('pass')) {
+  total++;
   // tmp는 위에서 rule 3개 등록됨
   // package.json 만들기 + 버전 변경 시뮬 (rule R-0001은 every-update 버전 룰)
   fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'tmp-e2e', version: '0.1.0' }));
@@ -2680,8 +2691,8 @@ total++;
 }
 
 // 1.9.7 A: verify-code — 가짜 package.json + 통과 시나리오
-total++;
-{
+if (e2eShard.take('B(1.9.7-A)')) {
+  total++;
   const tmpV = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpV, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   fs.writeFileSync(path.join(tmpV, 'package.json'), JSON.stringify({ name: 't', version: '0.0.1', scripts: { test: 'node -e "console.log(\\"OK\\");process.exit(0)"' } }));
@@ -2693,8 +2704,8 @@ total++;
 }
 
 // 1.9.7 A: verify-code — 실패 시나리오
-total++;
-{
+if (e2eShard.take('B(1.9.7-A) #2')) {
+  total++;
   const tmpV2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpV2, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   fs.writeFileSync(path.join(tmpV2, 'package.json'), JSON.stringify({ name: 't', version: '0.0.1', scripts: { test: 'node -e "process.exit(2)"' } }));
@@ -2705,8 +2716,8 @@ total++;
 }
 
 // 1.9.7 B: lessons — decisions/evidence에 시드 후 query로 회수
-total++;
-{
+if (e2eShard.take('B(1.9.7-B)')) {
+  total++;
   fs.appendFileSync(path.join(tmp, '.leerness/decisions.md'), `\n### 2026-05-08 — Decision: 캐시 차등 TTL 도입\n- Reason: 단일 5분 TTL이 daily 데이터에 비효율\n- Impact: open-meteo 응답 캐시 적중률 ↑\n`);
   fs.appendFileSync(path.join(tmp, '.leerness/review-evidence.md'), `\n## 2026-05-08 e2e\n✗ 캐시 키 불안정 — 좌표 정규화 부재 (롤백 후 fix)\n`);
   const r = cp.spawnSync(process.execPath, [CLI, 'lessons', '--query', '캐시', '--path', tmp], { encoding: 'utf8' });
@@ -2716,8 +2727,8 @@ total++;
 }
 
 // 1.9.7 B: guide가 lessons를 자동 통합
-total++;
-{
+if (e2eShard.take('B(1.9.7-B) #2')) {
+  total++;
   const r = cp.spawnSync(process.execPath, [CLI, 'guide', 'src/components/Card.html', '--path', tmp], { encoding: 'utf8' });
   const ok = r.status === 0 && /## 4\. Lessons/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.7-B) guide: lessons 섹션 자동 추가' : '✗ B guide 통합 실패');
@@ -2725,8 +2736,8 @@ total++;
 }
 
 // 1.9.7 C: lazy detect --auto-track
-total++;
-{
+if (e2eShard.take('B(1.9.7-C)')) {
+  total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-c-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   // 의도된 진짜 TODO (주석)
@@ -2746,8 +2757,8 @@ total++;
 }
 
 // 1.9.7 C: 같은 TODO 재실행 시 known-todos가 적용되어 newTodos 0
-total++;
-{
+if (e2eShard.take('B(1.9.7-C) #2')) {
+  total++;
   // 위 시나리오 이어서 — known-todos가 있으므로 새 TODO=0이어야 함
   // 별도 새 tmp로 재현 (tmpC는 위에서 자동 등록됐으니 same dir에서 다시 호출)
   // 위 tmpC는 already auto-tracked
@@ -2768,8 +2779,8 @@ total++;
 }
 
 // 1.9.6 회귀: task relink — 인위적 link 손실 → 자동 매칭 제안 + --apply 자동 복구
-total++;
-{
+if (e2eShard.take('B(1.9.6)')) {
+  total++;
   // plan.md에 새 milestone 추가, progress엔 link 없는 비슷한 row 추가
   const planPath_ = path.join(tmp, '.leerness/plan.md');
   fs.appendFileSync(planPath_,
@@ -2790,8 +2801,8 @@ total++;
   console.log(okSuggest ? '✓ B(1.9.6) task relink 제안: 2개 매칭 발견 (--dry-run 도 같은 제안)' : `✗ B(1.9.6) 제안 실패\n${r1.stdout}\n--dry-run: exit=${r1d.status} ${r1d.stdout}${r1d.stderr}`);
   if (!okSuggest) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.6) #2')) {
+  total++;
   // --apply
   const r2 = cp.spawnSync(process.execPath, [CLI, 'task', 'relink', '--apply', '--path', tmp], { encoding: 'utf8' });
   const tracker = fs.readFileSync(path.join(tmp, '.leerness/progress-tracker.md'), 'utf8');
@@ -2799,8 +2810,8 @@ total++;
   console.log(okApply ? '✓ B(1.9.6) task relink --apply: 자동 복구' : '✗ B(1.9.6) --apply 실패');
   if (!okApply) failed++;
 }
-total++;
-{
+if (e2eShard.take('B(1.9.6) #3')) {
+  total++;
   // audit이 task relink 안내를 출력하는지 (이번엔 link 복구 후라 미연결 milestone 없을 것)
   // 일부러 새 milestone 추가 후 audit
   fs.appendFileSync(path.join(tmp, '.leerness/plan.md'),
@@ -2812,8 +2823,8 @@ total++;
 }
 
 // 1.9.5 G 회귀: impact medium 카테고리 — 동적 path 패턴
-total++;
-{
+if (e2eShard.take('B(G)')) {
+  total++;
   // builder.js에서 path.join + readFileSync + Card.html을 동적 사용
   fs.writeFileSync(path.join(tmp, 'src/builder.js'),
     `const fs = require('fs'); const path = require('path');\n` +
@@ -2826,8 +2837,8 @@ total++;
 }
 
 // 1.9.4 회귀: --fail-on-violation cross-platform 종료
-total++;
-{
+if (e2eShard.take('B(B)')) {
+  total++;
   fs.appendFileSync(path.join(tmp, 'src/pages/home.html'), '\n<style>.x{color:#cafe00;}</style>\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'ui', 'consistency', tmp, '--fail-on-violation'], { encoding: 'utf8' });
   const ok = r.status === 1;
@@ -2836,8 +2847,8 @@ total++;
 }
 
 // 1.9.4 회귀: lazy detect string literal 무시
-total++;
-{
+if (e2eShard.take('B(C)')) {
+  total++;
   // false positive 시드: TODO 단어가 string literal 안에 있는 코드
   fs.writeFileSync(path.join(tmp, 'src/regex-helper.js'), `module.exports = { TODO_RE: /\\bTODO\\b/g, label: 'TODO list' };\n`);
   // 다른 한편 진짜 TODO 주석
@@ -2853,8 +2864,8 @@ total++;
 }
 
 // 1.9.4 회귀: task fix-evidence 표시
-total++;
-{
+if (e2eShard.take('B(D)')) {
+  total++;
   // T-0001 evidence를 placeholder로 (test before가 'review-evidence:e2e' 였음 → 'user-request'로 바꿈)
   const trackerPath = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath, 'utf8');
@@ -2867,8 +2878,8 @@ total++;
 }
 
 // 1.9.4 회귀: --set 일괄 갱신
-total++;
-{
+if (e2eShard.take('B(D2)')) {
+  total++;
   // T-0001 evidence를 plan:M-0002 링크 포함한 placeholder로 (1.9.5 link 보존 검증용 시드)
   const trackerPath2 = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath2, 'utf8');
@@ -2882,8 +2893,8 @@ total++;
 }
 
 // 1.9.5 F 회귀: --set 시 plan:M-XXXX 링크 자동 보존
-total++;
-{
+if (e2eShard.take('B(F)')) {
+  total++;
   const tracker = fs.readFileSync(path.join(tmp, '.leerness/progress-tracker.md'), 'utf8');
   const ok = /npm test 통과 \(e2e\) \(plan:M-0002\)/.test(tracker);
   console.log(ok ? '✓ B(F) fix-evidence --set: link 자동 보존' : `✗ B(F) link 손실\n${tracker}`);
@@ -2891,8 +2902,8 @@ total++;
 }
 
 // 1.9.5 F neg: --no-preserve-link
-total++;
-{
+if (e2eShard.take('B(F neg)')) {
+  total++;
   // T-0002 같은 row를 placeholder로 시드
   const trackerPath3 = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath3, 'utf8');
@@ -2907,8 +2918,8 @@ total++;
 }
 
 // 1.9.4 회귀: .leerness-skip-dirs 적용
-total++;
-{
+if (e2eShard.take('B(E)')) {
+  total++;
   fs.mkdirSync(path.join(tmp, '_devspace'), { recursive: true });
   fs.writeFileSync(path.join(tmp, '_devspace/secret-config.js'), `const k = "ghp_${'a1B2'.repeat(9)}";\n`);
   fs.writeFileSync(path.join(tmp, '.leerness-skip-dirs'), '_devspace/\n# 주석은 무시\n');
@@ -2927,8 +2938,8 @@ run('--version',           ['--version']);
 run('--help',              ['--help']);
 
 // 1.9.269 회귀 (UR-0022): 빈 디렉토리 신규 init + auto → OS 시스템 언어로 .leerness/LANGUAGE 결정
-total++;
-{
+if (e2eShard.take('B(1.9.269)')) {
+  total++;
   const tmpEn = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lang-en-'));
   const tmpKo = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lang-ko-'));
   // LANG 명시 (POSIX) — Windows 에서도 _detectSystemLang 이 LANG 우선 읽음
@@ -2945,8 +2956,8 @@ total++;
 }
 
 // 1.9.270 회귀: agent roles — 모델별 역할 부여 (사용자 명시)
-total++;
-{
+if (e2eShard.take('B(1.9.270)')) {
+  total++;
   const tmpRole = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-roles-'));
   // set (한국어 별칭) + model
   const rSet = cp.spawnSync(process.execPath, [CLI, 'roles', 'set', '코딩', '--provider', 'codex', '--model', 'gpt-5.5', '--path', tmpRole, '--json'], { encoding: 'utf8', timeout: 15000 });
@@ -2971,8 +2982,8 @@ total++;
 }
 
 // 1.9.272 회귀: capabilities — 권한/보안 표면 공개 (GPT-5.5 리뷰 반영)
-total++;
-{
+if (e2eShard.take('B(1.9.272)')) {
+  total++;
   const rJson = cp.spawnSync(process.execPath, [CLI, 'capabilities', '--json'], { encoding: 'utf8', timeout: 15000 });
   let jsonOk = false;
   try {
@@ -2989,8 +3000,8 @@ total++;
 }
 
 // 1.9.273 회귀 (UR-0027): 빠른 테스트 인프라 존재 검증 (smoke.js + test:fast script). 실제 smoke 실행은 별도(npm run test:fast).
-total++;
-{
+if (e2eShard.take('B(1.9.273)')) {
+  total++;
   const smokePath = path.resolve(__dirname, 'smoke.js');
   const smokeExists = fs.existsSync(smokePath);
   // 구문 유효성 (node --check)
@@ -3006,8 +3017,8 @@ total++;
 }
 
 // 1.9.274 회귀 (UR-0025 1단계): lib/ 모듈 분리 — pure-utils.js 존재 + require + 7종 export + 패키지 files 포함.
-total++;
-{
+if (e2eShard.take('B(1.9.274/283)')) {
+  total++;
   const libPath = path.resolve(__dirname, '..', 'lib', 'pure-utils.js');
   const libExists = fs.existsSync(libPath);
   let exportsOk = false;
@@ -3030,8 +3041,8 @@ total++;
 }
 
 // 1.9.275 회귀 (UR-0026): release channel — 안정/실험 채널 정책 (npm dist-tag)
-total++;
-{
+if (e2eShard.take('B(1.9.275)')) {
+  total++;
   const r = cp.spawnSync(process.execPath, [CLI, 'release', 'channel', tmp, '--json', '--offline'], { encoding: 'utf8', timeout: 15000 });
   let jsonOk = false;
   try { const j = JSON.parse(r.stdout); jsonOk = j.defaultPublishTag === 'latest' && j.policy && j.policy.stable === 'latest' && j.policy.experimental === 'next'; } catch {}
@@ -3044,8 +3055,8 @@ total++;
 }
 
 // 1.9.276 회귀 (GPT-5.5 2차 리뷰): init --dry-run / --minimal / --no-env
-total++;
-{
+if (e2eShard.take('B(1.9.276)')) {
+  total++;
   // --dry-run: 파일 0개 생성 + 요약 출력
   const dDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dry-'));
   const rDry = cp.spawnSync(process.execPath, [CLI, 'init', dDir, '--dry-run', '--yes'], { encoding: 'utf8', timeout: 30000 });
@@ -3070,8 +3081,8 @@ total++;
 }
 
 // 1.9.278 회귀 (UR-0032): .leerness/ 상태 스키마 라이프사이클 (start→record→verify→handoff→show)
-total++;
-{
+if (e2eShard.take('B(1.9.278)')) {
+  total++;
   const sDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-state-'));
   const run = (a) => cp.spawnSync(process.execPath, [CLI, 'state', ...a, '--path', sDir], { encoding: 'utf8', timeout: 15000 });
   run(['start', 'API 구현', '--agent', 'claude', '--model', 'claude-opus-4-7', '--task', 'T-0001']);
@@ -3102,8 +3113,8 @@ total++;
 }
 
 // 1.9.279 회귀 (UR-0031): 상태 substrate MCP 시맨틱 verb (state_start → state_show 라운드트립)
-total++;
-{
+if (e2eShard.take('B(1.9.279)')) {
+  total++;
   const mDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcpstate-'));
   const mcpCall = (req) => {
     const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 10000, input: JSON.stringify(req) + '\n' });
@@ -3124,8 +3135,8 @@ total++;
 }
 
 // 1.9.280 회귀 (UR-0033): leerness adapter — 도구별 선택 생성 + .mcp.json
-total++;
-{
+if (e2eShard.take('B(1.9.280)')) {
+  total++;
   const aDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-adapter-'));
   cp.spawnSync(process.execPath, [CLI, 'init', aDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000 });
   // adapter cursor: .cursor + .mcp.json 생성, .claude 미생성(minimal이라 commands는 있으나 cursor adapter는 안 건드림)
@@ -3150,8 +3161,8 @@ total++;
 }
 
 // 1.9.281 회귀 (UR-0034): 권한 등급 policy (show/set/check + enforce)
-total++;
-{
+if (e2eShard.take('B(1.9.281)')) {
+  total++;
   const pDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-policy-'));
   const run = (a) => cp.spawnSync(process.execPath, [CLI, 'policy', ...a, '--path', pDir], { encoding: 'utf8', timeout: 15000 });
   // 기본: enforce OFF + 8 등급
@@ -3172,8 +3183,8 @@ total++;
 }
 
 // 1.9.282 회귀 (UR-0035): AGENTS.md 정적 vs 동적(leerness) 역할 경계 포지셔닝
-total++;
-{
+if (e2eShard.take('B(1.9.282)')) {
+  total++;
   const gDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pos-'));
   cp.spawnSync(process.execPath, [CLI, 'init', gDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000 });
   let ok = false;
@@ -3186,8 +3197,8 @@ total++;
 }
 
 // 1.9.285 회귀 (UR-0023): reuse-check — 외부 OSS 빌드 vs 재사용 게이트
-total++;
-{
+if (e2eShard.take('B(1.9.285)')) {
+  total++;
   const r1 = cp.spawnSync(process.execPath, [CLI, 'reuse-check', 'JWT 인증 로그인', '--json'], { encoding: 'utf8', timeout: 15000 });
   let jsonOk = false;
   try { const j = JSON.parse(r1.stdout); jsonOk = j.feature && j.categories.some(c => c.key === 'auth') && Array.isArray(j.checklist) && j.checklist.length >= 5 && j.network === false; } catch {}
@@ -3202,8 +3213,8 @@ total++;
 }
 
 // 1.9.286 회귀 (UR-0024): skill impact — 영향 경량 상관추적 + 정직한 advisory
-total++;
-{
+if (e2eShard.take('B(1.9.286)')) {
+  total++;
   const iDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-impact-'));
   cp.spawnSync(process.execPath, [CLI, 'init', iDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_OFFLINE: '1' } });
   // 표본 부족 (검증 0건) → 판단 보류 advisory
@@ -3223,8 +3234,8 @@ total++;
 }
 
 // 1.9.287 회귀 (Codex 리뷰 수렴): verify-claim --require-evidence + handoff 펜스 sanitize + status minimal
-total++;
-{
+if (e2eShard.take('B(1.9.287)')) {
+  total++;
   const cDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-codex-'));
   const env = { ...process.env, LEERNESS_OFFLINE: '1' };
   cp.spawnSync(process.execPath, [CLI, 'init', cDir, '--minimal', '--no-env', '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000, env });   // 1.36.55: 로케일 고정 — auto(en 환경)에서 ko 정규식 단언이 깨지던 이식성 결함
@@ -3258,8 +3269,8 @@ total++;
 }
 
 // 1.9.288 회귀 (Codex gpt-5.5 리뷰 수렴): MCP policy enforce + release dry-run + 도구수 정합
-total++;
-{
+if (e2eShard.take('B(1.9.288)')) {
+  total++;
   const env = { ...process.env, LEERNESS_OFFLINE: '1' };
   // #1 MCP policy: read-only enforce → state_start(write) 차단 + state.json 미생성
   const pDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcppol-'));
@@ -3295,8 +3306,8 @@ total++;
 }
 
 // 1.9.289 회귀 (Codex #3): _shellQuoteArg — REPL agy/copilot 프롬프트 셸 주입 중립화
-total++;
-{
+if (e2eShard.take('B(1.9.289)')) {
+  total++;
   let ok = false;
   try {
     const h = require(path.resolve(__dirname, '..', 'bin', 'leerness.js'));
@@ -3312,8 +3323,8 @@ total++;
 }
 
 // 1.9.290 회귀 (Codex #4 UR-0037): require('harness') 가 호스트 프로세스 오염 X (top-level side effect 격리)
-total++;
-{
+if (e2eShard.take('B(1.9.290)')) {
+  total++;
   let ok = false;
   try {
     // 깨끗한 자식에서: 내 warning listener 등록 → require → 보존 확인 + NODE_OPTIONS 미변경
@@ -3331,8 +3342,8 @@ total++;
 }
 
 // 1.9.291 회귀 (UR-0025 2단계): lib/agent-registry.js 모듈 분리 — 단일출처 + 부작용 0
-total++;
-{
+if (e2eShard.take('B(1.9.291)')) {
+  total++;
   let ok = false;
   try {
     const reg = require(path.resolve(__dirname, '..', 'lib', 'agent-registry.js'));
@@ -3352,8 +3363,8 @@ total++;
 }
 
 // 1.9.292 회귀 (UR-0031): leerness context — get_project_context 집약 시맨틱 verb
-total++;
-{
+if (e2eShard.take('B(1.9.292)')) {
+  total++;
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'context', tmp, '--json'], { cwd: tmp, encoding: 'utf8', timeout: 30000 });
@@ -3370,8 +3381,8 @@ total++;
 }
 
 // 1.9.293 회귀: idempotency audit --auto-fix + progressHeader 복제버그 fix
-total++;
-{
+if (e2eShard.take('B(1.9.293)')) {
+  total++;
   let ok = false;
   try {
     const idemDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-idem-'));
@@ -3397,8 +3408,8 @@ total++;
 }
 
 // 1.9.294 회귀 (UR-0025 3단계): lib/role-catalog.js 모듈 분리 — 단일출처 + 부작용 0
-total++;
-{
+if (e2eShard.take('B(1.9.294)')) {
+  total++;
   let ok = false;
   try {
     const reg = require(path.resolve(__dirname, '..', 'lib', 'role-catalog.js'));
@@ -3418,8 +3429,8 @@ total++;
 }
 
 // 1.9.295 회귀 (UR-0025 4단계): lib/catalogs.js 모듈 분리 — 단일출처 + 부작용 0 + 소비 명령 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.295)')) {
+  total++;
   let ok = false;
   try {
     const reg = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -3443,8 +3454,8 @@ total++;
 }
 
 // 1.9.296 회귀 (UR-0030): leerness about — 정체성(AI 운영 레이어) verb + MCP + README 섹션
-total++;
-{
+if (e2eShard.take('B(1.9.296)')) {
+  total++;
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'about', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
@@ -3467,8 +3478,8 @@ total++;
 }
 
 // 1.9.297 회귀 (UR-0025 5단계): lib/mcp-tools.js 단일출처 — tools/list == 모듈 == _mcpToolCount (Codex #5 영구해소)
-total++;
-{
+if (e2eShard.take('B(1.9.297)')) {
+  total++;
   let ok = false;
   try {
     const T = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js'));
@@ -3487,8 +3498,8 @@ total++;
 }
 
 // 1.9.298 회귀 (UR-0038 외부리뷰): writeUtf8 원자적 쓰기 — 반복 쓰기 후 무손상 + temp 잔여 0
-total++;
-{
+if (e2eShard.take('B(1.9.298)')) {
+  total++;
   let ok = false;
   try {
     const aDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-atomic-'));
@@ -3518,8 +3529,8 @@ total++;
 }
 
 // 1.9.299 회귀 (UR-0039 외부리뷰): npm test 시크릿 차단 — 토큰이 보이면 exit 1 인 test 스크립트가 verify-code 에서 통과해야(스크럽됨)
-total++;
-{
+if (e2eShard.take('B(1.9.299)')) {
+  total++;
   let ok = false;
   try {
     const secDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sec-'));
@@ -3544,8 +3555,8 @@ total++;
 }
 
 // 1.9.300 회귀 (UR-0040 외부리뷰): 셸 주입 표면 제거 — fetchNpmLatest execFile + argList 인용 + update --check 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.300)')) {
+  total++;
   let ok = false;
   try {
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
@@ -3565,8 +3576,8 @@ total++;
 }
 
 // 1.9.301 회귀 (UR-0041 외부리뷰): MCP 정책 게이트가 도구 requiredTier 메타데이터로 under-classify 갭 차단
-total++;
-{
+if (e2eShard.take('B(1.9.301)')) {
+  total++;
   let ok = false;
   try {
     const pDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tier-'));
@@ -3598,8 +3609,8 @@ total++;
 }
 
 // 1.9.302 회귀 (UR-0042 외부리뷰): verify-claim git diff 시맨틱 교차검증 (변경 파일 주장 ✓ / 미변경 주장 ⚠ + strict FAIL)
-total++;
-{
+if (e2eShard.take('B(1.9.302)')) {
+  total++;
   let ok = false;
   try {
     const vDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc-'));
@@ -3626,8 +3637,8 @@ total++;
 }
 
 // 1.9.303 회귀 (UR-0043 외부리뷰): 동시 task add lost-update 락 — 6개 병렬 추가 시 모두 보존 + ID 충돌 0
-total++;
-{
+if (e2eShard.take('B(1.9.303)')) {
+  total++;
   let ok = false;
   try {
     const lDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lock-'));
@@ -3663,8 +3674,8 @@ total++;
 }
 
 // 1.9.304 회귀 (UR-0025): lib/analyzers.js 모듈 분리 — 단일출처 + 부작용 0 + 소비 명령 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.304)')) {
+  total++;
   let ok = false;
   try {
     const a = require(path.resolve(__dirname, '..', 'lib', 'analyzers.js'));
@@ -3685,8 +3696,8 @@ total++;
 }
 
 // 1.9.305 회귀 (사용자 명시): honesty-check — AI 인식론적 정직성 3차원 + exit code + MCP 노출
-total++;
-{
+if (e2eShard.take('B(1.9.305)')) {
+  total++;
   let ok = false;
   try {
     // 양호(근거 있음) → exit 0 + ✓
@@ -3708,8 +3719,8 @@ total++;
 }
 
 // 1.9.306 회귀 (UR-0045 설치리뷰): exit code 일관성 — 오류 경로 exit 1, 정상/help exit 0
-total++;
-{
+if (e2eShard.take('B(1.9.306)')) {
+  total++;
   let ok = false;
   try {
     const eDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-exit-'));
@@ -3732,8 +3743,8 @@ total++;
 }
 
 // 1.9.307 회귀 (UR-0055 사용자명시): brief — 프로젝트 청사진 set/show/export + README 섹션 + 멱등 업데이트
-total++;
-{
+if (e2eShard.take('B(1.9.307)')) {
+  total++;
   let ok = false;
   try {
     const bDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brief-'));
@@ -3761,8 +3772,8 @@ total++;
 }
 
 // 1.9.308 회귀 (UR-0055 2단계): brief update --direction 이력 + context 통합 + MCP leerness_brief
-total++;
-{
+if (e2eShard.take('B(1.9.308)')) {
+  total++;
   let ok = false;
   try {
     const b2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brief2-'));
@@ -3793,8 +3804,8 @@ total++;
 }
 
 // 1.9.309 회귀 (UR-0048 설치리뷰 critical): verify-claim done 주장 evidence 기본강제 + --lenient + MCP 도달
-total++;
-{
+if (e2eShard.take('B(1.9.309)')) {
+  total++;
   let ok = false;
   try {
     const vc = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc48-'));
@@ -3819,8 +3830,8 @@ total++;
 }
 
 // 1.9.310 회귀 (UR-0046 설치리뷰): 입력 스키마 검증 — 무효 status/trigger 거부, 유효/--force 통과, every-round 보존
-total++;
-{
+if (e2eShard.take('B(1.9.310)')) {
+  total++;
   let ok = false;
   try {
     const vd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-val-'));
@@ -3840,8 +3851,8 @@ total++;
 }
 
 // 1.9.311 회귀 (UR-0047 설치리뷰): init 가드 — 미초기화 디렉토리 write 차단, .leerness 미생성, --force 우회, init 후 정상
-total++;
-{
+if (e2eShard.take('B(1.9.311)')) {
+  total++;
   let ok = false;
   try {
     // dir1: 미초기화 7개 write 차단(exit 1) + .leerness 미생성 + --force 우회
@@ -3879,8 +3890,8 @@ total++;
 
 // 1.9.312 회귀 (UR-0050 설치리뷰): secret 스캐너 현대 키 — sk-proj-/sk-ant-api03-(_)/gho_/Stripe/npm 검출 + exit 1
 //   주의: e2e.js 는 scan 대상이라 키는 문자열 연결로 구성(리터럴 금지 — 자기 repo scan 오탐 방지)
-total++;
-{
+if (e2eShard.take('B(1.9.312)')) {
+  total++;
   let ok = false;
   try {
     const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-secmod-'));
@@ -3908,8 +3919,8 @@ total++;
 }
 
 // 1.9.313 회귀 (UR-0049 설치리뷰): MCP notification 준수 — id 없는 요청 무응답 + ping {} + notifications/* 가드
-total++;
-{
+if (e2eShard.take('B(1.9.313)')) {
+  total++;
   let ok = false;
   try {
     const input = [
@@ -3934,8 +3945,8 @@ total++;
 
 // 1.9.314 회귀 (UR-0049→UR-0052 설치리뷰): PowerShell 감지 — pwsh7(channel) ps5-chain 오탐 제거 + ps5.1 정상 발화
 //   env 마커로 셸/버전 판별(cross-platform) — POWERSHELL_DISTRIBUTION_CHANNEL=pwsh7, Documents\WindowsPowerShell=ps5.1
-total++;
-{
+if (e2eShard.take('B(1.9.314)')) {
+  total++;
   let ok = false;
   try {
     const sg = (extra) => { const r = cp.spawnSync(process.execPath, [CLI, 'shell-guard', 'a && b', '--json'], { encoding: 'utf8', timeout: 15000, env: { ...process.env, ...extra } }); try { return JSON.parse(r.stdout); } catch { return null; } };
@@ -3950,8 +3961,8 @@ total++;
 }
 
 // 1.9.315 회귀 (UR-0054 설치리뷰): doc/surface 정합 — doctor 진단 명령 + stale MCP 카운트 동적화(commands/banner)
-total++;
-{
+if (e2eShard.take('B(1.9.315)')) {
+  total++;
   let ok = false; const dbg = {};
   try {
     // 1.36.100: 이 호출만 30초로 남아 있었다 — doctor 는 selftest 를 내장해 격리 실측 31s(게시된 1.36.98 도 동일)라
@@ -3981,8 +3992,8 @@ total++;
 
 // 1.9.316 회귀 (drift 마커 버그): session-handoff 'Last generated' 중복 누적 방지 + drift 'session close 누락' 클리어
 //   근본: sessionClose 프론트매터 추출이 본문 '---' 를 오인 → 구 블록 보존 → 첫(구) Last generated 를 drift 가 읽어 영구 오발화
-total++;
-{
+if (e2eShard.take('B(1.9.316/1.36.262)')) {
+  total++;
   let ok = false;
   try {
     const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-driftmark-'));
@@ -4013,8 +4024,8 @@ total++;
 }
 
 // 1.9.317 회귀 (UR-0051 설치리뷰): 텔레메트리 분리 — 내부 auto-call(LEERNESS_INTERNAL)이 usage 집계 오염 안 함
-total++;
-{
+if (e2eShard.take('B(1.9.317)')) {
+  total++;
   let ok = false;
   try {
     const td = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-telem-'));
@@ -4039,8 +4050,8 @@ total++;
 }
 
 // 1.9.318 회귀 (UR-0025 모듈화): HTML 파싱 유틸 3종 lib/pure-utils 분리 + harness 인라인 제거 + 동작 보존 + 소비명령 로드
-total++;
-{
+if (e2eShard.take('B(1.9.318)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4059,8 +4070,8 @@ total++;
 }
 
 // 1.9.319 회귀 (UR-0044): MCP ToolRegistry 일치성 — tools/list 수 = def 수 + 대표 도구 dispatch(Unknown tool 아님)
-total++;
-{
+if (e2eShard.take('B(1.9.319)')) {
+  total++;
   let ok = false;
   try {
     const toolsLen = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js')).length;
@@ -4076,8 +4087,8 @@ total++;
 }
 
 // 1.9.320 회귀 (UR-0053): count drift — decisions/lessons 카운터가 코드펜스(```md 템플릿 예시) 제외 (decisions=2 실제1 버그)
-total++;
-{
+if (e2eShard.take('B(1.9.320)')) {
+  total++;
   let ok = false;
   try {
     const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-countdrift-'));
@@ -4094,8 +4105,8 @@ total++;
 }
 
 // 1.9.321 회귀 (UR-0053): decision 빈 필드(alternatives)가 [ \t]* 파싱으로 다음 줄(impact)을 캡처하지 않음
-total++;
-{
+if (e2eShard.take('B(1.9.321)')) {
+  total++;
   let ok = false;
   try {
     const fd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-field-'));
@@ -4113,8 +4124,8 @@ total++;
 }
 
 // 1.9.322 회귀 (UR-0044): _mcpToCliArgs 추출 후 인자 매핑(push) 보존 + 미지 도구 -32601
-total++;
-{
+if (e2eShard.take('B(1.9.322)')) {
+  total++;
   let ok = false;
   try {
     const md = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tocli-'));
@@ -4135,8 +4146,8 @@ total++;
 }
 
 // 1.9.323 회귀 (UR-0054 ⑥): fresh init → gate(lazy detect) 통과(부재신호 비차단) + active 거짓완료는 차단 유지
-total++;
-{
+if (e2eShard.take('B(1.9.323)')) {
+  total++;
   let ok = false;
   try {
     const fg = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-freshgate-'));
@@ -4153,8 +4164,8 @@ total++;
 }
 
 // 1.9.324 회귀 (UR-0025 모듈화): 메모리 MD 파서 2종 lib/pure-utils 분리 + harness 인라인 제거 + _compareSemver 중복제거 + 소비명령
-total++;
-{
+if (e2eShard.take('B(1.9.324)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4180,8 +4191,8 @@ total++;
 }
 
 // 1.9.325 회귀 (UR-0025 모듈화): _classifyIntent lib/pure-utils 분리 + harness 인라인 제거 + 소비명령(intent classify)
-total++;
-{
+if (e2eShard.take('B(1.9.325)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4206,8 +4217,8 @@ total++;
 }
 
 // 1.9.326 회귀 (UR-0025 모듈화): 순수 문자열/셸/env 유틸 3종 lib/pure-utils 분리 + harness 인라인 제거
-total++;
-{
+if (e2eShard.take('B(1.9.326)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4230,8 +4241,8 @@ total++;
 }
 
 // 1.9.327 회귀 (UR-0025 모듈화): TZ/날짜 포맷 2종 lib/pure-utils 분리 + harness 인라인 제거
-total++;
-{
+if (e2eShard.take('B(1.9.327)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4250,8 +4261,8 @@ total++;
 }
 
 // 1.9.328 회귀 (UR-0025 모듈화): 순수 문자열 유틸 2종(_truncate/_splitList) lib/pure-utils 분리 + harness 인라인 제거
-total++;
-{
+if (e2eShard.take('B(1.9.328)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4269,8 +4280,8 @@ total++;
 }
 
 // 1.9.329 회귀 (UR-0025 모듈화): roadmap MD 파서 3종 lib/pure-utils 분리 + harness 인라인 제거
-total++;
-{
+if (e2eShard.take('B(1.9.329)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4289,8 +4300,8 @@ total++;
 }
 
 // 1.9.330 회귀 (UR-0025 모듈화): project-brief config(_BRIEF_FIELDS) + _briefFilled lib/pure-utils 분리 + brief 명령 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.330)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4314,8 +4325,8 @@ total++;
 }
 
 // 1.9.331 회귀 (UR-0025 서브시스템): brief 빌더(_briefReadmeBlock/_briefBlueprint)+마커 lib/pure-utils 분리 + brief export/sync 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.331)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4342,8 +4353,8 @@ total++;
 }
 
 // 1.9.332 회귀 (UR-0025 모듈화): lessons.md 파서(_parseLessonEntries) lib/pure-utils 분리 + lesson list 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.332)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4366,8 +4377,8 @@ total++;
 }
 
 // 1.9.333 회귀 (UR-0025 심층): constraints 서브시스템 핵심 분리 — catalog→lib/catalogs + _matchConstraints→pure-utils + constraints 명령 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.333)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4402,8 +4413,8 @@ total++;
 }
 
 // 1.9.334 회귀 (UR-0025 심층, Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils + intent expand 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.334)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4428,8 +4439,8 @@ total++;
 }
 
 // 1.9.335 회귀 (UR-0025 심층): LSP catalog→lib/catalogs + _detectLspLang/_matchLspSymbols→pure-utils + lsp symbols 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.335)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4456,8 +4467,8 @@ total++;
 }
 
 // 1.9.336 회귀 (UR-0025 심층, Codex 위임·검증): anti-laziness OPTIMISM_PATTERNS→lib/catalogs + optimism 순수로직→pure-utils + optimism-check 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.336)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4489,8 +4500,8 @@ total++;
 }
 
 // 1.9.337 회귀 (UR-0025 심층): persona BUILT_IN_PERSONAS→lib/catalogs + _personaSummaries→pure-utils + persona list/review 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.337)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4519,8 +4530,8 @@ total++;
 }
 
 // 1.9.338 회귀 (UR-0025 심층): i18n STRINGS→lib/catalogs + _translate→pure-utils + _t 박막 (인터랙티브 전용 getter라 구조+순수동작 검증)
-total++;
-{
+if (e2eShard.take('B(1.9.338)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4544,8 +4555,8 @@ total++;
 }
 
 // 1.9.339 회귀 (UR-0053): decisions canonical = JSON, MD = projection. add→json+md / context count 단일소스 / drop+archive / MD-only 백필
-total++;
-{
+if (e2eShard.take('B(1.9.339)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4591,8 +4602,8 @@ total++;
 }
 
 // 1.9.340 회귀 (UR-0058, Codex 위임·검증): lessons canonical = JSON, MD = projection. save→json+md / list+tag / drop+archive / MD-only 백필
-total++;
-{
+if (e2eShard.take('B(1.9.340)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4637,8 +4648,8 @@ total++;
 }
 
 // 1.9.341 회귀 (UR-0025 심층): BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils + skill list 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.341)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4667,8 +4678,8 @@ total++;
 }
 
 // 1.9.342 회귀 (UR-0025 심층): ROADMAP_STATUS_LABEL/COLOR→lib/catalogs + roadmap.html 렌더 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.342)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4694,8 +4705,8 @@ total++;
 }
 
 // 1.9.343 회귀 (UR-0025 심층, R300 마일스톤): SECRET_PATTERNS→lib/catalogs 보안 응집 + scan secrets 탐지/오탐 가드 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.343)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4729,8 +4740,8 @@ total++;
 }
 
 // 1.9.344 회귀 (UR-0025 심층): SKILL_CATALOG_PRESETS→lib/catalogs + skill discover preset 인식 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.344)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
@@ -4754,8 +4765,8 @@ total++;
 }
 
 // 1.9.345 회귀 (UR-0025 심층): _esc(HTML escape)→pure-utils + roadmap.html XSS 이스케이프 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.345)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4782,8 +4793,8 @@ total++;
 }
 
 // 1.9.346 회귀 (UR-0025 심층): _roadmapTokenStyles→pure-utils + roadmap.html CSS 변수 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.346)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4809,8 +4820,8 @@ total++;
 }
 
 // 1.9.347 회귀 (UR-0025 심층): _parseSkillMd(SKILL.md frontmatter, BOM-aware)→pure-utils + skill install(BOM) 회귀
-total++;
-{
+if (e2eShard.take('B(1.9.347)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4836,8 +4847,8 @@ total++;
 }
 
 // 1.9.348 회귀 (외부리뷰 UR-0059 P0): --path 라우팅 일관화 — positional-dispatch 가 --path 우선(→positional→cwd)
-total++;
-{
+if (e2eShard.take('B(1.9.348)')) {
+  total++;
   let ok = false;
   try {
     const A = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pa-'));
@@ -4862,8 +4873,8 @@ total++;
 }
 
 // 1.9.349 회귀 (외부리뷰 UR-0063, GPT5.5+Opus 교차검증): selftest/doctor 위치독립 — 비초기화 dir 에서도 통과(거짓 "설치 손상" 없음)
-total++;
-{
+if (e2eShard.take('B(1.9.349)')) {
+  total++;
   let ok = false; let _liDbg = null;
   try {
     const ni = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));  // .leerness 없는 비초기화 dir
@@ -4892,8 +4903,8 @@ total++;
 }
 
 // 1.9.350 회귀 (외부리뷰 P1 보안 하드닝): UR-0061 CSS breakout 차단 + UR-0062 skill traversal 차단 + UR-0060 scan false-neg/패턴 보강
-total++;
-{
+if (e2eShard.take('B(1.9.350)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4922,8 +4933,8 @@ total++;
 }
 
 // 1.9.351 회귀 (외부리뷰 UR-0064/0065): decision/lesson 제목 오염 차단 + 문서 정합(AGENTS.md .leerness / --help 누락 명령)
-total++;
-{
+if (e2eShard.take('B(1.9.351)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-doc-'));
@@ -4947,8 +4958,8 @@ total++;
 }
 
 // 1.9.352 회귀 (외부리뷰 P2): UR-0069 usage subcommand 집계 + UR-0068 milestone 파서 블록 경계
-total++;
-{
+if (e2eShard.take('B(1.9.352)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -4972,8 +4983,8 @@ total++;
 }
 
 // 1.9.353 회귀 (외부리뷰 P2): UR-0067 encoding(CP949 감지/.ps1 BOM 예외) + UR-0070 shell-guard --shell + UR-0071 init non-TTY ANSI
-total++;
-{
+if (e2eShard.take('B(1.9.353)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-enc-'));
@@ -5002,8 +5013,8 @@ total++;
 }
 
 // 1.9.354 회귀 (외부리뷰 P3 UR-0072): compareVer pre-release + _classifyCJK + scan secrets 파일경로 + requests drop ✓
-total++;
-{
+if (e2eShard.take('B(1.9.354)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -5030,8 +5041,8 @@ total++;
 }
 
 // 1.9.355 회귀 (UR-0075 Phase A): migrate --guide 가이드 출력 + update/init/migrate --path 타깃(이전 positional 전용)
-total++;
-{
+if (e2eShard.take('B(1.9.355)')) {
+  total++;
   let ok = false;
   try {
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
@@ -5056,8 +5067,8 @@ total++;
 }
 
 // 1.9.356 회귀 (UR-0075 Phase B): migrate audit — clean=변경없음 · 구버전+canonical 누락=findings (비파괴 dry-run)
-total++;
-{
+if (e2eShard.take('B(1.9.356)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-aud-'));
@@ -5083,8 +5094,8 @@ total++;
 }
 
 // 1.9.357 회귀 (UR-0075 Phase C): migrate apply — dry-run 비파괴 · --yes canonical 백필 · 멱등
-total++;
-{
+if (e2eShard.take('B(1.9.357/1.36.191)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-app-'));
@@ -5123,8 +5134,8 @@ total++;
 }
 
 // 1.9.358 회귀 (UR-0075 Phase D): migrate plan — 임시폴더 설치 후 비교 · clean=변경없음 · 코어파일 누락=missing 감지 · 읽기전용
-total++;
-{
+if (e2eShard.take('B(1.9.358)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-plan-'));
@@ -5148,8 +5159,8 @@ total++;
 }
 
 // 1.9.359 회귀 (UR-0074): install-safety — 0 런타임 deps / 0 install-script / safe-install 워크플로 (공급망 신뢰 가드)
-total++;
-{
+if (e2eShard.take('B(1.9.359)')) {
+  total++;
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'install-safety', '--json'], { encoding: 'utf8', timeout: 15000 });
@@ -5161,8 +5172,8 @@ total++;
 }
 
 // 1.9.360 회귀 (외부리뷰 CV-2/UR-0077): update --check 가 신형 Node Windows 에서 spawn EINVAL 없이 동작 (cmd.exe 경유)
-total++;
-{
+if (e2eShard.take('B(1.9.360)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-einval-'));
@@ -5178,8 +5189,8 @@ total++;
 }
 
 // 1.9.361 회귀 (외부리뷰 CV-1/UR-0076): --path 라우팅 통일 — session close --path 가 cwd 아닌 정타깃에 쓰기 + context --path= 등호형
-total++;
-{
+if (e2eShard.take('B(1.9.361)')) {
+  total++;
   let ok = false;
   try {
     const a = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rootA-'));
@@ -5205,8 +5216,8 @@ total++;
 }
 
 // 1.9.361 회귀 (외부리뷰 CV-3/UR-0078): audit 가 미초기화/존재하지않는 경로를 healthy 로 오판 안 함 (verify 와 일관)
-total++;
-{
+if (e2eShard.take('B(1.9.361) #2')) {
+  total++;
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'audit', path.join(os.tmpdir(), 'leerness-no-such-' + total), '--json'], { encoding: 'utf8', timeout: 15000 });
@@ -5218,8 +5229,8 @@ total++;
 }
 
 // 1.9.362 회귀 (외부리뷰 CV-4/UR-0079): archive retention — init/migrate 반복해도 --keep 상한 유지 (무한 누적 차단)
-total++;
-{
+if (e2eShard.take('B(1.9.362)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-arch-'));
@@ -5239,8 +5250,8 @@ total++;
 }
 
 // 1.9.363 회귀 (외부리뷰 CV-7/UR-0082): commands 카탈로그가 누락 명령군(8그룹+install-safety+migrate sub) 전수 등재
-total++;
-{
+if (e2eShard.take('B(1.9.363)')) {
+  total++;
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'commands', '--json'], { encoding: 'utf8', timeout: 15000 });
@@ -5254,8 +5265,8 @@ total++;
 }
 
 // 1.9.364 회귀 (4번째 외부평가 9.3/UR-0083): auto-update hook 비침투 — update --check --quiet 가 up-to-date 시 무음 + hook 명령이 --quiet 사용
-total++;
-{
+if (e2eShard.take('B(1.9.364)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-quiet-'));
@@ -5274,8 +5285,8 @@ total++;
 }
 
 // 1.9.365 회귀 (외부리뷰 CV-6/UR-0081): 시크릿 스캐너 정밀도 — placeholder FP 무시 / unquoted FN 탐지 / gitignored 강등
-total++;
-{
+if (e2eShard.take('B(1.9.365)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sec-'));
@@ -5301,8 +5312,8 @@ total++;
 }
 
 // 1.9.366 회귀 (외부리뷰 CV-5/UR-0080): selftest 무결성 — 설치 패키지 관점에서 --json 전부 통과 (행위 케이스 포함)
-total++;
-{
+if (e2eShard.take('B(1.9.366)')) {
+  total++;
   let ok = false;
   try {
     // 1.36.85: 행위검사 전환으로 selftest 약 13s — 4초 시절 기준 30s 는 전체 부하에서 터진다.
@@ -5319,8 +5330,8 @@ total++;
 //   또한 stderr 잡음 0 을 함께 단언한다 — 잡음의 실제 원인(프로브가 fail() 의 stderr 를 안 가로챔 · graph 케이스 quiet 누락)은
 //   io 래치가 사람용 log 를 stderr 로 강등해 주는 **우연** 덕에 stdout 만 겨우 지켜졌다. 래치가 바뀌면 곧장 stdout 오염이 된다.
 //   → stdout 순수성만 단언하면 "우연히 통과"하므로, 잡음 자체를 0 으로 고정해 원인 단계에서 막는다.
-total++;
-{
+if (e2eShard.take('B(1.36.88)')) {
+  total++;
   let ok = false, why = '';
   // T-0341: run in a harness made through the product (scripts/e2e-lived-in-harness.js), the same on every tree.
   //   T-0315 copied this repository's own .leerness, AGENTS.md and CLAUDE.md, and the public export has none of
@@ -5361,8 +5372,8 @@ total++;
 //   프로젝트 상태에 따라 달라져 같은 코드로 게이트가 통과/실패로 갈렸다. 한 곳에서 나온 결함은 대개 클래스다 —
 //   실측 스윕(조회성 79개)에서 정보성 누출은 audit 하나였고 나머지 4건은 **사용법 오류의 stderr 진단**(CLI 관례)이었다.
 //   그 측정을 래칫으로 고정한다: 성공 경로의 `--json` 은 stderr 가 비어야 한다.
-total++;
-{
+if (e2eShard.take('B(1.36.121)')) {
+  total++;
   let ok = false; const bad = []; const diagnostics = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-json121-'));
   const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -5408,8 +5419,8 @@ total++;
 //   실측으로 두 결함이 나왔다: ① `leerness_selftest` 는 실측 116초인데 MCP 기본 한도가 60초라 **항상 타임아웃**
 //   (광고된 89개 도구 중 설치 검증 도구가 MCP 로는 무용) ② selftest 프로브가 `process.env` 를 상속해
 //   MCP 래퍼가 끄는 안내를 단언 → MCP 경유에서만 1건 실패 = AI 에게 "설치가 깨졌다" 는 **거짓 보고**.
-total++;
-{
+if (e2eShard.take('B(1.36.124)')) {
+  total++;
   let ok = false, mcpSeconds = null; const bad = [];
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcp124-'));
   const ENVm = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -5503,8 +5514,8 @@ total++;
 }
 
 // 1.9.367 회귀 (UR-0025): _mergeEnvLines 모듈 분리 — migrate 가 사용자 .env 값을 key-aware 로 보존 (덮어쓰기 X)
-total++;
-{
+if (e2eShard.take('B(1.9.367)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-envm-'));
@@ -5521,8 +5532,8 @@ total++;
 }
 
 // 1.9.368 회귀 (UR-0025): _managedMerge 모듈 분리 — migrate 가 사용자 편집(AGENTS.md)을 migration-preserved 블록으로 보존
-total++;
-{
+if (e2eShard.take('B(1.9.368)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mm-'));
@@ -5542,8 +5553,8 @@ total++;
 //   `adapter` 처럼 새 백업을 만들지 않는 실행이 일반 경로(`.leerness/archive`)를 채워 넘겨서,
 //   이전 마이그레이션이 적어 둔 구체 경로(`.leerness/archive/leerness-1.36.100-…`)를 덮었다.
 //   그 문장은 "삭제하지 않았다" 는 약속의 근거이므로 격하는 곧 정보 손실이다. 세 방향을 모두 잰다.
-total++;
-{
+if (e2eShard.take('B(1.36.122)')) {
+  total++;
   let ok = false; const bad = [];
   try {
     const PUx = require(path.resolve(path.dirname(CLI), '..', 'lib', 'pure-utils'));
@@ -5600,8 +5611,8 @@ total++;
 }
 
 // 1.9.369 회귀 (UR-0025): MINIMAL_SKIP_KEYS/_parseSkillsValue 분리 — init --minimal 비핵심 스킵+코어 유지, --skills recommended 설치
-total++;
-{
+if (e2eShard.take('B(1.9.369)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-min-'));
@@ -5620,8 +5631,8 @@ total++;
 }
 
 // 1.9.370 회귀 (UR-0025): _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 — lib/pure-utils 직접 호출 행위
-total++;
-{
+if (e2eShard.take('B(1.9.370)')) {
+  total++;
   let ok = false;
   try {
     const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
@@ -5636,8 +5647,8 @@ total++;
 }
 
 // 1.9.371 회귀 (UR-0073 Phase A): team 정의 레지스트리 — add/list/remove + canonical JSON/MD (opt-in · 정의 전용)
-total++;
-{
+if (e2eShard.take('B(1.9.371)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-team-'));
@@ -5660,8 +5671,8 @@ total++;
 }
 
 // 1.9.372 회귀 (UR-0073 Phase B): team preview — dry-run 실행 계획 미리보기 (멤버별 dispatch 명령, 실제 실행/파일변경 없음)
-total++;
-{
+if (e2eShard.take('B(1.9.372)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tprev-'));
@@ -5683,8 +5694,8 @@ total++;
 }
 
 // 1.9.373 회귀 (UR-0073 Phase C): handoff 가 비-manual 팀 스케줄 알림 노출(미리보기 안내) · manual 미표시 · opt-out
-total++;
-{
+if (e2eShard.take('B(1.9.373)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tsch-'));
@@ -5704,8 +5715,8 @@ total++;
 }
 
 // 1.9.374 회귀 (UR-0074): release cadence 진단 — --json level/recommendation/releasesPerDay 구조 (릴리스 빈도 가시화)
-total++;
-{
+if (e2eShard.take('B(1.9.374)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cad-'));
@@ -5723,8 +5734,8 @@ total++;
 }
 
 // 1.9.376 회귀 (UR-0073 Phase D): team deploy 2중 게이트 — dry-run 실행안함 · --yes만이면 거부 · --yes+env 만 실행
-total++;
-{
+if (e2eShard.take('B(1.9.376)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tdep-'));
@@ -5748,8 +5759,8 @@ total++;
 }
 
 // 1.9.377 회귀 (UR-0025): _renderWorkspaceReferenceGuide 모듈 분리 — 빌더가 dirName/version 반영 + 핵심 섹션 포함 (출력 동일성)
-total++;
-{
+if (e2eShard.take('B(1.9.377)')) {
+  total++;
   let ok = false;
   try {
     const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
@@ -5765,8 +5776,8 @@ total++;
 }
 
 // 1.9.378 회귀 (UR-0073): team MCP 도구 2종(read-only) 정의 + 매핑 CLI(team list/preview) 동작
-total++;
-{
+if (e2eShard.take('B(1.9.378)')) {
+  total++;
   let ok = false;
   try {
     const tools = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools'));
@@ -5788,8 +5799,8 @@ total++;
 }
 
 // 1.9.379 회귀 (UR-0025 심화): pulse 렌더 코어(_memorySurface/_renderPulseLine) 분리 — 빌더 동작 + pulse CLI 출력 유지
-total++;
-{
+if (e2eShard.take('B(1.9.379)')) {
+  total++;
   let ok = false;
   try {
     const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
@@ -5809,8 +5820,8 @@ total++;
 }
 
 // 1.9.380 회귀 (UR-0025): REQUIRED_WORKSPACE_FILES 단일출처 — verify 가 catalog 리스트로 init통과/누락실패
-total++;
-{
+if (e2eShard.take('B(1.9.380)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs'));
@@ -5830,8 +5841,8 @@ total++;
 }
 
 // 1.9.381 회귀 (UR-0025): KEYWORD_STOPWORDS 단일출처 — catalog Set + 키워드 필터 동작 + handoff consumer 무크래시
-total++;
-{
+if (e2eShard.take('B(1.9.381)')) {
+  total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs'));
@@ -5853,8 +5864,8 @@ total++;
 }
 
 // 1.9.382 회귀 (UR-0025 큰핸들러토대): lib/io.js 프리미티브 분리 — exports + 동작 + init(ok)/verify(fail→exit1) consumer 유지
-total++;
-{
+if (e2eShard.take('B(1.9.382)')) {
+  total++;
   let ok = false;
   try {
     const io = require(path.resolve(__dirname, '..', 'lib', 'io'));
@@ -5873,8 +5884,8 @@ total++;
 }
 
 // 1.9.383 회귀 (UR-0025 큰핸들러토대): lib/io.js fs 프리미티브 분리 — round-trip + decision write→context read consumer 유지
-total++;
-{
+if (e2eShard.take('B(1.9.383)')) {
+  total++;
   let ok = false;
   try {
     const io = require(path.resolve(__dirname, '..', 'lib', 'io'));
@@ -5897,8 +5908,8 @@ total++;
 }
 
 // 1.9.384 회귀 (5번째 외부평가/UR-0085): status/verify --json 구조화 출력 일관성 — pass JSON + fail JSON(exit1) + 사람용 exit1 유지
-total++;
-{
+if (e2eShard.take('B(1.9.384)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-svjson-'));
@@ -5923,8 +5934,8 @@ total++;
 }
 
 // 1.9.385 회귀 (5번째 외부평가/UR-0086): contract verify spec 파서가 markdown bullet "- name(args)" 함수 선언 감지 + backtick 약언급 관대 유지
-total++;
-{
+if (e2eShard.take('B(1.9.385)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-contract-bullet-'));
@@ -5952,8 +5963,8 @@ total++;
 }
 
 // 1.9.386 회귀 (5번째 외부평가/UR-0087): secret scan env-family 포함 + gitignore git-일치 (.env↛.env.bad 미보호=커밋대상)
-total++;
-{
+if (e2eShard.take('B(1.9.386)')) {
+  total++;
   let ok = false;
   try {
     const key = 'OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345pqr678stuvwx\n';
@@ -5983,8 +5994,8 @@ total++;
 }
 
 // 1.9.387 회귀 (5번째 외부평가 일관성/UR-0088): incident/runs list 빈 케이스도 --json 구조화 {total:0,items:[]} + 사람용 보존
-total++;
-{
+if (e2eShard.take('B(1.9.387)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-listjson-'));
@@ -6005,8 +6016,8 @@ total++;
 }
 
 // 1.9.393 회귀 (UR-0025 + whats-new BUG-fix): _parseChangelogBetween 가 "## X — DATE — title" 헤더를 파싱 (종전 0건 반환 버그)
-total++;
-{
+if (e2eShard.take('B(1.9.393)')) {
+  total++;
   let ok = false;
   try {
     const pkgRoot = path.resolve(__dirname, '..');
@@ -6030,8 +6041,8 @@ total++;
 }
 
 // 1.9.395 회귀가드 (행위검증): audit README 배지 mismatch + current-state stale 의 FP/FN — 종전 전용 e2e 가드 부재
-total++;
-{
+if (e2eShard.take('B(1.9.395)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auditchk-'));
@@ -6060,8 +6071,8 @@ total++;
 }
 
 // 1.9.396 회귀 (6번째 외부평가/codex P1-B): task drop 없는 ID → fail + 가짜 row 무생성(데이터 손상 차단). 실제 task drop 은 정상.
-total++;
-{
+if (e2eShard.take('B(1.9.396)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-taskdrop-'));
@@ -6083,8 +6094,8 @@ total++;
 }
 
 // 1.9.397 회귀 (6번째 외부평가/codex P1-A, UR-0098): install-safety 레시피 셸-무관(POSIX env-prefix 제거) + hardeningNote
-total++;
-{
+if (e2eShard.take('B(1.9.397)')) {
+  total++;
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'install-safety', '--json'], { encoding: 'utf8', timeout: 10000 });
@@ -6099,8 +6110,8 @@ total++;
 }
 
 // 1.9.398 회귀 (6번째 외부평가/codex P1-C, UR-0099): --json 에러 경로가 구조화 JSON(텍스트 아님) + 사람용 보존
-total++;
-{
+if (e2eShard.take('B(1.9.398)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-jsonerr-'));
@@ -6120,8 +6131,8 @@ total++;
 }
 
 // 1.9.399 회귀 (7번째 버그헌트 P1-A, UR-0104): 테이블셀 injection 차단 — task/rule 텍스트의 파이프(|) 보존 + 개행 가짜행 주입 차단 + rule 멱등성
-total++;
-{
+if (e2eShard.take('B(1.9.399)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cellinj-'));
@@ -6146,8 +6157,8 @@ total++;
 }
 
 // 1.9.400 회귀 (7번째 버그헌트 P1-B, UR-0105): verify-claim/optimism-check/honesty-check --json 에러가 구조화 JSON + 사람용 보존
-total++;
-{
+if (e2eShard.take('B(1.9.400)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-antilazyjson-'));
@@ -6164,8 +6175,8 @@ total++;
 }
 
 // 1.9.401 회귀 (7번째 버그헌트 P1-C, UR-0106): 시크릿 FN — gitignore 부정(!) 처리 + placeholder substring 정밀화
-total++;
-{
+if (e2eShard.take('B(1.9.401)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-secfn-'));
@@ -6187,8 +6198,8 @@ total++;
 }
 
 // 1.9.402 회귀 (7번째 버그헌트 P1-A 잔여, UR-0108): decision/lesson 텍스트 개행이 MD projection 위조 블록 주입 차단
-total++;
-{
+if (e2eShard.take('B(1.9.402)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mdinj-'));
@@ -6209,8 +6220,8 @@ total++;
 }
 
 // 1.9.403 회귀 (7번째 버그헌트 P2, UR-0107): api-skill show/drop 의 missing-id/not-found 에러가 exit 1(성공 오판 방지)
-total++;
-{
+if (e2eShard.take('B(1.9.403)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-apiskillexit-'));
@@ -6229,8 +6240,8 @@ total++;
 }
 
 // 1.9.404 회귀 (7번째 버그헌트 P2, UR-0105 잔여): reuse autodetect / creds check 의 --json 에러도 구조화 JSON
-total++;
-{
+if (e2eShard.take('B(1.9.404)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-jsonleak2-'));
@@ -6252,8 +6263,8 @@ total++;
 }
 
 // 1.9.405 회귀수정 (8번째 버그헌트, UR-0109): 1.9.401 looksReal 가드 FP — 긴 서술형 placeholder 가 실키로 오탐되던 것 차단
-total++;
-{
+if (e2eShard.take('B(1.9.405)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-phfp-'));
@@ -6274,8 +6285,8 @@ total++;
 }
 
 // 1.9.406 회귀 (8번째 버그헌트, UR-0110): rule/decision/lesson add 락 리팩터가 멱등성/정확성 보존 (skip 플래그 회귀가드)
-total++;
-{
+if (e2eShard.take('B(1.9.406)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lockrefactor-'));
@@ -6305,8 +6316,8 @@ total++;
 }
 
 // 1.9.407 회귀 (8번째 버그헌트, UR-0111): MCP feature_link safe-write tier + NaN --limit 가 결과 은폐 안 함
-total++;
-{
+if (e2eShard.take('B(1.9.407)')) {
+  total++;
   let ok = false;
   try {
     // ① feature_link tier safe-write (권한경계)
@@ -6329,8 +6340,8 @@ total++;
 }
 
 // 1.9.408 회귀 (8번째 버그헌트, UR-0112): CRLF/CR SKILL.md frontmatter 파싱 — Windows/Notepad 줄바꿈으로 meta 소실되던 skill install 복구
-total++;
-{
+if (e2eShard.take('B(1.9.408)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-crlfskill-'));
@@ -6354,8 +6365,8 @@ total++;
 // 1.9.409 회귀 (8번째 버그헌트, UR-0113): env encoding-check --apply 는 .sh/shebang 을 byte-exact 보존한다.
 // 1.36.177 데이터 무결성 계약: .ps1 BOM 교체는 Windows 에서만 메타데이터 보존 writer 로 수행하고,
 // POSIX 에서는 inode 교체가 ACL/xattr/ownership 을 잃을 수 있어 byte-exact no-op 한다.
-total++;
-{
+if (e2eShard.take('B(1.9.409/1.36.177)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bomsh-'));
@@ -6383,8 +6394,8 @@ total++;
 //     그 폴백이 바로 이번에 고친 결함이다 — `decision add SNEAKY --path=` 가 cwd 에 쓰고 "✓ 기록됨" 을 냈다(실측).
 //     플래그를 적었는데 값이 없으면 그건 오타다. 원래 목적(**raw TypeError 를 흘리지 않는다**)은 그대로 두고,
 //     "조용한 폴백" 대신 "사유를 말하는 거절" 을 단언한다. 그리고 값을 준 경우가 여전히 도는지 대조군으로 잰다.
-total++;
-{
+if (e2eShard.take('B(1.9.410/1.36.144)')) {
+  total++;
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'status', '--path'], { encoding: 'utf8', timeout: 15000 });
@@ -6402,8 +6413,8 @@ total++;
 }
 
 // 1.9.411 회귀 (8번째 버그헌트, UR-0115): lazy detect --auto-track 배치화가 다수 TODO 를 순차 ID 로 정확히 등록(동작 보존)
-total++;
-{
+if (e2eShard.take('B(1.9.411)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-autotrack-'));
@@ -6426,8 +6437,8 @@ total++;
 }
 
 // 1.9.412 회귀 (6th외부평가 Opus P1, UR-0100): list-family 가 positional path 를 인식(조용한 cwd 오독 차단) + add/show 회귀 없음
-total++;
-{
+if (e2eShard.take('B(1.9.412)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pospath-'));
@@ -6451,8 +6462,8 @@ total++;
 // 1.36.2 회귀 (클린룸 리뷰, UR-0184): feature add/show/link/impact 도 trailing positional path 인식 —
 //   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + 비-프로젝트 cwd 에 stray .leerness scaffold(조용한 오독).
 //   fix: --path > path-like positional > cwd; add 의 NAME 은 _parseAddTitle 로 절단; 미초기화 dir 은 _requireInit 게이트(scaffold 대신 에러).
-total++;
-{
+if (e2eShard.take('B(1.36.2)')) {
+  total++;
   let ok = false;
   try {
     const target = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-featpos-t-'));
@@ -6488,8 +6499,8 @@ total++;
 }
 
 // 1.9.413 회귀 (6th외부평가 codex P2, UR-0101): action 명령 --json 구조화 출력 + 데이터 영속 + 사람용 보존
-total++;
-{
+if (e2eShard.take('B(1.9.413)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-actionjson-'));
@@ -6513,8 +6524,8 @@ total++;
 }
 
 // 1.9.414 회귀 (UR-0119/0120): team review(메인 검수) — preview 가 분배 후 메인 검수 단계 표시, --no-review 시 생략
-total++;
-{
+if (e2eShard.take('B(1.9.414)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-teamreview-'));
@@ -6537,8 +6548,8 @@ total++;
 }
 
 // 1.9.415 회귀 (9th 외부평가 Codex P1/Opus P2, UR-0121): handoff 보안 헤드라인 정직화 + scan/encoding --json + contract --json exit
-total++;
-{
+if (e2eShard.take('B(1.9.415)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-honesty-'));
@@ -6572,8 +6583,8 @@ total++;
 }
 
 // 1.9.416 회귀 (9th 외부평가 Sonnet/Codex, UR-0122): add류 제목 경로흡수 차단 + 빈 입력 거부
-total++;
-{
+if (e2eShard.take('B(1.9.416)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-addtitle-'));
@@ -6601,8 +6612,8 @@ total++;
 }
 
 // 1.9.417 회귀 (9th 외부평가 Opus, UR-0123): contract verify field 범용화 — ## Fields 섹션 불릿 누락 감지
-total++;
-{
+if (e2eShard.take('B(1.9.417)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cfield-'));
@@ -6623,8 +6634,8 @@ total++;
 }
 
 // 1.35.11 (자체 contract 적대적 헌트 + codex 교차): 필드명 $ 정규식-앵커 FP — $scope/foo$bar 실존 필드를 항상 missing 오탐하던 버그. 이스케이프+식별자 룩어라운드로 수정. 정규식 안전 + no-FN 회귀 가드.
-total++;
-{
+if (e2eShard.take('B(1.35.11)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cvdollar-'));
@@ -6661,8 +6672,8 @@ total++;
 }
 
 // 1.9.418 회귀 (9th 외부평가 Codex P2, UR-0121 잔여): health 보안 정직화 + status scope
-total++;
-{
+if (e2eShard.take('B(1.9.418)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hlabel-'));
@@ -6689,8 +6700,8 @@ total++;
 // 1.30.1 회귀 (14th 외부리뷰 F1+F2): audit/handoff 보안요약이 커밋된 시크릿을 정직하게 노출.
 //   F1: audit 가 _collectSecretFindings 콘텐츠 스캔을 돌려 committed 시크릿을 failure 로 승격(scan secrets 와 일관) — gitignored 는 무영향(FP 0).
 //   F2: handoff 🔒 보안요약 섹션이 .env 없어도 committed 시크릿을 노출(envExists 단독 게이팅 제거).
-total++;
-{
+if (e2eShard.take('B(1.30.1)')) {
+  total++;
   let ok = false;
   try {
     const H = /[가-힣]/;
@@ -6731,8 +6742,8 @@ total++;
 }
 
 // 1.30.2 회귀 (#157 사용자명시, 하위 프로젝트 방향 — 외부AI+Claude 교차검토 → 방향 C): parent detect 가 상위 leerness 부모를 탐지(read-only) + handoff 헤드라인 노출 + 자동 적용 안 함.
-total++;
-{
+if (e2eShard.take('B(1.30.2)')) {
+  total++;
   let ok = false;
   try {
     const par = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-par-'));
@@ -6765,8 +6776,8 @@ total++;
 }
 
 // 1.30.3 회귀 (#158 사용자명시): parent adopt 게이트형 적용 — dry-run 기본(쓰기 0) + --apply(사용자 명시) 시에만 자식-로컬 참조 기록 + 자식 design-system.md 무변경(비파괴) + handoff 헤드라인 adopted 반영.
-total++;
-{
+if (e2eShard.take('B(1.30.3)')) {
+  total++;
   let ok = false;
   try {
     const par = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-adopt-'));
@@ -6800,8 +6811,8 @@ total++;
 }
 
 // 1.30.4 회귀 (#155 / 14th리뷰 F5+F6+F7): add류 cli-ux 일관성 — decision/lesson dedup + rule/lesson 빈입력 --json 구조화 + task/rule bogus subcommand 토큰 명시.
-total++;
-{
+if (e2eShard.take('B(1.30.4)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f567-'));
@@ -6835,8 +6846,8 @@ total++;
 }
 
 // 1.31.1 회귀 (UR-0010): install-safety 출력 영어 opt-in — en 한글 0 + ko 보존 + 셸-무관 가드(npx --yes/PowerShell/no npm_config prefix) 양 언어 보존.
-total++;
-{
+if (e2eShard.take('B(1.31.1)')) {
+  total++;
   let ok = false;
   try {
     const H = /[가-힣]/;
@@ -6853,8 +6864,8 @@ total++;
 }
 
 // 1.31.2 회귀 (UR-0010): constraints 영어화 — list/check 라벨 + 카탈로그 detailEn + suggestion 영어 / ko 보존 / 매칭(한국어 alias) 무회귀.
-total++;
-{
+if (e2eShard.take('B(1.31.2)')) {
+  total++;
   let ok = false;
   try {
     const H = /[가-힣]/;
@@ -6879,8 +6890,8 @@ total++;
 }
 
 // 1.31.3 회귀 (UR-0010): capabilities(권한·보안 표면) 영어화(라벨+카탈로그 descEn/optOutEn/noteEn+principles) + team reminder 본문 영어화 / ko 보존.
-total++;
-{
+if (e2eShard.take('B(1.31.3)')) {
+  total++;
   let ok = false;
   try {
     const H = /[가-힣]/;
@@ -6913,8 +6924,8 @@ total++;
 }
 
 // 1.32.1 회귀 (15th 외부리뷰 맹신X): constraints/parent --json 에러 구조화(C2) + parent adopt --json 에러경로 비공백(A1) + --select 무효 kind applied:false(A2).
-total++;
-{
+if (e2eShard.take('B(1.32.1)')) {
+  total++;
   let ok = false;
   try {
     const isJson = s => { try { JSON.parse(String(s).trim()); return true; } catch { return false; } };
@@ -6949,8 +6960,8 @@ total++;
 
 // 1.32.3 회귀 (15th 리뷰 A3 방어심화): 적대적 부모 design-system content(가짜 ## 헤더 + 가짜 leerness 마커 + 백틱런)가
 //   parent adopt --apply 시 자식 inherited-from-parent.md 에 동적 코드펜스로 감싸져 marker/헤더 spoofing 차단되는지 + content 보존.
-total++;
-{
+if (e2eShard.take('B(1.32.3)')) {
+  total++;
   let ok = false;
   try {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-a3-'));
@@ -6980,8 +6991,8 @@ total++;
 }
 
 // 1.33.1 회귀 (verify-claim+gate 슬라이스 강화): ci init 생성 워크플로가 production-grade — leerness 버전 핀(재현성) + 최소권한 permissions + concurrency 취소.
-total++;
-{
+if (e2eShard.take('B(1.33.1)')) {
+  total++;
   let ok = false;
   try {
     const ver = require(path.resolve(__dirname, '..', 'package.json')).version;
@@ -7006,8 +7017,8 @@ total++;
 }
 
 // 1.33.2 회귀 (verify-claim+gate 슬라이스 강화): verify-claim --all — 모든 done 주장 일괄 검증. 거짓완료=exit 1(files-missing), 진실완료/빈프로젝트=exit 0, per-task 경로와 verdict 일치(맹신 X).
-total++;
-{
+if (e2eShard.take('B(1.33.2)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vca-'));
@@ -7046,8 +7057,8 @@ total++;
 }
 
 // 1.33.3 회귀 (verify-claim+CI gate 슬라이스 강화): gate --claims opt-in 6번째 체크(기본 5 무변경) + MCP leerness_verify_claim_all 라운드트립.
-total++;
-{
+if (e2eShard.take('B(1.33.3)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-g3-'));
@@ -7086,8 +7097,8 @@ total++;
 }
 
 // 1.34.1 회귀 (16th리뷰 정직화 실증): gate --claims 정밀성 가치 — 워크스페이스가 깨끗(lazy detect 0 finding)한데 콘텐츠-레벨 거짓(부풀린 테스트 카운트)인 경우, 기본 5체크는 통과(exit 0)하고 --claims 만 차단(exit 1). 이 판별 케이스가 깨지면(기본도 잡거나 --claims가 못 잡으면) --claims 의 차별 가치가 사라진 것이므로 가드.
-total++;
-{
+if (e2eShard.take('B(1.34.1)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-disc-'));
@@ -7124,8 +7135,8 @@ total++;
 //   stubFiles=[] → implementationSubstance=true, gitApplicable 은 files>0 요구 → skip.
 //   전 판정이 공허참이라 "코드도 테스트도 없이 done" 이 ok:true/exit 0 이었고, 단조성이 뒤집혀 있었다
 //   (파일명을 적어 검증 가능하게 쓸수록 FAIL, 날조할수록 PASS). 판별 케이스로 고정한다.
-total++;
-{
+if (e2eShard.take('B(1.36.82)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vac-'));
@@ -7185,8 +7196,8 @@ total++;
 
 // 1.36.82 회귀 (High #2): `gate --require-referee <id>` — 툴이 사용자에게 안내하면서 gate 는 읽지도 않아
 //   조용히 exit 0 이던 플래그. 이제 실제 게이팅한다(미존재/미증명/무효 거부 + 검증기가 현재 상태를 거부하면 실패).
-total++;
-{
+if (e2eShard.take('B(1.36.82) #2')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-refgate-'));
@@ -7232,8 +7243,8 @@ total++;
 }
 
 // 1.35.10 (자체 gate 적대적 헌트): gate 를 "보안 가드레일"로 검증 — 8-프로브 헌트(FP 4 + FN 3 + by-design 1) 결과 제품 결함 0 확인 후, 유일 커버리지 갭(gate 레벨 보안 동작)을 회귀 가드로 고정. 커밋된 실키 → 차단(exit 1, scan secrets step), 정상 .env.example placeholder → 오탐 없이 통과(exit 0). scan-step 리팩터가 가드레일 보안을 조용히 무너뜨리는 회귀 차단.
-total++;
-{
+if (e2eShard.take('B(1.35.10)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-gatesec-'));
@@ -7257,8 +7268,8 @@ total++;
 }
 
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
-total++;
-{
+if (e2eShard.take('B(1.9.430)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hexit-'));
@@ -7274,8 +7285,8 @@ total++;
 }
 
 // 1.9.435 (11th 외부평가 Codex P2, UR-0137): agents dispatch task 에 flag 값(--to 의 codex) 흡수 금지.
-total++;
-{
+if (e2eShard.take('B(1.9.435/1.35.6)')) {
+  total++;
   let ok = false;
   let d = null;
   let fbin = null;
@@ -7318,8 +7329,8 @@ total++;
 }
 
 // 1.9.439 (10th 외부평가 Codex P1, UR-0135): drift --auto-fix --json 은 dirty WS 에서도 stdout 순수 JSON.
-total++;
-{
+if (e2eShard.take('B(1.9.439)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-djson-'));
@@ -7336,8 +7347,8 @@ total++;
 }
 
 // 1.9.440 (12th 외부평가 Opus P2): 시크릿 스캐너 prefix 패턴(AWS/GitHub)도 placeholder 가드 — .env.example 더미는 미탐, 진짜는 탐지.
-total++;
-{
+if (e2eShard.take('B(1.9.440)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-scanph-'));
@@ -7356,8 +7367,8 @@ total++;
 }
 
 // 1.9.442 (12th 외부평가 Sonnet P1, UR-0141): task 계열 positional path — 다른 cwd 에서 실행해도 positional 경로에 저장(cwd 오염 차단).
-total++;
-{
+if (e2eShard.take('B(1.9.442)')) {
+  total++;
   let ok = false;
   try {
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-taskpos-'));
@@ -7376,8 +7387,8 @@ total++;
 }
 
 // 1.9.443 (GPT-5.5 전략리뷰 §6.3, UR-0153): evidence-first 완료 게이트 — state 워크플로에서 completion_claim_allowed 파생.
-total++;
-{
+if (e2eShard.take('B(1.9.443)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cca-'));
@@ -7398,8 +7409,8 @@ total++;
 }
 
 // 1.9.444 (GPT-5.5 전략리뷰 §6.7, UR-0152): ci init — PR gate 워크플로 생성(멱등).
-total++;
-{
+if (e2eShard.take('B(1.9.444)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ci-'));
@@ -7419,8 +7430,8 @@ total++;
 }
 
 // 1.9.445 (UR-0151): add-family(decision/lesson/rule) positional path — 다른 cwd 에서 실행해도 positional 경로에 저장(cwd 오염 차단).
-total++;
-{
+if (e2eShard.take('B(1.9.445)')) {
+  total++;
   let ok = false;
   try {
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-addpos-'));
@@ -7446,8 +7457,8 @@ total++;
 
 // 1.25.1 (22nd 버그헌트 → i18n 행위 회귀 가드, UR-0010): --language en 런타임 렌더가 실제로 영어인지 + ko 기본 보존 + --language 값이 positional 로 누출 안 되는지 행위로 검증.
 //   소스가드(문자열 존재)만으로는 1.23.0 "session close 완전 영어" 과장(런타임 한글 누출)을 못 잡았던 공백을 e2e 로 보강(defense-in-depth).
-total++;
-{
+if (e2eShard.take('B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3/1.29.4/1.30.5)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-'));
@@ -7576,8 +7587,8 @@ total++;
 }
 
 // 1.26.1 (13번째 외부리뷰 P2 회귀가드): 개인키파일 스캔 FN + DB placeholder FP + retro --json NaN 행위 가드.
-total++;
-{
+if (e2eShard.take('B(1.26.1)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rev13-'));
@@ -7609,8 +7620,8 @@ total++;
 }
 
 // 1.27.1 (13번째 외부리뷰 정직성 후속 회귀가드): audit 미초기화 모순출력 차단 + verify-claim no-parse 정직표기 (양방향 무회귀).
-total++;
-{
+if (e2eShard.take('B(1.27.1)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rev13b-'));
@@ -7644,8 +7655,8 @@ total++;
 }
 
 // 1.35.7 (UR-0013, GPT5.5pro 평가): declared-pass 부풀림 게이팅 — 주장(3/3) vs 실행(2/2) → exit 1 (human/--json/--all 3경로) + spec 리포터 파싱(패턴 6) + 실행≥주장 무벌점.
-total++;
-{
+if (e2eShard.take('B(1.35.7)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dpm-'));
@@ -7687,8 +7698,8 @@ total++;
 
 // 1.36.1 회귀 (클린룸 리뷰 FN): 상태파일 JSON 무결성 — 손상 .leerness/*.json 을 audit(warning)/health(degraded)/check(exit 1) 가 표면화.
 //   배경: 그레이스풀 폴백이 깨진 상태 JSON 을 "healthy"/exit 0 으로 감추던 false-negative(health/doctor/check 전부). 클린(유효 JSON)엔 무오탐.
-total++;
-{
+if (e2eShard.take('B(1.36.1)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-si-'));
@@ -7720,8 +7731,8 @@ total++;
 }
 
 // 1.36.51 (사용자 요청 UR-0061): clarify 모호성 질문 + preview 승인 워크플로 — CLI 라운드트립
-total++;
-{
+if (e2eShard.take('B(1.36.51)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-clarify-'));
@@ -7754,8 +7765,8 @@ total++;
 }
 
 // 1.36.53 (사용자 요청 UR-0062): tech 프로필 — 언어·서비스 감지/이력 + 그래프 🛠 탭(스위치 제거·가이드) CLI 라운드트립
-total++;
-{
+if (e2eShard.take('B(1.36.53)')) {
+  total++;
   let ok = false;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tech-'));
@@ -7782,8 +7793,8 @@ total++;
 }
 
 // 1.36.59 (외부감사 F-05 1회차): en init 의 지시-레이어 5종은 한글 0 + ko 완전 보존
-total++;
-{
+if (e2eShard.take('B(1.36.59)')) {
+  total++;
   let ok = false;
   const _dirs = [];
   try {
@@ -7816,8 +7827,8 @@ total++;
 }
 
 // 1.36.65 (외부감사 F-08): no-op 재설치 — 변경 없으면 백업/아카이브/타임스탬프 무증식, 변경·구버전·force 는 정상 설치
-total++;
-{
+if (e2eShard.take('B(1.36.65)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -7848,8 +7859,8 @@ total++;
 }
 
 // 1.36.68 (8차 헌트 F14 재구현): 마감 보고/JSON 에 미승인 미리보기 노출 — 텍스트·JSON 양 모드 + 승인 후 소거
-total++;
-{
+if (e2eShard.take('B(1.36.68)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -7878,8 +7889,8 @@ total++;
 }
 
 // 1.36.69 (성장 한계 클래스): whats-new --json 기본 상한 — AI 컨텍스트 보호 + 정직한 절단 표기 + --all/--limit 옵트인
-total++;
-{
+if (e2eShard.take('B(1.36.69)')) {
+  total++;
   let ok = false;
   try {
     const R = (a) => cp.spawnSync(process.execPath, [CLI, 'whats-new', ...a], { encoding: 'utf8', timeout: 25000, maxBuffer: 32 * 1024 * 1024 });
@@ -7935,8 +7946,8 @@ total++;
 }
 
 // 1.36.70 (성장 한계 클래스): migrate 보고서 상한 — 큰 버전 점프에서 ~88KB 폭주하던 AI must re-read 를 목록별 캡 + "외 N개" 정직 표기
-total++;
-{
+if (e2eShard.take('B(1.36.70)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -7966,8 +7977,8 @@ total++;
 }
 
 // 1.36.71 (성장 한계 클래스 3): retro/insights --json data.rows 상한 — 전 task row 임베드로 무한 성장하던 것 (집계는 전량 기준 유지)
-total++;
-{
+if (e2eShard.take('B(1.36.71)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -7998,8 +8009,8 @@ total++;
 }
 
 // 1.36.72 (성장 한계 클래스 4): task list --json 상한 100 + lint 거짓 PASS(F16) 차단
-total++;
-{
+if (e2eShard.take('B(1.36.72)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -8026,8 +8037,8 @@ total++;
 }
 
 // 1.36.73 (8차 헌트 F12/F9 종결): skills-lock = 디스크 실재 + KO-잔존 이월 안내
-total++;
-{
+if (e2eShard.take('B(1.36.73)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -8065,8 +8076,8 @@ total++;
 }
 
 // 1.36.74 (9차 헌트): state 스키마 fail-closed · restore 중복 거부 · api-skill skeleton 충돌 · MCP 마지막 줄 · 손상 표시 · --json 계약
-total++;
-{
+if (e2eShard.take('B(1.36.74)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -8140,8 +8151,8 @@ total++;
 }
 
 // 1.36.75 (UR-0066): 디자인 시안 워크플로 — preview mockup 스캐폴드 + 덮어쓰기 보호 + XSS 이스케이프 + 디자인 감지 + --mockup 첨부
-total++;
-{
+if (e2eShard.take('B(1.36.75)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -8200,8 +8211,8 @@ total++;
 //   selftest 는 checkDoneTransition 을 in-process 로만 불러, `task update --status done` 배선을 한 줄도
 //   실행하지 않았다 — 게이트를 통째로 죽여도 341/341 그린이었다(변이로 실측). 실제 CLI 경로로 못 박는다.
 //   특히 done 을 기록하는 경로가 taskUpdate 하나가 아니다: task sync --from(TodoWrite 왕복)이 우회했다.
-total++;
-{
+if (e2eShard.take('B(1.36.88) #2')) {
+  total++;
   let ok = false;
   const _d = [];
   const R = (args, cwd) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 180000, cwd }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
@@ -8272,8 +8283,8 @@ total++;
 // 1.36.89 (P-0007, 사용자 승인 범위=제안+확인후실행): agents route 난이도 라우팅.
 //   판별 케이스를 함께 넣는다 — 거부 사유(code)까지 단언하지 않으면 여러 거부 조건이 서로를 가려
 //   하나를 죽여도 다른 하나가 막는다(1.36.88 에서 변이 6/8 로 실측한 함정).
-total++;
-{
+if (e2eShard.take('B(1.36.89)')) {
+  total++;
   let ok = false;
   const _d = [];
   const R = (args, cwd) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 120000, cwd }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
@@ -8401,8 +8412,8 @@ total++;
 // 1.36.90 (P-0006, 사용자 승인 범위=대시보드만): 읽기 전용 대시보드 + **넘지 않기로 한 경계**를 가드로 못 박는다.
 //   경계가 문서에만 있으면 다음 라운드에 조용히 넘는다 — .leerness 실행코드 0 · 루트 실행기 미생성 ·
 //   게이트 미판정 · 정적 leerness.html 존속을 테스트가 강제한다.
-total++;
-{
+if (e2eShard.take('B(1.36.90)')) {
+  total++;
   let ok = false;
   const _d = [];
   const R = (args, cwd) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 120000, cwd }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
@@ -8483,8 +8494,8 @@ total++;
 // 1.36.91: **설치됨 ≠ 사용가능** — 인증 축. 확인 가능한 provider 만 판정하고 나머지는 unknown 으로 남긴다.
 //   unknown 을 차단 사유로 쓰면 확인 수단이 없는 대부분의 CLI 에서 고위험 작업이 전부 잠긴다(false-BLOCK) —
 //   "확실히 아닌 것"만 막는다는 비대칭이 이 축의 핵심이고, 그걸 테스트가 못 박는다.
-total++;
-{
+if (e2eShard.take('B(1.36.91)')) {
+  total++;
   let ok = false;
   const _d = [];
   const R = (args) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 120000 }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
@@ -8600,8 +8611,8 @@ total++;
 // 1.36.92 (신규표면 헌트 확정 5건): 동의 없는 외부 CLI 실행 · 사유 오귀인 · 다국어 과소평가 ·
 //   위치경로 무시 · Bearer 토큰 미마스킹 · 손상 토글 무경고.
 //   **PATH shim** 으로 "프로세스를 띄우지 않는다"를 증명한다 — 종전 테스트에는 그걸 증명할 수단이 아예 없었다.
-total++;
-{
+if (e2eShard.take('B(1.36.92)')) {
+  total++;
   let ok = false;
   const _d = [];
   let N1 = false, N2 = false, N3 = false, N4 = false, N5 = false;
@@ -8689,8 +8700,8 @@ total++;
 // 1.36.93 (헌트 이월 2건): ① MCP 래퍼 타임아웃이 probe 예산보다 짧아 정직하게 고친 사용자가 done 을 못 하고,
 //   응답이 `(no output)` 이라 진단 단서가 0 이었다 ② `plan add --status verified` 가 정규화 없이 저장돼
 //   lazy detect 는 done 으로 세는데 verify-claim/gate 는 그 행을 아예 보지 않았다(검증기가 못 보는 완료 행).
-total++;
-{
+if (e2eShard.take('B(1.36.93)')) {
+  total++;
   let ok = false;
   const _d = [];
   const R = (args, env) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 300000, env: env || process.env }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
@@ -8755,8 +8766,8 @@ total++;
 //   검수가 9회에 걸쳐 사용자 데이터 삭제/변형 반례를 계속 찾아냈다 — 문자열로는 "우리가 내보낸 줄"과
 //   "사용자가 그 줄을 적은 것"을 구분할 수 없기 때문이다(바이트가 같다). 근본 해결은 생성 영역 마커
 //   (provenance)이고 별도 라운드로 다룬다. 여기서는 **삭제하지 않는 변경만** 출하한다.
-total++;
-{
+if (e2eShard.take('B(1.36.95)')) {
+  total++;
   let ok = false;
   const _d = [];
   let T1 = false, T2 = false, T3 = false;
@@ -8913,8 +8924,8 @@ total++;
 //   이 블록이 잡아야 하는 것(전부 변이로 확인): 원시 HTML 통과 · javascript:/data: 링크 · 표/제목/링크텍스트
 //   미이스케이프 · 코드펜스 안 마크다운 해석 · 코드스팬 자리표시자가 본문 숫자를 삼킴 · 시크릿 미마스킹 ·
 //   누적 로그 방향 뒤집힘 · 줄경계/코드포인트 절단 붕괴 · 전체 상한에서 조용한 누락.
-total++;
-{
+if (e2eShard.take('B(1.36.96)')) {
+  total++;
   let ok = false;
   const _d = [];
   const dbg = {};
@@ -9369,8 +9380,8 @@ total++;
 //   자연 경합 19.5% · 읽기 실패를 손상으로 오인 · <ID> 무시 전역 삭제 · 되돌릴 수 없는 게이트 무장해제 ·
 //   안내가 --path 를 잃어 애먼 프로젝트 파괴). 손으로 고치는 회복은 그 다섯이 전부 없고 되돌리면 게이트도
 //   살아난다 — 그래서 도구가 할 일은 대신 지워 주는 게 아니라 **어디를 어떻게 고치면 되는지 말하는 것**이다.
-total++;
-{
+if (e2eShard.take('B(1.36.94/1.36.185)')) {
+  total++;
   let ok = false;
   const _d = [];
   let E1 = false, E2 = false, E3 = false, E4 = false, E5 = false;
@@ -9632,8 +9643,8 @@ s.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[3],String(s.address().p
 }
 
 // 1.36.76 (9차 헌트 이월 3건 종결): 손상 아카이브 복원 거부 · MCP read-only 무변형 · 긴 파생 id 안전화
-total++;
-{
+if (e2eShard.take('B(1.36.76)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -9671,8 +9682,8 @@ total++;
 }
 
 // 1.36.77 (UR-0061/0066 MCP 완결): leerness_clarify + leerness_preview 도구 — MCP 전용 에이전트도 질문·시안 승인 흐름
-total++;
-{
+if (e2eShard.take('B(1.36.77)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -9706,8 +9717,8 @@ total++;
 }
 
 // 1.36.78 (10차 헌트 확정 7건): team 형상/계약 · constraints 검증/손상 · agents recommend · 빈 contract
-total++;
-{
+if (e2eShard.take('B(1.36.78)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -9775,8 +9786,8 @@ total++;
 }
 
 // 1.36.79 (실 프로젝트 60개 도그푸딩 P1 5건): progress 행 보존 · handoff --json 순수 · parent path · tech 언어 순위 · audit=integrity 정합
-total++;
-{
+if (e2eShard.take('B(1.36.79)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -9862,8 +9873,8 @@ total++;
 }
 
 // 1.36.80 (P-0001 검증기 캘리브레이션): 검증기를 신뢰하기 전에 탐지력을 실행으로 증명 — 적대적 FP 프로브 포함
-total++;
-{
+if (e2eShard.take('B(1.36.80)')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -9950,8 +9961,8 @@ total++;
 }
 
 // 1.36.80 (UR-0067 라이브 미리보기 + P-0003 사다리 + 기본 스킬 정리)
-total++;
-{
+if (e2eShard.take('B(1.36.80) #2')) {
+  total++;
   let ok = false;
   const _d = [];
   try {
@@ -9994,7 +10005,7 @@ total++;
 }
 
 // ── 1.36.97 (P-0011): 렌즈 3축 심화 — CLI 표면 행위. selftest 는 함수만 보므로 실제 렌더/로케일/완료검증 인라인은 여기서 잰다.
-{
+if (e2eShard.take('B(1.36.97/P-0011)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lens97-'));
@@ -10049,7 +10060,7 @@ total++;
 
 // ── 1.36.98: session close 가 current-state.md 의 사용자 작성 내용을 지우지 않는가 (사용자 보고 재현 → 실 CLI 로 고정)
 //   selftest 는 순수 함수만 본다. 손실은 '명령을 실제로 돌렸을 때' 났으므로 여기서 실 CLI 로 건다.
-{
+if (e2eShard.take('B(1.36.98)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cs98-'));
@@ -10083,7 +10094,7 @@ total++;
 }
 
 // ── 1.36.98 (P-0013): 재사용 인벤토리 CLI — 추출 결과가 아니라 '무엇을 싣지 않는가' 를 건다.
-{
+if (e2eShard.take('B(1.36.98/P-0013)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lib98-'));
@@ -10121,7 +10132,7 @@ total++;
 }
 
 // ── 1.36.99 (P-0012): 시안 정확도 — 시안이 '빈 종이' 가 아니라 이 앱의 재료로 시작하는가.
-{
+if (e2eShard.take('B(1.36.99/P-0012)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mk99-'));
@@ -10160,7 +10171,7 @@ total++;
 }
 
 // ── 1.36.100 (P-0012 후반): 승인 시 시안을 계약으로 고정 → 구현 후 존재 대조. 과장하지 않는 것까지 함께 건다.
-{
+if (e2eShard.take('B(1.36.100/P-0012)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ct100-'));
@@ -10210,7 +10221,7 @@ total++;
 // ── 1.36.103 A: 값-플래그의 값이 사용자 데이터/경로로 흡수되지 않는다.
 //   허용목록이 소비자보다 45개 뒤처져 있었고, 같은 클래스의 목록이 다섯 벌로 갈라져 각자 따로 뒤처졌다.
 //   실측 재현: `preview add "제목" --select X` → 저장 제목 「제목 X」 · `review --persona security f.js` → 파일이 "security".
-{
+if (e2eShard.take('A(1.36.103)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fl103-'));
@@ -10256,7 +10267,7 @@ total++;
 
 // ── 1.36.103 B: --json 은 실패해도 stdout 에 파싱 가능한 JSON 하나를 남긴다.
 //   위반 5건이 서로 다른 이유였다 — 경고가 stdout 선점 / 실패 분기에 JSON 없음 / 출력을 삼키는 구간에서 표식만 서서 폴백 차단.
-{
+if (e2eShard.take('B(1.36.103)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-js103-'));
@@ -10302,7 +10313,7 @@ total++;
 //   1.36.101 의 path-strict 가 args[1] 을 무조건 경로로 봐서 `leerness library page` 를 거부했고(게시된 1.36.102
 //   에서 확인), 같은 두 명령이 root 해석은 index 2 부터 시작해 검증된 경로를 건너뛰고 cwd 에 썼다.
 //   관측값은 파일시스템이다 — 문구가 아니라 '어디에 썼는지'.
-{
+if (e2eShard.take('C(1.36.103)')) {
   total++;
   let ok = false; const dbg = {};
   const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rt103-'));
@@ -10338,7 +10349,7 @@ total++;
 //   _bumpMcpUsage 는 stats.mcp.tools 에 기록하는데 usage 표시는 commands 가 비면 이른 return 이라
 //   그 아래 MCP 섹션에 도달하지 못했다 → MCP 로만 일하는 에이전트의 프로젝트가 "사용 기록 없음".
 //   동시에 서버 프로세스가 cwd 에 `mcp: N` 을 쌓아 남의 프로젝트 통계를 오염시켰다.
-{
+if (e2eShard.take('D(1.36.104)')) {
   total++;
   let ok = false; const dbg = {};
   const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-us104-'));
@@ -10383,7 +10394,7 @@ total++;
 // ── 1.36.104 (P-0014): 시크릿 인정 기제 — 오경보를 없애되 눈이 멀지는 않는다.
 //   동기: leerness 자기 저장소가 63건을 보고했고 전부 의도적 가짜였다(e2e.js 47 · e2e-core.js 5 · pure-utils 4 · 보고서 7).
 //   매 세션 같은 숫자가 뜨면 진짜 유출이 하나 섞여도 구분되지 않는다. 그래서 대조군 3종을 함께 건다.
-{
+if (e2eShard.take('E(1.36.104/P-0014)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sb104-'));
@@ -10448,7 +10459,7 @@ total++;
 
 // ── 1.36.104: handoff 가 보호 파일을 지웠다 — 표식 줄의 본문 해시로 '우리가 쓴 그대로' 일 때만 청소한다.
 //   실측 귀속: 명령을 하나씩 단독 실행하니 handoff 였다(이전 라운드엔 외부 검수 탓으로 오귀속하고 있었다).
-{
+if (e2eShard.take('F(1.36.104)')) {
   total++;
   let ok = false; const dbg = {};
   const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rem104-'));
@@ -10482,7 +10493,7 @@ total++;
 // ── 1.36.105 (P-0015): 운영 등급 — 등급이 '이름' 이 아니라 '읽히는 양' 을 바꾸는가.
 //   실측 동기: init --minimal 은 디스크 파일만 줄이고 세션 적재는 2,800→2,790 tok(-0.3%) 였다.
 //   대조군 둘이 핵심이다 — 기존 사용자는 무변경이어야 하고, 최소 등급에서도 핵심 3종은 살아 있어야 한다.
-{
+if (e2eShard.take('G(1.36.105/P-0015)')) {
   total++;
   let ok = false; const dbg = {};
   const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-md105-'));
@@ -10566,7 +10577,7 @@ total++;
 // ── 1.36.105 (P-0009 B, 사용자 승인): 검증 스캐폴딩 토글 3종.
 //   승인 조건이 "경계 계약을 시험으로 고정" 이었다 — 토글이 끄는 것은 **지시문** 뿐이고,
 //   도구가 실제로 실행해 남기는 증거(scan/audit/gate/verify-claim/session close)는 어떤 조합에서도 살아야 한다.
-{
+if (e2eShard.take('H(1.36.105/P-0009B)')) {
   total++;
   let ok = false; const dbg = {};
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sc105-'));
@@ -10631,7 +10642,7 @@ total++;
 // ── 1.36.106 (T-0090): selftest/doctor 가 임시 디렉토리를 흘렸다 — 실행당 8개/3개, 실측 누적 83,135개.
 //   selftest 는 "CI 친화" 로 광고되는 명령이라 커밋마다 쌓인다. 정적으로는 안 보이고 **실행 전후 증가분**으로만 잡힌다.
 //   대조군: 사용자 명령(handoff/audit)은 원래 0이어야 하고, 여기서도 0이어야 한다(회귀 감시).
-{
+if (e2eShard.take('I(1.36.106/T-0090)')) {
   total++;
   let ok = false; const dbg = {};
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tl106-'));
@@ -10693,7 +10704,7 @@ total++;
 //   손상 스토어 클래스는 이 저장소에서 3회 재발했고(토글 1.36.49 · preview 형상 1.36.28 · 토글 값 1.36.92),
 //   스토어 9종 × 손상 3유형 = 27조합을 실제로 돌려보니 **manifest 만** 3/3 실패였다 —
 //   다른 8종은 fail-closed 규율이 서 있는데 manifest 에는 없었고, 1.36.105 가 거기에 쓰기(mode set)를 추가했다.
-{
+if (e2eShard.take('J(1.36.107)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mf107-'));
@@ -10757,7 +10768,7 @@ total++;
 //   (실측 exit 0 · 무경고). manifest 는 managedOverwrite 목록에 있어 매번 템플릿으로 재생성되는데
 //   템플릿은 사용자 선택을 모른다. installedAt 도 매 재init 마다 갱신돼 이름이 거짓말을 하고 있었다.
 //   고치면서 반대 실패(등급을 바꿀 수 없게 되는 false-STICK)를 만들지 않았는지 함께 단언한다.
-{
+if (e2eShard.take('K(1.36.107)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mk107-'));
@@ -10833,7 +10844,7 @@ total++;
 //
 //   유실은 가설이 아니라 재현이다: 읽기 직후를 4초 늘린 프로세스 A 와 그 창의 프로세스 B 를 붙이면
 //   락 있는 스토어는 B 가 2.4초 대기 후 둘 다 생존하고, 락 없던 user-requests.json 은 B 의 요청이 통째로 사라졌다.
-{
+if (e2eShard.take('L(1.36.108/T-0097, 1.36.169/T-0108)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lock108-'));
@@ -10989,7 +11000,7 @@ total++;
 //       Next.js `pages/_app.tsx`, 파이썬 `__init__.py` 처럼 흔한 이름이 전부 여기 걸렸다. 이유 없이 막히면
 //       사용자는 게이트를 끈다 — false-BLOCK 이 false-PASS 보다 나쁘다.
 //   두 방향을 한 블록에서 함께 단언한다. 한쪽만 보면 "전부 거부" 나 "전부 통과" 로 도망갈 수 있다.
-{
+if (e2eShard.take('M(1.36.109)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-claim109-'));
@@ -11084,7 +11095,7 @@ total++;
 //   구조적 병목은 "산문에 완료 낱말이 있는가" 를 다시 요구한 것이었다 — verify-claim 은 이미 done 행에만
 //   이 검사를 돌린다. 호출부가 아는 사실(claimedDone)을 넘겨 중복 요구를 없앴다.
 //   FP 를 먼저 고정했다: 실제 done 이력 139건 발화 0 · 홀드아웃 정직 주장 8/8 무탐지.
-{
+if (e2eShard.take('N(1.36.110/T-0099)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-honest110-'));
@@ -11155,7 +11166,7 @@ total++;
 //   기준선 실측: 43개 명령 중 31개가 새고 누출 234줄. 이번 라운드에 `commands` 카탈로그를 이중언어화해
 //   234 → 134 로 줄였다. 나머지는 **부채**이고, 이 가드는 그 부채가 **늘지 못하게** 한다.
 //   ⚠ baseline 은 목표가 아니라 측정값이다. 줄이는 방향으로만 갱신한다(갚은 뒤에는 반드시 조인다).
-{
+if (e2eShard.take('O(1.36.111/T-0092)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n111-'));
@@ -11286,7 +11297,7 @@ total++;
 //   최악(이 저장소)은 지침 파일의 78.0%(6,048 tok)이고, minimal 로 낮춰도 적재 7,242 tok 중 83% 가 그것이다.
 //   (이 수치는 **출하되는 `_splitPreserved` 로** 다시 잰 값이다 — 분해기를 엄격하게 고친 뒤 재측정했다.)
 //   이 가드는 "재서 보인다" 만 지킨다. 지우는 동작은 여전히 없고, 그게 없다는 것도 아래에서 단언한다.
-{
+if (e2eShard.take('P(1.36.112)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-carry112-'));
@@ -11516,7 +11527,7 @@ total++;
 //   1.9.402(UR-0108)가 decisions/lessons 의 **md 투영**에 _lineSafe 를 걸었지만, 같은 클래스의
 //   나머지 발화점이 남아 있었다 — plan.md 쓰기(handoff 까지 전파) + 목록 출력 12곳.
 //   가드는 발견 하나가 아니라 **행렬 전체**를 고정한다. 한 표면만 막으면 다음 헌트에서 옆 표면이 나온다.
-{
+if (e2eShard.take('Q(1.36.113)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-inj113-'));
@@ -11648,7 +11659,7 @@ total++;
 //   ⚠ 이 라운드가 만든 회귀도 여기서 잡았다: 손상 시 저장은 막혔는데 명령이 `✓ 추가` 를 찍고 exit 0 이었다.
 //     조용한 무동작 + 성공 표시는 조용한 유실보다 나쁘다 — 사용자는 저장됐다고 믿는다. 그래서 **세 가지를 함께** 단언한다:
 //     안 쓴다 · 성공이라 말하지 않는다 · 정상 스토어에서는 오차단하지 않는다.
-{
+if (e2eShard.take('R(1.36.114)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-neg114-'));
@@ -11827,7 +11838,7 @@ total++;
 //     ③ `init` 이 `.mcp.json` 을 만들지 않았다 — `adapter list` 는 claude 에 "[+.mcp.json]" 이라 광고하는데
 //        문서화된 진입점인 init 은 그 배선을 빼먹어, init 만 한 사용자의 Claude Code 는 도구를 하나도 못 봤다.
 //   이 가드는 "설치하면 도구가 leerness 를 쓰게 된다" 는 **제품의 기본 약속**을 계약으로 고정한다.
-{
+if (e2eShard.take('S(1.36.115)')) {
   total++;
   let ok = false; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wire115-'));
@@ -12205,7 +12216,7 @@ total++;
 //   ⚠ 이 기능의 성패는 **오탐**에 달렸다. 잘 만든 프로젝트는 CI 에 이름을 나열하지 않고 package.json 을
 //   동적으로 열거한다 — 그걸 못 알아보면 가장 모범적인 저장소에서 수십 건이 뜨고 사용자는 경고를 꺼 버린다.
 //   실제로 초안이 그 실측 프로젝트에서 **85건 오탐**을 냈고(근접 창 가정 때문), 그래서 아래 세 대조군을 모두 건다.
-{
+if (e2eShard.take('T(1.36.116)')) {
   total++;
   let ok = false; const dbg = {};
   try {
@@ -12847,8 +12858,8 @@ total++;
 //   메모화로 1회로 줄였다. 그런데 "안 돌렸다" 와 "한 번 돌리고 결과를 나눠 줬다" 는 겉보기가 같다 —
 //   그래서 **실패하는 스위트**를 판별 케이스로 쓴다: 전파되면 N개 주장 **전부** 실패하고, 끊기면 첫 주장만 실패한다.
 //   대조군(통과 스위트)도 함께 둔다 — 메모가 없는 실패를 지어내지 않는지.
-total++;
-{
+if (e2eShard.take('U(1.36.125)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const _dirs = [];
   const N = 3;
@@ -12899,8 +12910,8 @@ total++;
 // 1.36.126 → 1.36.162 (T-0107): `.leerness/` 가 공식 canonical 이 된 뒤의
 //   호환 계약. 과거에는 대체 디렉터리를 거부했지만, 이제는 fresh init·idempotency·
 //   marker가 권위를 낮추지 않는 dual-live fail-closed·부모 자산 해석을 검증한다.
-total++;
-{
+if (e2eShard.take('V(1.36.126/T-0107)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ws126-'));
   const envW = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -13038,8 +13049,8 @@ total++;
 //   CI 가 `bin/leerness.js` 를 실행하므로 그 파일이 러너로 잡히고, 그 안의 selftest 단언 문자열
 //   (`'test:core'`·`e2e-core.js`)이 호출로 읽혀 leerness 자신의 진짜 고아가 0건으로 보고됐다.
 //   ① audit 이 그 가림을 **사용자에게 말하는가** ② 대조군은 조용한가 ③ 그리고 우리 자신이 실제로 배선했는가.
-total++;
-{
+if (e2eShard.take('W(1.36.127/T-0105)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mask127-'));
   const envM = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -13148,8 +13159,8 @@ total++;
 // 1.36.128 (T-0104 실측): `adapter <tool> [+.mcp.json]` 은 **외부 제품이 그 파일을 읽는다**는 주장이다.
 //   이 머신의 실제 CLI 로 재 보니 codex 는 읽지 않았고(`codex mcp get` → not found) opencode 는 읽었다(connected).
 //   그래서 안 읽는 도구에는 파일을 **쓰지 않고** 되는 명령을 안내한다. 그 계약을 CLI 행위로 고정한다.
-total++;
-{
+if (e2eShard.take('X(1.36.128/T-0104)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-adp128-'));
   const envA = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -13229,8 +13240,8 @@ total++;
 //   설계 경계는 전부 실측에서 나왔다: PID 라이브니스는 양방향으로 틀리고(5초에 재사용 7건, 죽은 pid 5.2%가 ALIVE),
 //   `leerness selftest` 1회가 leerness 프로세스 129개를 띄우므로 "모든 호출마다 등록" 은 불가능하다.
 //   그래서 쓰기 지점은 handoff · session close 둘뿐이고, 판정("활성")은 아예 하지 않는다.
-total++;
-{
+if (e2eShard.take('Y(1.36.129/P-0016 P1)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sess129-'));
   //   ⚠ 이 e2e 는 **살아있는 Claude Code 세션 안에서** 돈다 — 주변 env 를 비우지 않으면
@@ -13447,8 +13458,8 @@ total++;
 //       → 이제 **별도 프로세스**가 해제 시각을 파일로 남기고, 대상 파일 **mtime 과 비교**한다.
 //       "잠깐 기다렸다 무락으로 쓰기" 도 mtime < 해제시각 이라 걸린다.
 //     · 사용자 글 보존을 `includes` 로만 봐서 **표 뒤로 재배치**해도 통과했다 → 이제 **위치**를 단언한다.
-total++;
-{
+if (e2eShard.take('Z(1.36.131/P-0016 P2)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-p2-131-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -13609,8 +13620,8 @@ total++;
 //     ② 세션 신호가 4표면 중 1곳에만 닿았고, 못 가는 3곳에 유일한 강제 경로(훅)·MCP 경로·기계 경로가 들어 있었다.
 //     ③ 억제된 세션은 "남이 N건 있다" 는 듣지만 "나는 안 보인다" 는 못 들었다(비대칭이 조용했다).
 //   그리고 그 밑에서 락 자체가 새고 있었다(아래 ①).
-total++;
-{
+if (e2eShard.take('AA(1.36.132/UR-0069)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-132-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -13895,8 +13906,8 @@ total++;
 //   자동유도 96.9% · 명시선언 63.1% · 혼합(채택률 1.0) 94.0% 로 전부 40% 초과였고, 유일한 생존 구성은
 //   **충돌이 실제로 나는 파일(bin/leerness.js, 커밋의 68.8%)을 음소거해서** 조용해진 것이었다(무출력은 통과가 아니다).
 //   대신 그 정찰이 실측한 **기반 결함**을 고친다 — 전부 P3-A 없이도 이미 출하돼 있던 동작이다.
-total++;
-{
+if (e2eShard.take('AB(1.36.133/T-0109)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-133-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -14126,8 +14137,8 @@ total++;
 //   그리고 `status --json` 은 git 아님/unborn/정상/HEAD손상/gitdir깨짐 **5상태에서 payload 가 동일**해
 //   '설치 안 됨' 과 '설치할 데가 없음' 이 구분되지 않았다.
 //   원인은 근거가 셋이었다는 것이다: install=`.git` **디렉토리 존재**, audit=`git log` 실행 결과, status=아무것도 안 봄.
-total++;
-{
+if (e2eShard.take('AC(1.36.134)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-134-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -14578,14 +14589,14 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AD(1.36.140) — **초크포인트는 하나여야 한다.**
 //   1.36.135/139 는 `bin/leerness.js` 의 git 초크포인트에만 환경 세척을 넣었고,
 //   `lib/drift.js` · `lib/session-close.js` 는 같은 이름의 복제본을 갖고 있었다(세척 없음).
 //   기존 가드는 "인라인 배열 형태의 직접 호출 0건" 만 셌다 — 세 복제본이 전부 변수 형태라 **모양은 통과**했다.
 //   가드가 밟지 않는 경로는 가드가 지키지 못한다. 그래서 여기서는 **행위로** 잰다:
 //     상속된 GIT_DIR 아래에서 남의 저장소 브랜치가 지워지는가(실측: 고치기 전 60 → 10, 50건 삭제).
-{
+if (e2eShard.take('AD(1.36.140)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-140-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -14693,14 +14704,14 @@ total++;
 
 
 
-total++;
 // AE(1.36.140) — 재검수가 지적하고 **내가 재현한** 것들을 고정한다.
 //   전부 "고치려고 넣은 코드가 만든 다음 결함" 이다:
 //     · 복합 키 예산(1.36.139) → `date` 안의 `|` 로 두 항목이 같은 키가 되어 **무관 항목 삭제 + archive 불일치**
 //     · 롤백(1.36.134~139) → 정의가 실패 지점보다 뒤라 EPERM 이 최상위로 튀며 **체인 백업이 덮인 채 남음**
 //     · archive 를 락 밖에서 씀 → 동시 drop 둘 다 성공 보고 + 이중 archive → 복원이 중복 생성
 //   판정값은 모두 **실측 전/후 비교**다(문자열 존재가 아니라 무엇이 남았는지).
-{
+if (e2eShard.take('AE(1.36.140)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-140b-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -14887,7 +14898,6 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AF(1.36.142/T-0116) — **증거는 일한 세션에 붙어야 한다.**
 //   `.leerness/state.json` 의 `currentRunId` 는 전역 슬롯 하나였다. 두 세션이 같은 프로젝트에서 일하면
 //   뒤에 `state start` 한 쪽이 앞사람 슬롯을 덮어썼고, 실측으로:
@@ -14895,7 +14905,8 @@ total++;
 //     · 일하지 않은 B 가 `completion_claim_allowed: true` 를 받았고
 //     · A 는 `state show` 로 **자기 run 을 볼 수조차 없었다**.
 //   락 문제가 아니다(직렬로 돌려도 재현된다) — 주소가 없는 것이 문제다.
-{
+if (e2eShard.take('AF(1.36.142/T-0116)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-142-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15009,14 +15020,14 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AG(1.36.143) — **없는 `--path` 는 아무것도 만들지 않는다** + 공유 판정은 추정하지 않는다.
 //   검수는 `provider add` · `team add` · `creds register` 3건을 지목했다. 이름을 더 넣는 대신
 //   모든 명령에 없는 `--path` 를 주고 전수로 재니 **33건**이 그 경로를 만들었다 —
 //   다수는 **성공이라 말하면서**(`provider add` · `team add` · `skill learn` · `glossary` · `wakeup-interval`),
 //   그중엔 직전 라운드에 내가 넣은 `state start` 도 있었다. 개별 등록은 이미 세 번째였다.
 //   그래서 이름 목록이 아니라 **성질**로 막고, 여기서도 이름이 아니라 **열거**로 잰다.
-{
+if (e2eShard.take('AG(1.36.143)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-143-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15176,12 +15187,12 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AH(1.36.144/T-0117) — **`--dry-run` 은 아무것도 쓰지 않는다** + 재검수 P1/P2.
 //   `--dry-run` 은 등록된 전역 플래그인데 많은 명령이 그냥 무시하고 썼다. 378 호출을 전후 트리 비교로 재니
 //   183건이 썼고 그중 28건이 **사용자 데이터**를 바꿨다(`session close` 가 실제 마감을 수행, `task/decision/rule/plan add`
 //   가 실제로 추가). 명령마다 분기를 심으면 16개의 새 실수 자리가 생기므로 **쓰기 시점 하나**에서 막는다.
-{
+if (e2eShard.take('AH(1.36.144/T-0117)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-144-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15332,12 +15343,12 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AI(1.36.145) — **MCP 표면에도 세션 주소가 있어야 한다.**
 //   T-0116 을 CLI 에서만 고쳤다. MCP `state` 도구에는 주소 입력이 없어 한 서버의 모든 호출이
 //   같은(=무)주소로 접혀 전역 슬롯 오귀속이 그대로 남아 있었다 — 실측: A 의 증거가 B 의 run 에 붙고
 //   일하지 않은 B 가 `completion_claim_allowed: true` 를 받았다. 가드는 자기가 밟는 경로만 지킨다.
-{
+if (e2eShard.take('AI(1.36.145)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-145-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15427,7 +15438,6 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AJ(1.36.146) — dry-run 가드가 **쓰기만** 보고 있었다.
 //   1.36.144 의 가드는 `writeUtf8`/`append`/`mkdirp` 세 함수만 봤다. io 를 우회하는 `fs.*` 변경 호출은
 //   정적으로 **330건**(unlinkSync 15 · rmSync 85 · writeFileSync 125 …) 이었고, 실측으로:
@@ -15436,7 +15446,8 @@ total++;
 //     · 면제 정규식이 `cache` 를 경로 어디서나 매칭해 `…/cache/proj/` 프로젝트는 **가드가 통째로 꺼졌다**
 //     · MCP 의 빈 `path` 가 서버 root 로 대체돼 엉뚱한 저장소에 썼다
 //   330곳을 배선하면 330개의 새 실수 자리가 생긴다 — 프로세스 진입점에서 한 번 막고, git 은 초크포인트에서 막는다.
-{
+if (e2eShard.take('AJ(1.36.146)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-146-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15547,13 +15558,13 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AK(1.36.147) — 소유권 코드가 만든 세 결함. 전부 **내가 T-0116 을 고치며 넣은 것**이다.
 //   ① 인수는 했는데 **소유를 저장하지 않아** 두 세션이 같은 legacy run 을 각자 인수했다
 //      (실측: 한 run 에 A.js 와 B.js 가 함께 들어갔다 — T-0116 이 잡으려던 바로 그 증거 혼합).
 //   ② 같은 세션 키로 두 번 `start` 하면 둘 다 성공하고 마지막만 소유해 **첫 run 이 증거 없이 고아**가 됐다.
 //   ③ 남의 세션 키 가림이 최상위 필드에만 걸려 **중첩 `state.runsBySession`** 으로 원본이 그대로 샜다.
-{
+if (e2eShard.take('AK(1.36.147)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-147-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15629,7 +15640,6 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AL(1.36.148) — 앞 라운드 수정들이 **다른 조건에서 무력화**되던 자리들.
 //   ① `keySource` 가 child 억제를 **명시 주소보다 먼저** 검사해, MCP 서버가
 //      `CLAUDE_CODE_CHILD_SESSION=1` 을 상속하면 1.36.145 의 주소 전달이 통째로 죽었다.
@@ -15637,7 +15647,8 @@ total++;
 //   ② run id 를 "빈 문자열만 아니면" 으로 봐서 `../../evil` 이 소유 맵에 들어가면 `.leerness` 밖에 썼다.
 //   ③ 중앙 `--path` 가드가 존재성만 봐서 **일반 파일**이 프로젝트 root 로 통과했다.
 //   ④ dry-run 가드는 파일·git 만 봤다 — `team deploy --yes --dry-run` 이 배포 subprocess 를 실제 실행했다.
-{
+if (e2eShard.take('AL(1.36.148)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-148-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15755,11 +15766,11 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AM(1.36.149) — 1.36.148 의 run-id 경로 차단은 소유 맵만 덮었다.
 //   legacy `currentRunId` 와 디스크 run record 의 `run_id` 도 같은 파일 경로 병목을 탄다.
 //   둘 중 하나가 경로형이면 state record/handoff 가 프로젝트 밖에 쓰기 전에 손상으로 멈춰야 한다.
-{
+if (e2eShard.take('AM(1.36.149)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-149-'));
   const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
@@ -15813,11 +15824,11 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AN(1.36.150/T-0120) — `GIT_CONFIG_NOSYSTEM`은 저장소 위치 주입이 아니라 호출자가 시스템 설정을
 // 숨기겠다는 의미다. 설치기만 이를 지우면 system core.hooksPath에 훅을 쓰지만, 같은 셸의 실제 git commit은
 // 기본 .git/hooks를 보아 오래된 handoff도 통과한다. 설치 경로와 실제 커밋 경로가 같은 환경에서 일치해야 한다.
-{
+if (e2eShard.take('AN(1.36.150/T-0120)')) {
+  total++;
   let ok = false; const bad = []; const dbg = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-150-'));
   const stripGitTargetEnv = (source) => {
@@ -15878,12 +15889,12 @@ total++;
   if (!ok) failed++;
 }
 
-total++;
 // AO(1.36.152/T-0115, 1.36.169/T-0108 확장) — write 시점의 락 관측만으로는 "읽은 사본도 락 안인가"를 증명할 수 없다.
 // 첫 프로세스의 최종 rename을 강제로 멈추고 두 번째 쓰기를 붙여, 서로 다른 RMW 11쌍이 모두 생존하는지 확인한다.
 // T-0343: plus 19 pairs where the second command decided a write, a skip or an error from a file the first one was
 // publishing (on POSIX the path is missing for that moment); 30 in all.
-{
+if (e2eShard.take('AO(1.36.152/T-0115, 1.36.169/T-0108, T-0343)')) {
+  total++;
   let ok = false; const dbg = {};
   try {
     const race = cp.spawnSync(process.execPath, [path.join(__dirname, 'e2e-concurrency.js'), CLI], {
@@ -15916,7 +15927,7 @@ setImmediate(() => {
   } catch (error) {
     runtimeDep0190.push(`warning redirect gate read failed: ${error.message}`);
   }
-  total++;
+  total++; // e2e-shard: run-wide check
   if (runtimeDep0190.length === 0) {
     console.log('✓ AP(1.36.162/T-0139) 전체 E2E 부모+동기·ignore·async 자식 런타임 DEP0190 0건');
   } else {
@@ -15925,7 +15936,7 @@ setImmediate(() => {
     process.stderr.write(runtimeDep0190.join('\n---\n') + '\n');
   }
   // T-0315: 테스트는 패키지 저장소 자신의 상태를 바꾸지 않는다 — gitignore 된 캐시·원장까지 전부 대조한다.
-  total++;
+  total++; // e2e-shard: run-wide check
   const _pkgChanged = repoGuard.diff(_pkgLeernessBefore, repoGuard.snapshot(_pkgLeerness));
   if (_e2eHomeInit.status === 0 && _pkgChanged.length === 0) {
     console.log(`✓ T-0315 e2e 가 패키지 저장소 .leerness 를 바꾸지 않음 (항목 ${_pkgLeernessBefore.size}개 대조 · cwd 없는 CLI 호출은 격리 홈 프로젝트에서 실행)`);
@@ -15934,6 +15945,16 @@ setImmediate(() => {
     console.log(`✗ T-0315 e2e 격리 실패 — 격리 홈 init exit=${_e2eHomeInit.status}, 패키지 .leerness 변경 ${_pkgChanged.length}건: ${_pkgChanged.slice(0, 20).join(', ')}${_pkgChanged.length > 20 ? ' …' : ''}`
       + ' (실행 중 이 저장소에서 leerness 를 직접 실행했다면 그 쓰기도 여기에 잡힌다)');
   }
-  console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
+  // T-0359: every case of this file was reached exactly once, here or in its own shard, and none is unguarded.
+  total++; // e2e-shard: run-wide check
+  const _shard = e2eShard.finish();
+  const _shardName = _shard.spec ? `샤드 ${_shard.spec.index}/${_shard.spec.count}` : '샤드 없음(전체)';
+  if (_shard.ok) {
+    console.log(`✓ T-0359 e2e ${_shardName}: 케이스 ${_shard.ran}/${_shard.total}개 실행 · 가드 ${_shard.total}개가 각각 한 번씩 도달 · 가드 없는 최상위 블록 0`);
+  } else {
+    failed++;
+    console.log(`✗ T-0359 e2e 샤드 가드 이상 ${JSON.stringify({ problems: _shard.problems.slice(0, 10), missing: _shard.missing.slice(0, 10), repeated: _shard.repeated.slice(0, 10), unknown: _shard.unknown.slice(0, 10) })}`);
+  }
+  console.log(`\nE2E result: ${total - failed}/${total} passed${_shard.spec ? ` · shard ${_shard.spec.index}/${_shard.spec.count} (${_shard.ran}/${_shard.total} cases)` : ''} · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
   if (failed > 0) process.exitCode = 1;
 });

@@ -96,10 +96,14 @@ New writer operations may read-only wait for an existing regular, single-linked 
 workspace migration lock before classifying ownership. They reclassify after the peer
 finishes; waiting never grants lock ownership or permission to overwrite a conflict.
 The existing migration wait budget defaults to 10 seconds, is configurable through
-`LEERNESS_WORKSPACE_MIGRATION_LOCK_WAIT_MS`, and is clamped to 0–60 seconds. Expired or
-non-regular/linked lock observations block with `workspace_dir_migration_locked`; no
-lock is read, reclaimed or deleted by admission. The budget bounds contention waiting,
-not unrelated Git/filesystem I/O. Public `state compatibility` remains immediate.
+`LEERNESS_WORKSPACE_MIGRATION_LOCK_WAIT_MS`, and is clamped to 0–60 seconds; a positive value below 1.5 seconds
+counts as 1.5 seconds (three refresh intervals), and 0 does not wait. It is the longest
+wait without progress: the migrating process refreshes the lock file's modification time while
+it works (at most every 500 ms), and a waiter keeps waiting while the lock's size or modification
+time changes, up to 15 minutes in all. A lock that does not change for the budget, such as one
+left by a process that died, and non-regular/linked lock observations block with
+`workspace_dir_migration_locked`; no lock is read, reclaimed or deleted by admission. The budget
+bounds contention waiting, not unrelated Git/filesystem I/O. Public `state compatibility` remains immediate.
 An observed non-workspace denial is terminal even if a peer subsequently removes its
 descriptor. A conflict snapshot gets at most one extra classification when no lock is
 seen, covering a peer that completed between observations without accepting persistent

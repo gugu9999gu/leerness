@@ -34,9 +34,10 @@ const unique = marker => {
 const extract = (start, end, precedingCounter = false) => {
   let a = unique(start); const b = unique(end);
   if (precedingCounter) {
-    const counter = source.lastIndexOf('total++;\n{', a);
-    assert(counter >= 0 && /^total\+\+;\n\{\s*$/.test(source.slice(counter, a)), 'handoff counter boundary drift');
-    a = counter;
+    // T-0359: a case opens with its shard guard, and the counter is the guard's first line.
+    const guard = source.lastIndexOf("if (e2eShard.take('", a);
+    assert(guard >= 0 && /^if \(e2eShard\.take\('[^'\\\n]+'\)\) \{\n  total\+\+;\n\s*$/.test(source.slice(guard, a)), 'handoff counter boundary drift');
+    a = guard;
   }
   assert(b > a, 'source markers reversed');
   const block = source.slice(a, b);
@@ -100,6 +101,7 @@ try {
   const execute = (name, failingResult) => {
     const lines = [], calls = [];
     const context = { fs, path, os: { ...os, tmpdir: () => arena }, process: { execPath: process.execPath, env: { ...process.env } }, CLI, SELFTEST_SPAWN_MS, performance, childDiagnostics, total: 0, failed: 0,
+      e2eShard: { take: () => true },
       console: { log: (...args) => lines.push(args.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')) },
       cp: { spawnSync: (executable, args, options) => {
         assert.equal(executable, process.execPath); assert.equal(args[0], CLI);

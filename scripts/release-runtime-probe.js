@@ -1075,12 +1075,15 @@ try {
       || !/name:\s*release runtime \(shell-free npm\)/.test(workflow)) {
     failures.push('CI가 전체 게이트와 Node 24/26 매트릭스에서 릴리스 런타임 프로브를 실행하지 않음');
   }
-  const fullTestStart = workflow.indexOf('\n  test:');
-  const fullTestEnd = workflow.indexOf('\n  release-runtime:', fullTestStart);
-  const fullTestJob = fullTestStart >= 0 && fullTestEnd > fullTestStart
-    ? workflow.slice(fullTestStart, fullTestEnd) : '';
-  if (!/include:\s*[\s\S]*-\s+os:\s*windows-latest\s*[\r\n]+\s*node:\s*24/.test(fullTestJob)
-      || !/-\s+name:\s*e2e\s*[\s\S]*run:\s*node \.\/scripts\/e2e\.js/.test(fullTestJob)) {
+  // T-0359: the full E2E runs in shards; Windows Node 24 must list every shard (1..k) of the e2e job.
+  const ciJobs = require('./ci-shard').workflowJobs(workflow);
+  const e2eJob = ciJobs.test || { entries: [], runs: [], lines: [] };
+  const win24 = e2eJob.entries.filter(e => e.os === 'windows-latest' && e.node === '24');
+  const win24Shards = win24.map(e => Number(e.shard)).sort((a, b) => a - b);
+  if (!win24.length || win24.some(e => e.shards !== win24[0].shards) || win24Shards.length !== Number(win24[0].shards)
+      || win24Shards.some((s, i) => s !== i + 1)
+      || !e2eJob.runs.includes('node ./scripts/e2e.js')
+      || !e2eJob.lines.some(l => /^\s+LEERNESS_E2E_SHARD: \$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\}$/.test(l))) {
     failures.push('Windows Node 24 전체 E2E가 CI test 매트릭스에서 실행되지 않음');
   }
 
