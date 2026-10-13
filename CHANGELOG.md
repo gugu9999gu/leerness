@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.36.300 - 2026-10-13
+
+- Fixed: `leerness lazy detect --auto-track` registered TODOs that a task already covered (T-0345).
+  - When a batch of new TODOs mixed files that no tracker row references with a file a task already referenced, every new TODO got a task, including those in the referenced file.
+  - Now only the TODOs whose file no row references are registered, decided under the tracker lock as before, and `known-todos.json` gains exactly those. A TODO in a referenced file is left as it is, as without `--auto-track`.
+- Tests (T-0345, T-0346):
+  - `scripts/lazy-auto-track-probe.js` (`npm run test:lazy-auto-track`, in `test:commands`) checks a mixed batch, a rerun, and two controls: nothing referenced, and everything referenced. On the old code the two mixed-batch cases fail: the referenced file's two TODOs got tasks too.
+  - The 30 races of `scripts/e2e-concurrency.js` now check that the two commands overlapped. Before, the first command's publication stalled for a fixed 1.2 s, and a second command that started later than that passed without racing.
+    - The second command now runs with `scripts/lock-probe.js` too. After each operation on the stalled file it reports: a finished read, open, stat or existence check, and the result of its first attempt at that file's lock or at a lock the first command held when it stalled (refused because held, or taken). It reads those held locks once, when it starts; if they cannot be read, the race does not count. It marks its report complete when it exits. A report that cannot be written sets its exit code to 97 at once, and an incomplete report does not count.
+    - The first command stays stalled until a report exists (at most 15 s), then 1.2 s more. `scripts/race-overlap.js` judges the reports. A race counts when such a lock attempt was refused because the first command held the lock. For a command that tried none of those locks, it counts when its read finished before the first command resumed. A first attempt that took such a lock means the first command had already released it, and the race does not count.
+    - `scripts/race-overlap-probe.js` (`npm run test:race-overlap`, in `test`, `test:core` and `test:fast`) runs the handshake with two small processes on ten fixed schedules. They include a second process that is slow to reach its lock attempt, one that reads during the stall but takes a lock after the release, held locks that cannot be read, and a report that can no longer be rewritten, also after the report was completed. Write failures are injected (`LOCKPROBE_REPORT_FAIL_AFTER`), so the test does not depend on file permissions. Ablations:
+      - every lock attempt reported as refused, whatever its result: 8 of 10;
+      - a first process that does not wait for the report: 6 of 10;
+      - the held locks read at the first lock attempt, and a failed read kept as "none": 8 of 10;
+      - a report judged without the completion mark: 9 of 10;
+      - a failed write that sets the exit code only in the closing exit listener: 9 of 10.
+    - Measured from the stall to the first report: 468-1,704 ms on this Windows PC and 123-217 ms on Linux (Docker node:20). In `creds-refresh` the second command reached the stalled file 1,704 ms after the stall began, 504 ms after the old fixed stall would have ended, so with the old harness that race would have passed without overlapping.
+    - On the current code all 30 races overlapped and passed, on Windows and on Linux. On Linux the second command's lock attempt was refused by the first command's lock in all 30; on Windows in 29, and `bugfix-start-vs-task-add` counted by its read. On Linux with the 1.36.296 code (before T-0343) all 30 overlapped too, and 20 failed: the 19 races T-0343 added and `plan-init-vs-remove`, whose `plan init` T-0343 also fixed. The other 10 pass there, as before.
+
 ## 1.36.299 - 2026-10-12
 
 - Fixed: on Windows, `leerness skill publish` made a `.zip` instead of the `.tgz` when Git for Windows' GNU tar came first on PATH, as it does in Git Bash and in agent shells built on it (T-0352).

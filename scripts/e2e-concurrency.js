@@ -9,6 +9,7 @@ const cp = require('child_process');
 
 const CLI = path.resolve(process.argv[2] || path.join(__dirname, '..', 'bin', 'leerness.js'));
 const PRELOAD = path.join(__dirname, 'lock-probe.js');
+const { overlapOf } = require('./race-overlap');
 const ENV = {
   ...process.env,
   LEERNESS_OFFLINE: '1',
@@ -37,16 +38,22 @@ function init(d) {
 // is observed rather than inferred. T-0314: inferring it from `<target>.tmp-*` names stopped working when
 // 1.36.190 published memory outputs through `.<target>.publish-*` + link; 8 of 11 races then never raced.
 const readyFileOf = d => path.join(d, '.stall-ready.json');
+// T-0346: the second command writes this file after it read the target, or tried its lock or a lock the first
+// command held when it stalled; the first command's stall ends only after it exists (see scripts/lock-probe.js).
+// A fixed 1.2 s stall could end before the second command had started (a Node start alone can take that long on
+// Windows), and the race then passed without overlapping the publication.
+const reachFileOf = d => path.join(d, '.stall-reached.json');
 
-function spawn(d, args, stallTarget) {
-  const nodeArgs = stallTarget
-    ? ['--require', PRELOAD, CLI, ...args, '--path', d]
-    : [CLI, ...args, '--path', d];
-  const env = stallTarget
-    ? { ...ENV, LOCKPROBE_STALL_TARGET: stallTarget, LOCKPROBE_STALL_MS: String(STALL_MS), LOCKPROBE_READY_FILE: readyFileOf(d) }
-    : ENV;
+// role 'first' stalls the publication of `target` until the second command reaches it; role 'second' reports
+// reaching it. Both run with the lock-probe preload.
+function spawn(d, args, role, target) {
+  const nodeArgs = ['--require', PRELOAD, CLI, ...args, '--path', d];
+  const env = role === 'first'
+    ? { ...ENV, LOCKPROBE_STALL_TARGET: target, LOCKPROBE_STALL_MS: String(STALL_MS), LOCKPROBE_READY_FILE: readyFileOf(d), LOCKPROBE_WAIT_FILE: reachFileOf(d) }
+    : { ...ENV, LOCKPROBE_REACH_TARGET: target, LOCKPROBE_REACH_FILE: reachFileOf(d), LOCKPROBE_REACH_LOCKS_FILE: readyFileOf(d) };
   return cp.spawn(process.execPath, nodeArgs, { cwd: d, env, stdio: 'ignore' });
 }
+const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 
 function waitForStall(d, target) {
   // T-0343: an absolute target (a file outside .leerness) is acknowledged by its full path, a relative one by its
@@ -66,15 +73,22 @@ async function race(name, config) {
     if (config.seed) config.seed(d);
     // T-0343: a target outside .leerness is given as a function of the project directory (its absolute path).
     const stallTarget = typeof config.stallTarget === 'function' ? config.stallTarget(d) : config.stallTarget;
-    const first = spawn(d, config.first, stallTarget);
+    const first = spawn(d, config.first, 'first', stallTarget);
     const stalled = waitForStall(d, stallTarget);
     if (config.beforeSecond) config.beforeSecond(d);
-    const second = spawn(d, typeof config.second === 'function' ? config.second(d) : config.second);
+    const second = spawn(d, typeof config.second === 'function' ? config.second(d) : config.second, 'second', stallTarget);
     const exits = await Promise.all([wait(first), wait(second)]);
+    // T-0346: the race counts only when the second command overlapped the first one's stalled section (see
+    // scripts/race-overlap.js): a contended lock attempt, or, for a command that tried none of those locks, a read
+    // of the stalled file that finished before the first command resumed.
+    const ready = readJson(readyFileOf(d)) || {}, reach = readJson(reachFileOf(d));
+    const { overlapped, why } = overlapOf({ stalled, ready, reach });
     const inspected = config.inspect(d);
     // T-0343: `secondExit` names the second command's expected exit when it is not 0 (lazy detect reports issues with 1).
     const secondExit = config.secondExit === undefined ? 0 : config.secondExit;
-    return { name, stalled, exits, ...inspected, ok: stalled && exits[0] === 0 && exits[1] === secondExit && inspected.preserved === true };
+    return { name, stalled, overlapped, why, read: reach && reach.read && reach.read.how, lock: reach && reach.lock && reach.lock.result,
+      waitedMs: ready.waitedMs, exits, ...inspected,
+      ok: overlapped && exits[0] === 0 && exits[1] === secondExit && inspected.preserved === true };
   } catch (e) {
     return { name, error: String(e && e.message || e), ok: false };
   } finally {

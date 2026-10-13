@@ -115,7 +115,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.299';
+const VERSION = '1.36.300';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -17528,23 +17528,27 @@ function lazyDetect(root, opts = {}) {
           const header = progressHeader(root, input.text);
           const rows2 = readProgressRows(root, input.text);
           const lockedText = rows2.map(r => `${r.request || ''} ${r.evidence || ''}`).join('\n');
-          if (!newTodos.some(t => !lockedText.includes(t.file))) return false;
+          // T-0345: only the TODOs whose file no row references. A batch with one untracked file registered every
+          //   new TODO, so TODOs in files a task already covered were registered again.
+          const toRegister = newTodos.filter(t => !lockedText.includes(t.file));
+          if (!toRegister.length) return [];
           let maxT = _historyRetention.reservedTaskMax(root); const idRe = /\bT-(\d{4,})\b/g;
           const scanSrc = (exists(planPath(root)) ? read(planPath(root)) : '') + '\n' + rows2.map(r => r.id).join('\n');
           let mm; while ((mm = idRe.exec(scanSrc))) maxT = Math.max(maxT, Number(mm[1]));
-          _historyRetention.assertTaskIdCapacity(maxT, newTodos.length);
-          for (const t of newTodos) {
+          _historyRetention.assertTaskIdCapacity(maxT, toRegister.length);
+          for (const t of toRegister) {
             maxT++;
             rows2.push({ id: `T-${String(maxT).padStart(4, '0')}`, status: 'requested', request: `TODO ${t.file}:${t.line}`, evidence: 'auto-tracked', nextAction: t.text.slice(0, 80), updated: today() });
           }
           writeProgressRows(root, header, rows2, { input });
-          return true;
+          return toRegister;
         });
-        if (registered) {
-          // known-todos에 추가 — 다음 detect에서 재카운트 안 하도록
-          const merged = [...knownList, ...newTodos.map(t => ({ ...t, ackAt: now() }))];
+        if (registered.length) {
+          // known-todos에 추가 — 다음 detect에서 재카운트 안 하도록. T-0345: only what was registered; a TODO in a
+          //   file a task already references stays as it is, as without --auto-track.
+          const merged = [...knownList, ...registered.map(t => ({ ...t, ackAt: now() }))];
           writeUtf8(knownPath, JSON.stringify(merged, null, 2) + '\n');
-          if (!jsonMode) ok(`${newTodos.length}개 TODO를 progress-tracker에 자동 등록 + known-todos.json 갱신`);
+          if (!jsonMode) ok(`${registered.length}개 TODO를 progress-tracker에 자동 등록 + known-todos.json 갱신`);
         }
       } else if (newTodos.length && !jsonMode) {
         log(`    💡 자동 등록: leerness lazy detect --auto-track`);
