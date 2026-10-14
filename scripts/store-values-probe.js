@@ -58,6 +58,18 @@ const skill = (dir, id, fields) => {
   fs.writeFileSync(store(dir, 'skills', id, 'skill.json'), JSON.stringify({ name: id, ...fields }, null, 2) + '\n');
 };
 const constraints = (dir, platforms) => fs.writeFileSync(store(dir, 'platform-constraints.json'), JSON.stringify({ platforms }, null, 2) + '\n');
+// T-0358: skill publish first runs a pre-check (health), which fails while drift needs attention, and drift counts a
+//   tracker last dated the previous UTC day as stale. The template is made once at the start, so a run that crossed
+//   UTC midnight before a publish test failed there. The tests about generated text skip the pre-check; the pre-check
+//   has its own test below, with dates that do not depend on the time of day.
+const NO_PRECHECK = ['--no-security-check'];
+const trackerDated = (dir, daysFromToday) => {
+  const day = new Date(Date.now() + daysFromToday * 86400000).toISOString().slice(0, 10);
+  const file = store(dir, 'progress-tracker.md');
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(/\d{4}-\d{2}-\d{2}/.test(text), 'the template tracker holds no date');
+  fs.writeFileSync(file, text.replace(/\d{4}-\d{2}-\d{2}/g, day));
+};
 // What a non-text value turned into: an object, a comma-joined array, a missing value.
 const BAD = /\[object Object\]|undefined|얼룩말,목록/;
 const JS_ERROR = /is not a function|Cannot read properties|is not iterable|of undefined|of null/;
@@ -107,7 +119,7 @@ test('array fields that are not arrays do not crash skill commands, and skill le
   skill(dir, 'str-items', { displayNameKo: '문자열 항목', capabilities: ['zebra export'], patterns: ['run it'], optimizations: ['faster'], sources: [{ note: 'no url' }, null, { url: '' }], verification: null });
   skill(dir, 'good-sources', { displayNameKo: '출처 있음', capabilities: ['zebra export'], sources: ['https://string.example', { url: 'https://object.example' }] });
   for (const args of [['skill', 'search', 'zebra'], ['skill', 'info', 'str-caps'], ['skill', 'info', 'obj-caps'], ['skill', 'info', 'str-items'], ['skill', 'consolidate'],
-    ['skill', 'export', 'str-caps'], ['skill', 'export', 'obj-caps'], ['skill', 'export', 'str-items'], ['skill', 'export', 'good-sources'], ['skill', 'export-all'], ['skill', 'publish'],
+    ['skill', 'export', 'str-caps'], ['skill', 'export', 'obj-caps'], ['skill', 'export', 'str-items'], ['skill', 'export', 'good-sources'], ['skill', 'export-all'], ['skill', 'publish', ...NO_PRECHECK],
     ['skill', 'learn', 'obj-caps'], ['skill', 'learn', 'str-items'], ['skill', 'learn', 'str-items', '--doc', 'https://kite.example'], ['skill', 'learn', 'good-sources']]) {
     clean(must(run(dir, [...args, '--path', dir]), args.join(' ')), args.join(' '));
   }
@@ -225,7 +237,7 @@ test('generated files hold text only, and the export description still prefers d
   const dir = project();
   for (const [id, fields] of Object.entries(SKILLS)) skill(dir, id, fields);
   skill(dir, 'described', { displayNameKo: '설명 있음', description: 'Use when drawing zebra charts', capabilities: ['zebra export'] });
-  for (const args of [['skill', 'export', 'obj-desc'], ['skill', 'export-all'], ['skill', 'publish'], ['skill', 'learn', 'obj-name'], ['skill', 'learn', 'objitem-caps'],
+  for (const args of [['skill', 'export', 'obj-desc'], ['skill', 'export-all'], ['skill', 'publish', ...NO_PRECHECK], ['skill', 'learn', 'obj-name'], ['skill', 'learn', 'objitem-caps'],
     ['roadmap'], ['skill', 'match', 'zebra']]) must(run(dir, [...args, '--path', dir]), args.join(' '));
   // Only what these commands write: exported/published bundles, skill READMEs, the roadmap page, the match history.
   const files = [path.join(dir, 'roadmap.html'), store(dir, 'skill-suggestions.md')].filter(f => fs.existsSync(f));
@@ -240,6 +252,21 @@ test('generated files hold text only, and the export description still prefers d
   assert.strictEqual(desc(store(dir, 'skills-export', 'described', 'SKILL.md')), 'Use when drawing zebra charts');
   const manifest = JSON.parse(fs.readFileSync(store(dir, 'skills-publish', 'manifest.json'), 'utf8'));
   assert.deepStrictEqual(manifest.skills.filter(s => s.id === 'obj-name').map(s => s.name), ['obj-name']);
+});
+
+test('skill publish stops while drift needs attention, --no-security-check skips that check (no clock dependency)', () => {
+  // A tracker dated two days back is stale at any time of day; one dated tomorrow is not.
+  const stale = project(), fresh = project();
+  for (const dir of [stale, fresh]) skill(dir, 'plain', { displayNameKo: '기본', description: 'Use when drawing zebra charts', capabilities: ['zebra export'] });
+  trackerDated(stale, -2); trackerDated(fresh, 1);
+  const refused = run(stale, ['skill', 'publish', '--path', stale]);
+  assert.strictEqual(refused.status, 1, both(refused));
+  assert.ok(/보안 사전 점검 \(1\.9\.98\): \d+건 issue/.test(refused.stdout) && /⚠ drift/.test(refused.stdout), both(refused));
+  assert.ok(!fs.existsSync(store(stale, 'skills-publish', 'manifest.json')), 'a refused publish wrote its bundle');
+  must(run(stale, ['skill', 'publish', ...NO_PRECHECK, '--path', stale]), 'publish --no-security-check');
+  assert.ok(fs.existsSync(store(stale, 'skills-publish', 'manifest.json')), '--no-security-check did not publish');
+  const passedCheck = must(run(fresh, ['skill', 'publish', '--path', fresh]), 'publish with a fresh tracker');
+  assert.ok(/보안 사전 점검 \(1\.9\.98\): 통과/.test(passedCheck), passedCheck);
 });
 
 test('--json keeps the stored values', () => {

@@ -1356,7 +1356,8 @@ if (e2eShard.take('B(1.9.48)')) {
   // 1.9.48 cross-platform archive — PowerShell ZIP or tar
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-arc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
-  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only'], { encoding: 'utf8', timeout: 30000 });
+  // T-0358: the publish pre-check reads drift, which turns stale at UTC midnight; store-values-probe tests the pre-check.
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only', '--no-security-check'], { encoding: 'utf8', timeout: 30000 });
   const tarballDir = path.join(tmpC, '.leerness', 'skills-publish-tarball');
   const files = fs.existsSync(tarballDir) ? fs.readdirSync(tarballDir) : [];
   const archive = files.find(f => /\.(tgz|zip)$/.test(f));
@@ -1425,7 +1426,8 @@ if (e2eShard.take('B(1.9.47)')) {
   total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pub-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
-  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only'], { encoding: 'utf8', timeout: 30000 });
+  // T-0358: as above, the pre-check has its own date-independent test in store-values-probe.
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only', '--no-security-check'], { encoding: 'utf8', timeout: 30000 });
   const publishDir = path.join(tmpC, '.leerness', 'skills-publish');
   const manifestFile = path.join(publishDir, 'manifest.json');
   let manifest = null;
