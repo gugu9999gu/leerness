@@ -8,6 +8,7 @@
 // A snapshot records size, mtime (ns) and inode of every file and each directory, gitignored state included.
 // Content hashes are unnecessary: a write moves mtime, and a rename or hard link changes the inode.
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

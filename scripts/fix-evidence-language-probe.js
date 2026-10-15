@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0333: `task fix-evidence` speaks the project's language. It printed Korean everywhere: in an English project the
 // header, the guidance, the per-row lines, the suggested evidence and the results of `--set` and of an empty list were
 // Korean. English projects now get English; Korean output stays byte for byte (every expected line below is the text

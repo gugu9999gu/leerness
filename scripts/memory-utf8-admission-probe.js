@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Real CLI regression: invalid UTF-8 must not pass a memory mutation guard.
 // Scope is canonical decisions/lessons; Markdown retention and checked snapshots

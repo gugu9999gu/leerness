@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // Exercise actual generation, migration and handoff; never filter user Unicode.
 const assert = require('assert');
 const fs = require('fs');

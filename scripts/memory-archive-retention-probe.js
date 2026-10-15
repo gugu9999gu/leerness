@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0193: real CLI coverage for fail-closed legacy archive retention plus
 // operation-local checked-file snapshot primitives used by restore.

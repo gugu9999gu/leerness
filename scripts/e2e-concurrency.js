@@ -1,6 +1,7 @@
 // scripts/e2e-concurrency.js — T-0115의 silent lost-update 회귀 방지.
 // LOCKPROBE_STALL_*은 scripts/lock-probe.js를 명시 preload한 이 테스트에서만 활성화된다.
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 const fs = require('fs');
 const os = require('os');

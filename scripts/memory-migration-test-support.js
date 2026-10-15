@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -58,39 +59,21 @@ const legacy = surface => surface === 'decisions'
 // the temp directory (1,206 were found). A failed run keeps it for inspection. Links inside the arena are removed
 // first, as links, so the removal never walks into a link's target, wherever that points. The arena itself must
 // still be the folder made above (same file identity, not a link): a test that renamed it away and put a link in its
-// place would otherwise have the walk run inside the link's target (review round 1).
-const arenaIdentity = fs.lstatSync(arena, { bigint: true });
-function sameArena() {
-  const st = fs.lstatSync(arena, { bigint: true });
-  return !st.isSymbolicLink() && st.isDirectory() && st.dev === arenaIdentity.dev && st.ino === arenaIdentity.ino;
-}
-// Review round 2: a folder can also be replaced by a link after its lstat, and the arena right after sameArena().
-// So each folder must still resolve inside the arena just before it is listed and before a link in it is removed.
-// finish() runs after the tests, so nothing else changes the arena then; a process that kept swapping folders
-// during finish() could still race these checks.
-const arenaReal = fs.realpathSync.native(arena);
-const replaced = () => Object.assign(new Error('the arena was replaced'), { code: 'E_ARENA_REPLACED' });
-function resolvesInArena(dir) {
-  const relative = path.relative(arenaReal, fs.realpathSync.native(dir));
-  return !(relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative));
-}
-function removeLinks(dir) {
-  if (!resolvesInArena(dir)) throw replaced();
-  for (const name of fs.readdirSync(dir)) {
-    const file = path.join(dir, name), st = fs.lstatSync(file);
-    if (st.isSymbolicLink()) {
-      if (!resolvesInArena(dir)) throw replaced();
-      try { fs.unlinkSync(file); } catch { fs.rmdirSync(file); }
-    } else if (st.isDirectory()) removeLinks(file);
-  }
-}
+// place would otherwise have the walk run inside the link's target (review round 1). Review round 2: a folder can
+// also be replaced by a link after its lstat, and the arena right after the identity check, so each folder must still
+// resolve inside the arena just before it is listed and before a link in it is removed. finish() runs after the
+// tests, so nothing else changes the arena then; a process that kept swapping folders during finish() could still
+// race these checks. T-0357 moved these checks to scripts/temp-cleanup.js (ownTree, removeOwnedTree) for every probe.
+// finish() reports its own removal attempt. Under the test runner the tracker (line 2) also records the arena: the
+// runner keeps it after a failed run, and after a clean run in which finish() could not remove it, tries once more with
+// the same checks.
+const ownedArena = require('./temp-cleanup').ownTree(arena);
 function finish(label) {
   let kept = '';
   if (failed) { process.exitCode = 1; kept = ' (kept)'; }
   else {
     try {
-      if (!sameArena()) throw replaced();
-      removeLinks(arena); require('./temp-cleanup').removeTree(arena, { recursive: true, force: true }); kept = ' (removed)';
+      require('./temp-cleanup').removeOwnedTree(ownedArena, { code: 'E_ARENA_REPLACED' }); kept = ' (removed)';
     }
     catch (error) { kept = ` (not removed: ${error.code || error.message})`; }
   }

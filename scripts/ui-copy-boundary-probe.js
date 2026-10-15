@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0309: the UI copy boundary reaches the UI-building agent as an on-demand skill.
 const assert = require('assert');

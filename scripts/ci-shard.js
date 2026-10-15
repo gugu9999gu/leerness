@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0359: split CI work across parallel jobs. Until 1.36.300 each Windows gate job ran e2e.js (167-226 min) and the
 //   command-surface leaves (43-52 min) one after the other, and the Windows fast job ran its leaves for 79 min, so a
 //   release waited about five hours for CI (run 38193803239). A shard runs part of that work. Shards 1..k of one job
@@ -17,11 +18,17 @@
 //   guessed: running it differently from npm would test something else. Leaves run with node directly, in the
 //   package root, in their order in the script. A shard runs all of its leaves and fails if any failed, so one CI
 //   run reports every failing leaf of the shard (a plain `&&` chain stops at the first).
+// T-0357: each leaf records the temp folders it makes (scripts/temp-cleanup.js trackTemp, into a directory this runner
+//   gives it through LEERNESS_TEMP_RECORD), and the runner removes them after the leaf ended with status 0, no signal
+//   and no spawn error: the verdict it uses for pass/fail, read from the exit status, which no code in the leaf can
+//   change afterwards. A failed leaf's folders are kept for inspection.
 // e2e.js uses e2eShard() below: each top-level case is `if (e2eShard.take('<key>')) {`, and finish() checks that the
 //   file has no unguarded top-level block and that every guard was reached exactly once.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const temp = require('./temp-cleanup');
 
 const ROOT = path.resolve(__dirname, '..');
 const WEIGHTS_FILE = path.join(__dirname, 'ci-shard-weights.json');
@@ -139,23 +146,48 @@ function runNpm(name, spec, opts = {}) {
   const grouped = env.GITHUB_ACTIONS === 'true';
   // Leaves do not see this runner's times file: a leaf that runs runNpm itself (ci-shard-probe.js) would overwrite it.
   const leafEnv = { ...env };
-  for (const k of Object.keys(leafEnv)) if (k.toUpperCase() === 'LEERNESS_CI_SHARD_TIMES') delete leafEnv[k];
+  for (const k of Object.keys(leafEnv)) if (['LEERNESS_CI_SHARD_TIMES', temp.RECORD_ENV].includes(k.toUpperCase())) delete leafEnv[k];
   log(`ci-shard: ${name} shard ${spec.index}/${spec.count} runs ${mine.length} of ${leaves.length} leaves`);
+  // T-0357: one record directory per leaf, below a root this runner makes. Each is checked right after it is made (an
+  //   empty directory, not a link, its identity kept): a wrapper of fs.mkdtempSync or fs.mkdirSync installed before
+  //   the runner could put an existing folder there (1.36.304 review round 3). A leaf whose directory fails the check
+  //   gets no variable and records nothing; only checked directories are removed, and the root only when it is empty.
+  const freshDir = d => {
+    try {
+      const st = fs.lstatSync(d, { bigint: true });
+      return st.isSymbolicLink() || !st.isDirectory() || fs.readdirSync(d).length ? null : temp.ownTree(d);
+    } catch { return null; }
+  };
+  let recordRoot = null;
+  try { recordRoot = freshDir(fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-temp-record-'))); } catch { /* nothing recorded */ }
+  const tempCount = { removed: 0, left: 0, unrecorded: 0 };
   const results = [];
-  for (const leaf of mine) {
+  for (const [i, leaf] of mine.entries()) {
     if (grouped) log(`::group::${leaf.key}`);
+    let recordDir = null;
+    if (recordRoot) { const d = path.join(recordRoot.dir, String(i)); try { fs.mkdirSync(d); recordDir = freshDir(d); } catch { /* nothing recorded */ } }
+    if (!recordDir) tempCount.unrecorded++;
     const started = Date.now();
-    const r = cp.spawnSync(process.execPath, [path.resolve(root, leaf.file), ...leaf.args], { cwd: root, stdio: opts.stdio || 'inherit', env: leafEnv });
+    const r = cp.spawnSync(process.execPath, [path.resolve(root, leaf.file), ...leaf.args], { cwd: root, stdio: opts.stdio || 'inherit', env: recordDir ? { ...leafEnv, [temp.RECORD_ENV]: recordDir.dir } : leafEnv });
     const seconds = (Date.now() - started) / 1000;
     const ok = r.status === 0 && !r.signal && !r.error;
+    if (ok && recordDir) { const t = temp.removeRecorded(recordDir.dir); tempCount.removed += t.removed; tempCount.left += t.left; }
+    if (recordDir) try { temp.removeOwnedTree(recordDir, { timeoutMs: 2000 }); } catch { /* left behind */ }
     results.push({ key: leaf.key, ok, seconds, status: r.status, signal: r.signal || null, error: r.error ? String(r.error.code || r.error.message) : null });
     if (grouped) log('::endgroup::');
     log(`ci-shard: ${ok ? 'ok  ' : 'FAIL'} ${seconds.toFixed(1).padStart(7)} s  ${leaf.key}${ok ? '' : ` (exit ${r.status}${r.signal ? `, signal ${r.signal}` : ''}${r.error ? `, ${r.error.code || r.error.message}` : ''})`}`);
+  }
+  if (recordRoot) {
+    try {
+      const st = fs.lstatSync(recordRoot.dir, { bigint: true });
+      if (!st.isSymbolicLink() && st.dev === recordRoot.dev && st.ino === recordRoot.ino) fs.rmdirSync(recordRoot.dir);
+    } catch { /* not empty or replaced: left behind */ }
   }
   const failed = results.filter(r => !r.ok);
   const total = results.reduce((s, r) => s + r.seconds, 0);
   log(`ci-shard: ${name} shard ${spec.index}/${spec.count}: ${results.length - failed.length}/${results.length} leaves passed · ${total.toFixed(0)} s`);
   for (const f of failed) log(`ci-shard: failed: ${f.key}`);
+  log(`ci-shard: temp folders: ${tempCount.removed} removed after passing leaves${tempCount.left ? `, ${tempCount.left} left (replaced, outside the temp directory, or still held)` : ''}${tempCount.unrecorded ? `, ${tempCount.unrecorded} leaves not recorded (their record directory was not the one made)` : ''}; a failed leaf keeps its own`);
   if (env.LEERNESS_CI_SHARD_TIMES) {
     fs.writeFileSync(env.LEERNESS_CI_SHARD_TIMES, JSON.stringify(Object.fromEntries(results.map(r => [r.key, Math.round(r.seconds * 10) / 10])), null, 1) + '\n');
   }

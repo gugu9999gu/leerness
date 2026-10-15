@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0318: decision add / lesson add re-render decisions.md and lessons.md behind a generated header. The header
 // was Korean in every project; it now follows the harness authoring language (explicit choice, else the stored
 // project language). Existing files keep working: every known header variant is accepted as the generated one and

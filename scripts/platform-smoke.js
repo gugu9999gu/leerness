@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Windows/Linux 플랫폼 경계의 빠른 회귀:
 // 1) selftest가 Windows 8.3(`RUNNER~1`) 실행 경로를 허용하는지,

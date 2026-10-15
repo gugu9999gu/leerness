@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0319: saved API skills (.leerness/api-skills/*.md) are matched against the in-progress task by handoff,
 // handoff --json, health --json and session close --json. All four read row.title and row.notes, which progress
 // rows do not have, so nothing ever matched. They now share one task-text helper (request and next action), and

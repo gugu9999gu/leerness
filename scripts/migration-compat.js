@@ -3,6 +3,7 @@
 //  (b) 언어 전환 (1.36.60 사고: 구 언어 템플릿이 커스텀으로 오인돼 이월)
 //  (c) 연쇄 업그레이드 (구버전 → 중간 → 현재)
 //  (d) 사용자가 **템플릿과 같은 문장**을 의도적으로 쓴 경우(차감이 지우면 안 된다)
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { spawnNpmSync } = require('../lib/npm-process');
 const CUR = require('path').join(__dirname, '..', 'bin', 'leerness.js');   // 저장소 어디에 있든 동작

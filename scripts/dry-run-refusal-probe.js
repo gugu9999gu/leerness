@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0339: commands whose edits need a state lock refuse --dry-run with the dry-run refusal. Under --dry-run the CLI
 // takes no state lock (it would leave lock metadata), so lib/managed-text.js refused every edit with "Managed text
 // requires its existing state lock" (E_TEXT_LOCK) before its first write could meet the dry-run guard (task add, drop

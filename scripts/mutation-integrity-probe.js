@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0022: destructive shell-encoding repair must fail closed when encoding
 // provenance, file identity, metadata, or concurrent-writer state is uncertain.

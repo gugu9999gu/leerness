@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Writer-only joining of the existing legacy migration lock. Actual competing
 // processes/copy barriers live in workspace-dir-lock-order-probe. These local

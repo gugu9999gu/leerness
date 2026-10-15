@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const S = require('./memory-migration-write-support');
 const { fs, path, cp, assert, fixture, prepared, hook, modulePath } = S;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));

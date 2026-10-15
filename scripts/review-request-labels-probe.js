@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0320: `review-request --ladder` printed "[object Object]" in the in-codebase rung, in text and in --json, for every
 // reuse-map candidate. The rung labelled a candidate with r.name || r.id; reuse-map rows ({ capability, where }) have
 // neither, so it fell back to the row object. The rung and the reuse-candidate section now share one label per kind:

@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0331: drop archive integrity record. Each decisions or lessons drop block starts, after its header line, with
 // "- Archive check: N entries, sha256 <hex>" over the entry text the drop wrote. A restore refuses a block that no
 // longer matches (archive_changed), so an edit or a cut anywhere in it is caught, including the cases T-0328 left as

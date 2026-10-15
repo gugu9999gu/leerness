@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Release-only negative controls. Supply an existing installed v1.36.186 package;
 // this probe never downloads a client or changes that installation.

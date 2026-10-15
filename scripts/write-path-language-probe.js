@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0337: the remaining fixed-language errors on the shared write path follow the project language. lib/memory-input.js
 // and lib/memory-output.js gave every project an English reason with Korean advice; lib/memory-input-bytes.js,
 // lib/memory-publication-read.js, the session handoff update (lib/context-current.js) and two state-lock errors were

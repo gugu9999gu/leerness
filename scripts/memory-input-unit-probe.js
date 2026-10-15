@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const fs=require('fs'),os=require('os'),path=require('path'),assert=require('assert/strict');
 const {captureMemoryInput,assertMemoryInputCurrent,getLegacyMemoryInput,assertCheckedFileCurrent}=require('../lib/memory-input');
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'leerness-memory-input-unit-'));

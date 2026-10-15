@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Exercise the actual installed harness function with real, owned Node children.
 // Only long timeout/output limits are shortened; production argv/env are observed.

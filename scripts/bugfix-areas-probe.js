@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0330: past fixes at completion. `bugfix receipt --areas` declares the files or folders a fix is about;
 // verify-claim then lists the bugfix receipts whose declared areas hold a file the task's evidence names: finished
 // ones (their task is done, also in retained history) as past fixes with the root cause and the probe to re-run,

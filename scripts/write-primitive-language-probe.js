@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0338: the write primitives' fixed-language texts follow the project language. In lib/io.js the dry-run guard,
 // the compare-and-set refusal (E_CONCURRENT_MODIFICATION) with its recovery backup and recovery artifact suffixes, the
 // link and file type refusals, the two Windows replacement failures and the damaged-JSON notice were Korean in every

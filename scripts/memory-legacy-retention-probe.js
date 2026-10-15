@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0193: legacy-only Markdown mutation must retain opaque suffixes or refuse
 // before domain writes. Exercise the actual CLI, including migration backfill.

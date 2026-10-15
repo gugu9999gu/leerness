@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Real loopback TLS; only the test intercepts DNS destination/trust roots.
 const assert = require('node:assert/strict');

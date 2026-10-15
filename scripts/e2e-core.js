@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // 1.35.13 (UR-0014): 3-tier 테스트의 중간 티어 — critical-path 행위(behavioral) 스위트.
 //   test:fast (smoke.js) — 명령이 크래시 없이 도는가만 clean 프로젝트에서 확인, <1분. 개발 루프.

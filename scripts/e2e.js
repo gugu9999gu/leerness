@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 const fs = require('fs');
 const os = require('os');
@@ -15957,6 +15958,10 @@ setImmediate(() => {
     failed++;
     console.log(`✗ T-0359 e2e 샤드 가드 이상 ${JSON.stringify({ problems: _shard.problems.slice(0, 10), missing: _shard.missing.slice(0, 10), repeated: _shard.repeated.slice(0, 10), unknown: _shard.unknown.slice(0, 10) })}`);
   }
+  // T-0357: 케이스가 만든 임시 폴더는 이 프로세스가 기록만 하고, 이 실행을 시작한 러너(scripts/ci-shard.js)가 종료 코드 0 을
+  //   보고 지운다(링크는 링크로만). 러너 없이 실행하면 기록하지 않는다.
+  const _temp = require('./temp-cleanup').trackTemp(module);
+  if (_temp.active) console.log(`  임시 폴더 ${_temp.pending()}개 기록 — 러너가 종료 코드 0 을 보면 삭제, 실패면 남김`);
   console.log(`\nE2E result: ${total - failed}/${total} passed${_shard.spec ? ` · shard ${_shard.spec.index}/${_shard.spec.count} (${_shard.ran}/${_shard.total} cases)` : ''} · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
   if (failed > 0) process.exitCode = 1;
 });

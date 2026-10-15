@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0346: the e2e-concurrency handshake (scripts/lock-probe.js reports, scripts/race-overlap.js judgement) with two
 // small processes instead of leerness commands, so each schedule is fixed. The first process takes
 // .leerness/x.json.lock (and y.json.lock when asked), prepares x.json and renames it into place; the preload stalls

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0145 regression probe: a reviewed legacy debt boundary unblocks only exact
 // historical failures. Raw/per-task audits, changed rows, new failures, invalid

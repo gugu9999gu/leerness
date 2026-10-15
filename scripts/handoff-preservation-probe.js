@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0307: session close keeps user-written handoff text by position, and every reader of the
 // handoff looks at the current generated region rather than the whole file.

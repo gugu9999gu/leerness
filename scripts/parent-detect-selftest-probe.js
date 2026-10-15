@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0091: the parent-detect selftest must be independent of a Leerness
 // workspace above the OS temp directory, and partial setup must be cleaned if

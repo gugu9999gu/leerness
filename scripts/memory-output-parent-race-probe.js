@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0193: focused low-level evidence for parent/ancestor pathname replacement.
 // This probe does not claim that Node path APIs provide openat-style ancestor fencing.

@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Real role/ledger files; narrow stat and I/O seams only. No provider is invoked.
 const assert = require('assert');

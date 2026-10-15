@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // P-0020: exercise real Git layouts and controlled discovery failures without
 // enabling runtime writers, migration, providers, or any remote operation.

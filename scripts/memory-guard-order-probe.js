@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // 기존 JSON 구문 검사의 실행 순서만 검증한다. 완전한 schema/트랜잭션 검사가 아니다.
 const fs = require('fs');

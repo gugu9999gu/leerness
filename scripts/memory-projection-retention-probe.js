@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0193: canonical JSON이 authoritative인 상태에서 projection Markdown 뒤에
 // 붙은 사용자/producer 원문은 보존하고, projection 내부 divergence는 덮어쓰지 않는다.

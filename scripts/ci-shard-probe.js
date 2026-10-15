@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0359: CI runs e2e.js cases and npm-script leaves in parallel shards (scripts/ci-shard.js). A shard that drops a
 //   unit fails nothing — the unit silently stops running — so this probe checks the parts that decide what runs:
 //   the assignment is a deterministic partition, every leaf of the real sharded scripts parses and lands in exactly
@@ -149,6 +150,104 @@ try {
     assert.strictEqual(fs.readFileSync(seen, 'utf8'), 'unset', 'a leaf saw the runner\'s times variable');
     assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(times, 'utf8'))), ['node ./e.js'], 'the runner did not write its own times');
     assert.strictEqual(env.LEERNESS_CI_SHARD_TIMES, times, 'the caller\'s environment object was changed');
+  });
+
+  check('runNpm removes the temp folders a passing leaf and its tracked child recorded, and keeps a failing or killed leaf\'s (T-0357)', () => {
+    // The leaf only records (scripts/temp-cleanup.js trackTemp); the runner, which sees the exit status, removes.
+    const dir = path.join(arena, 'temp-record');
+    const leafTemp = path.join(dir, 'temp');
+    fs.mkdirSync(leafTemp, { recursive: true });
+    const TC = JSON.stringify(path.join(__dirname, 'temp-cleanup.js'));
+    const make = (name, end) => fs.writeFileSync(path.join(dir, `${name}.js`), [
+      `require(${TC}).trackTemp(module);`,
+      "const fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');",
+      `const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-leaf-${name}-'));`,
+      `const c = cp.spawnSync(process.execPath, [${JSON.stringify(path.join(dir, 'child.js'))}], { encoding: 'utf8' }).stdout.trim();`,
+      `fs.writeFileSync(${JSON.stringify(path.join(dir, `${name}.out`))}, JSON.stringify({ d, c, rec: process.env.LEERNESS_TEMP_RECORD || null }));`,
+      end, ''].join('\n'));
+    fs.writeFileSync(path.join(dir, 'child.js'), [`require(${TC}).trackTemp(module);`,
+      "const fs = require('fs'), os = require('os'), path = require('path');",
+      "process.stdout.write(fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-leaf-child-')));", ''].join('\n'));
+    make('pass', 'process.exitCode = 0;');
+    make('fail', 'process.exitCode = 1;');
+    make('killed', "process.kill(process.pid, 'SIGKILL');");
+    const recordRoots = () => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('leerness-temp-record-')).sort();
+    const rootsBefore = recordRoots();
+    const lines = [];
+    const env = { ...process.env, GITHUB_ACTIONS: '', TEMP: leafTemp, TMP: leafTemp, TMPDIR: leafTemp, LEERNESS_TEMP_RECORD: path.join(dir, 'outer-record') };
+    const r = cs.runNpm('suite', { index: 1, count: 1 }, { root: dir, scripts: { suite: 'node ./pass.js && node ./fail.js && node ./killed.js' }, weights: { e2e: {}, npm: {} }, stdio: 'ignore', env, log: l => lines.push(l) });
+    assert.deepStrictEqual(r.failed, ['node ./fail.js', 'node ./killed.js']);
+    const res = n => JSON.parse(fs.readFileSync(path.join(dir, `${n}.out`), 'utf8'));
+    const pass = res('pass'), fail = res('fail');
+    assert.ok(pass.d && pass.c && fail.d && fail.c, JSON.stringify({ pass, fail }));
+    assert.strictEqual(fs.existsSync(pass.d), false, 'the passing leaf\'s folder was kept');
+    assert.strictEqual(fs.existsSync(pass.c), false, 'the passing leaf\'s tracked child\'s folder was kept');
+    assert.strictEqual(fs.existsSync(fail.d), true, 'the failing leaf\'s folder was removed');
+    assert.strictEqual(fs.existsSync(fail.c), true, 'the failing leaf\'s child\'s folder was removed');
+    const killedMade = fs.readdirSync(leafTemp).filter(n => n.startsWith('leerness-leaf-killed-'));
+    assert.strictEqual(killedMade.length, 1, 'the killed leaf\'s folder was removed');
+    assert.ok(pass.rec && fail.rec && pass.rec !== fail.rec && pass.rec !== env.LEERNESS_TEMP_RECORD, 'each leaf gets its own record directory from the runner');
+    assert.strictEqual(fs.existsSync(pass.rec) || fs.existsSync(fail.rec), false, 'a record directory was left');
+    assert.deepStrictEqual(recordRoots(), rootsBefore, 'the runner left its record root');
+    assert.ok(lines.some(l => /^ci-shard: temp folders: 2 removed after passing leaves/.test(l)), lines.join('\n'));
+    assert.strictEqual(env.LEERNESS_TEMP_RECORD, path.join(dir, 'outer-record'), 'the caller\'s environment object was changed');
+  });
+
+  // 1.36.304 review round 3: the record root was removed recursively without checking that it was still the folder the
+  //   runner made. A wrapper of fs.mkdtempSync (or fs.mkdirSync, for a leaf's directory) installed before the runner
+  //   can put an existing folder there; the runner now checks each directory right after making it (its own identity,
+  //   empty), records nothing into one that fails, removes only the leaf directories it checked, and the root only when
+  //   it is empty.
+  check('runNpm removes no folder that a wrapper swapped in for its record root or a leaf\'s record directory (T-0357)', () => {
+    const dir = path.join(arena, 'temp-record-swap');
+    const leafTemp = path.join(dir, 'temp');
+    fs.mkdirSync(leafTemp, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'pass.js'), [`require(${JSON.stringify(path.join(__dirname, 'temp-cleanup.js'))}).trackTemp(module);`,
+      "const fs = require('fs'), os = require('os'), path = require('path');",
+      "fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-leaf-swap-'));", ''].join('\n'));
+    for (const target of ['root', 'leaf']) {
+      const unrelated = path.join(dir, `unrelated-${target}`);
+      fs.mkdirSync(unrelated); fs.writeFileSync(path.join(unrelated, 'keep.txt'), 'keep');
+      const saved = { mkdtempSync: fs.mkdtempSync, mkdirSync: fs.mkdirSync };
+      let swappedAt = null;
+      const swapIn = made => { fs.renameSync(made, made + '-aside'); fs.renameSync(unrelated, made); swappedAt = made; };
+      if (target === 'root') fs.mkdtempSync = function (prefix, ...rest) { const d = saved.mkdtempSync.call(fs, prefix, ...rest); if (String(prefix).includes('leerness-temp-record-')) swapIn(d); return d; };
+      else fs.mkdirSync = function (p, ...rest) { const r = saved.mkdirSync.call(fs, p, ...rest); if (!swappedAt && /leerness-temp-record-/.test(path.dirname(String(p)))) swapIn(String(p)); return r; };
+      let r;
+      const lines = [];
+      try {
+        r = cs.runNpm('suite', { index: 1, count: 1 }, { root: dir, scripts: { suite: 'node ./pass.js' }, weights: { e2e: {}, npm: {} }, stdio: 'ignore',
+          env: { ...process.env, GITHUB_ACTIONS: '', TEMP: leafTemp, TMP: leafTemp, TMPDIR: leafTemp }, log: l => lines.push(l) });
+      } finally { fs.mkdtempSync = saved.mkdtempSync; fs.mkdirSync = saved.mkdirSync; }
+      assert.deepStrictEqual(r.failed, [], target);
+      assert.ok(swappedAt, `${target}: the wrapper did not run`);
+      assert.strictEqual(fs.readFileSync(path.join(swappedAt, 'keep.txt'), 'utf8'), 'keep', `${target}: the folder swapped in was removed`);
+      assert.ok(lines.some(l => /^ci-shard: temp folders: .*1 leaves not recorded/.test(l)), `${target}: the leaf was given a directory that failed the check\n${lines.join('\n')}`);
+      // What the runner rightly leaves is this test's own, in the temp directory: for the root, the folder swapped in and
+      //   the root moved aside; for a leaf's directory, the root that holds them (1.36.304 full run: they were left).
+      const own = target === 'root' ? [swappedAt, swappedAt + '-aside'] : [path.dirname(swappedAt)];
+      for (const p of own) {
+        assert.ok(path.resolve(path.dirname(p)) === path.resolve(os.tmpdir()) && path.basename(p).startsWith('leerness-temp-record-'), `${target}: not the runner's folder: ${p}`);
+        fs.rmSync(p, { recursive: true, force: true });
+      }
+    }
+  });
+
+  check('runNpm removes its record root only when it is empty: a folder a leaf moved into it is left (T-0357)', () => {
+    const dir = path.join(arena, 'temp-record-into-root');
+    const leafTemp = path.join(dir, 'temp');
+    fs.mkdirSync(leafTemp, { recursive: true });
+    const moved = path.join(dir, 'moved');
+    fs.mkdirSync(moved); fs.writeFileSync(path.join(moved, 'keep.txt'), 'keep');
+    fs.writeFileSync(path.join(dir, 'mover.js'), ["const fs = require('fs'), path = require('path');",
+      `const into = path.join(path.dirname(process.env.LEERNESS_TEMP_RECORD), 'moved'); fs.renameSync(${JSON.stringify(moved)}, into);`,
+      `fs.writeFileSync(${JSON.stringify(path.join(dir, 'into.txt'))}, into);`, ''].join('\n'));
+    const r = cs.runNpm('suite', { index: 1, count: 1 }, { root: dir, scripts: { suite: 'node ./mover.js' }, weights: { e2e: {}, npm: {} }, stdio: 'ignore',
+      env: { ...process.env, GITHUB_ACTIONS: '', TEMP: leafTemp, TMP: leafTemp, TMPDIR: leafTemp }, log: () => {} });
+    assert.deepStrictEqual(r.failed, []);
+    const into = fs.readFileSync(path.join(dir, 'into.txt'), 'utf8');
+    assert.strictEqual(fs.readFileSync(path.join(into, 'keep.txt'), 'utf8'), 'keep', 'the folder moved into the record root was removed with it');
+    fs.rmSync(path.dirname(into), { recursive: true, force: true });
   });
 
   const CREATE = names => `const e2eShard = require('./ci-shard').e2eShard(__filename, [${names.map(n => `'${n}'`).join(', ')}]);`;

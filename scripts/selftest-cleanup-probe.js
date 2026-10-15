@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0090: run the three real selftest bodies that leaked native Windows EPERM
 // cleanup failures. Healthy runs use the actual writers, heartbeat, and rmSync.

@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0354: scripts/memory-migration-test-support.js removes its arena at finish() when every test passed, and keeps
 // it when one failed. A link inside the arena that points outside it is removed as a link: its target and the files
 // in it must survive. An arena, or a folder in it, that was replaced with a link is not walked, whether that happened

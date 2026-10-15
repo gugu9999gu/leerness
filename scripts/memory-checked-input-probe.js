@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // Actual CLI processes, with bounded filesystem fault injection only in owned fixtures.
 const fs = require('fs'), path = require('path'), os = require('os');
 const cp = require('child_process'), assert = require('assert/strict'), crypto = require('crypto');

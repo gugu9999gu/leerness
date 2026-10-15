@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Real readline events and product REPL implementation; provider replies and
 // incidental startup context/catalog are local stubs. No provider is launched.

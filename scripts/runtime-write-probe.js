@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // 실제 지원 writer 경계 검증. 모든 descriptor와 데이터는 이 probe의 임시 root에만 둔다.
 const fs = require('fs');

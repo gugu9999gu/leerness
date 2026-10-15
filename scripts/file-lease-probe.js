@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Exact-file leases are an opt-in coordination primitive. This probe deliberately
 // distinguishes them from the discarded ambient scope advisory: only explicit calls

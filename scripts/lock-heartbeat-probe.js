@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // The state-lock heartbeat worker re-checks the admission of the operation that holds the lock.
 // It used to make a new admission on every touch, which ran `git rev-parse` with the project as its

@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0343: lib/copy-tree.js copyTreeSync, the fs.cpSync replacement used for fixture and selftest copies.
 // It must copy nested directories and file bytes exactly, copy into an existing directory, never overwrite a file,
 // and work with non-ASCII paths on every supported Node (fs.cpSync crashes on them in Node 22.23.3 on Windows).

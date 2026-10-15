@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0303: generated runtime cache must not create a strict Git mismatch for
 // an unrelated, already committed claim when an older project lacks .gitignore.

@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0324 (follow-up of T-0321): titles and targets reach leerness intact through MCP and after `--`.
 // The MCP title and target tools put the text before their flags without "--", so the child CLI read a title
 // that begins with "-" as an option and dropped it (a markdown bullet as a task title answered empty_title).

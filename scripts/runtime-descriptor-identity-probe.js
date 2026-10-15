@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Real files with narrow stat/failure seams. No runtime authority is mocked.
 const assert = require('assert');

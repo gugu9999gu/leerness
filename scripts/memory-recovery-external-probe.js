@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const S=require('./memory-write-budget-support');
 const {assert,fs,path,cp,test,finish,fixture,arena}=S;
 const os=require('os'),runtime=require('../lib/runtime-writes'),{attachMemoryRecovery}=require('../lib/memory-recovery');

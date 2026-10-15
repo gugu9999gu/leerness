@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0332: which tracker statuses read as done. verify-claim (one task, and --all, which gate --claims runs), the claims
 // baseline, lazy detection and past-fix advice share one exact predicate: done, completed, verified or 완료, in any
 // case, with the cell's spaces trimmed, also inside one pair of brackets (the older tracker form, like [진행]).

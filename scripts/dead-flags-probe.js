@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0094: advertised options must change observable behavior (or fail closed).
 // This probe intentionally uses isolated projects and real CLI processes so a

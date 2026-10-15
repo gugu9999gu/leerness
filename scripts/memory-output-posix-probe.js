@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // POSIX-only race probe for T-0193 memory output publication. Windows has a
 // separate ReplaceFileW probe. This script is intentionally skipped on win32 so

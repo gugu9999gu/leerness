@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0323 (owner request 2026-09-30): data features get the CRUD operations they need, by default and in every
 // leerness project. The owner chose "guidance plus an automatic check at completion" (advisory, never blocking),
 // for new features and changes to existing ones, and "the four operations plus quality items" as the standard:

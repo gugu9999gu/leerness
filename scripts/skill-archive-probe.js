@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0352: the archive step of `leerness skill publish --bundle-only` (_createArchive in bin/leerness.js).
 // It ran `tar -czf <absolute path>`. Git for Windows' GNU tar, first on PATH in Git Bash and in agent shells built on
 // it, reads the drive letter of an absolute Windows path as a remote host and failed, so the .zip fallback ran

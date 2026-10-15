@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0317: English handoff output carries no Korean-only tool text. An English project on Korean Windows saw the
 // terminal-encoding notice, skill suggestions, the official-skill cache note, next-step suggestions and the compact
 // "다음:" line in Korean. Every line the tool writes on the handoff paths now goes through a language helper whose

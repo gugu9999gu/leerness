@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0306: the secret scan follows Git's view of the repository. A nested repository or worktree is a
 // separate repository (Git never lists its files here), .git/info/exclude ignores like .gitignore,

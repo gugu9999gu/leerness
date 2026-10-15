@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0095 regression probe: read/status commands must state what they actually
 // measured. A CLI version is not a project version, an invalid memory verb is

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // A live legacy migration must own its project lock before migration revalidation.
 // Otherwise a peer can populate `.leerness/` after validation and

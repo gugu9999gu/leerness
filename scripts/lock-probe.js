@@ -8,6 +8,7 @@
 //
 // 사용: node --require scripts/lock-probe.js bin/leerness.js <명령> ...   (LOCKPROBE_OUT 에 jsonl 기록)
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

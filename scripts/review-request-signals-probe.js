@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0322: review-request read brainstorm fields that brainstorm never emits. Failure lessons ({ title, line }) were read
 // as text/preview and printed as a blank "[lesson]" line; task-log failures ({ title, line }) printed a blank
 // "[task-log-failure]" line; in-progress task rows (which carry request, not title) printed only their id; milestones

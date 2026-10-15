@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0099 / UR-0076: historically uncovered command families.
 // Local state commands execute end-to-end in a disposable fixture. Commands that

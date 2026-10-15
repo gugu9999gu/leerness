@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // T-0143: verify-code must execute its own fixed Python/Go/Rust runners under
 // fresh basic permissions, and a failed run must not become green gate evidence.

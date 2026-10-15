@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // 1.9.273 (UR-0027, GPT-5.5 리뷰): 빠른 핵심-경로 smoke 테스트.
 //   전체 e2e(수백 케이스)는 CI/릴리스 게이트용. 이 smoke 는 개발 중 제한된 핵심 명령만 확인한다.

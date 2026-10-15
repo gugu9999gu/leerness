@@ -10,6 +10,7 @@
 // dated decision, a lesson, an active rule, an open user request, a closed session (a handoff naming the
 // in-progress task, the current state, a pre-wake report), the manifest, the installed skills and the usage counter.
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');

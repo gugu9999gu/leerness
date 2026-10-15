@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Actual CLI regression coverage for canonical array-root admission and preparation
 // before domain writes. Not a full item schema, UTF-8/size gate, transaction, or

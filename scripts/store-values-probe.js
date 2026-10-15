@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0325: values from hand-edited stores that are not text. skill.json (displayNameKo, description, capabilities, sources,
 // patterns, usage) and platform-constraints.json (docs, kind, detail) are written by people and third-party skill packs, so
 // an object, an array or nothing can sit where text or a number is expected. Text commands printed "[object Object]", a

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 
 // Snapshot selection must preserve the resolver's decisions and diagnostics
 // while adding no filesystem calls, writes, or ambient environment dependency.

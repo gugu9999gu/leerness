@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0348: the workspace migration lock wait counts time without progress, not time in all. The migrating process
 // refreshes the lock file's modification time while it works, and a waiting command keeps waiting while that time
 // moves; a lock that does not move still fails after LEERNESS_WORKSPACE_MIGRATION_LOCK_WAIT_MS. Each case uses a

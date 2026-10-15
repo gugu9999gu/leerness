@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0345: `lazy detect --auto-track` registers a task for each new TODO whose file no tracker row references, and
 // only those. A batch that mixed such files with a file a task already referenced registered every new TODO, so the
 // TODOs in the referenced file got tasks of their own as well. known-todos.json gains exactly the registered TODOs.

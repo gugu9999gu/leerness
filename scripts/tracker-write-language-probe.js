@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0336: errors on the shared progress-tracker write path follow the project language. The row-loss guard in
 // writeProgressRows (E_PROGRESS_ROW_LOSS) printed Korean in English projects through the commands that rewrite tracker
 // rows (task fix-evidence --set, task add, task update, task sync and others); lib/managed-text.js errors

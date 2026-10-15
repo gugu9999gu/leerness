@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0334: `task export` then `task sync --from` the same file must change nothing. Sync mapped every TodoWrite status
 // back to one tracker status and rewrote any row that differed, so a round trip turned dropped into planned
 // (resurrecting the task), requested and on-hold into planned, and blocked and incomplete into in-progress. Export

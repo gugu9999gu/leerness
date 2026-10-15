@@ -1,4 +1,5 @@
 'use strict';
+require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
 // T-0321: free text given to a command is exactly the positional text the user typed.
 // Reported: `clarify "<request>" --path <dir>` appends <dir> to the request. That did not reproduce —
 // main() builds args with nonFlagArgs(), which already drops registered value flags and their values; the
