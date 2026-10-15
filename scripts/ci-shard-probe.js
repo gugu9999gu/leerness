@@ -136,6 +136,21 @@ try {
     assert.deepStrictEqual(s1.results.map(r => r.key), ['node ./a.js', 'node ./d.js']);
   });
 
+  check('runNpm keeps LEERNESS_CI_SHARD_TIMES to itself: leaves do not see it, the runner still writes its times', () => {
+    // 1.36.303: the full run's times file was overwritten mid-run by this probe's own runNpm, which inherited the
+    //   variable from the outer runner through the leaf environment.
+    const dir = path.join(arena, 'times-env');
+    fs.mkdirSync(dir);
+    const seen = path.join(dir, 'seen.txt'), times = path.join(dir, 'times.json');
+    fs.writeFileSync(path.join(dir, 'e.js'), `require('fs').writeFileSync(${JSON.stringify(seen)}, Object.keys(process.env).filter(k => k.toUpperCase() === 'LEERNESS_CI_SHARD_TIMES').length ? 'set' : 'unset');\n`);
+    const env = { ...process.env, GITHUB_ACTIONS: '', LEERNESS_CI_SHARD_TIMES: times };
+    const r = cs.runNpm('suite', { index: 1, count: 1 }, { root: dir, scripts: { suite: 'node ./e.js' }, weights: { e2e: {}, npm: {} }, stdio: 'ignore', env, log: () => {} });
+    assert.deepStrictEqual(r.failed, []);
+    assert.strictEqual(fs.readFileSync(seen, 'utf8'), 'unset', 'a leaf saw the runner\'s times variable');
+    assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(times, 'utf8'))), ['node ./e.js'], 'the runner did not write its own times');
+    assert.strictEqual(env.LEERNESS_CI_SHARD_TIMES, times, 'the caller\'s environment object was changed');
+  });
+
   const CREATE = names => `const e2eShard = require('./ci-shard').e2eShard(__filename, [${names.map(n => `'${n}'`).join(', ')}]);`;
   const START = '// e2e-shard: cases start here';
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.36.303 - 2026-10-15
+
+- Fixed (tests): `scripts/ci-shard.js` passed its own `LEERNESS_CI_SHARD_TIMES` to the leaves it runs, so `scripts/ci-shard-probe.js`, which runs the runner itself, overwrote the outer run's times file in the middle of a local full run (found in a full run for this release; the outer runner rewrote the file at its end, so the stored times were right). Leaves no longer see the variable, the way `e2eShard` already hides its own. CI does not set it. A new probe case fails on the 1.36.302 runner (13/14) and passes now (14/14) (T-0364).
+- Not shipped: T-0357, removing the temp folders a test made after it ends with exit code 0, was planned for this release in a simplified form. Its four review rounds found 16 more problems in the exit-time decision and in which folders it records (6, 6, 2 and 2; the first 14 fixed, each with a test that fails on the reviewed code). By the owner's decision before the fourth round, this release ships only the change above, and T-0357 continues separately.
+- Not changed: `contract verify` still counts exports written inside comments and strings. This was investigated and deferred on purpose in 1.36.18 (a comment masker without a parser deleted real code in review, which blocks valid contracts); T-0361 is on hold until a real parser is an option.
+
 ## 1.36.302 - 2026-10-14
 
 - Fixed (tests): store-values-probe's two `skill publish` tests failed when a run crossed UTC midnight (T-0358; seen once in a Linux Docker node:20 run during the 1.36.299 release).

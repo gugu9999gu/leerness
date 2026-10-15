@@ -137,12 +137,15 @@ function runNpm(name, spec, opts = {}) {
   const mine = leaves.filter(l => l.shard === spec.index);
   const log = opts.log || (line => process.stdout.write(line + '\n'));
   const grouped = env.GITHUB_ACTIONS === 'true';
+  // Leaves do not see this runner's times file: a leaf that runs runNpm itself (ci-shard-probe.js) would overwrite it.
+  const leafEnv = { ...env };
+  for (const k of Object.keys(leafEnv)) if (k.toUpperCase() === 'LEERNESS_CI_SHARD_TIMES') delete leafEnv[k];
   log(`ci-shard: ${name} shard ${spec.index}/${spec.count} runs ${mine.length} of ${leaves.length} leaves`);
   const results = [];
   for (const leaf of mine) {
     if (grouped) log(`::group::${leaf.key}`);
     const started = Date.now();
-    const r = cp.spawnSync(process.execPath, [path.resolve(root, leaf.file), ...leaf.args], { cwd: root, stdio: opts.stdio || 'inherit', env });
+    const r = cp.spawnSync(process.execPath, [path.resolve(root, leaf.file), ...leaf.args], { cwd: root, stdio: opts.stdio || 'inherit', env: leafEnv });
     const seconds = (Date.now() - started) / 1000;
     const ok = r.status === 0 && !r.signal && !r.error;
     results.push({ key: leaf.key, ok, seconds, status: r.status, signal: r.signal || null, error: r.error ? String(r.error.code || r.error.message) : null });
