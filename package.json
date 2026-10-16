@@ -1,6 +1,6 @@
 {
   "name": "leerness",
-  "version": "1.36.304",
+  "version": "1.36.305",
   "description": "The AI-coding operations layer that makes \"done\" require evidence — persistent memory, evidence-gated completion checks, and clean handoffs for any AI agent (Claude Code, Codex, Cursor). State lives as plain files in your repo. CLI + MCP, 0 runtime dependencies.",
   "keywords": [
     "leerness",
@@ -143,7 +143,7 @@
     "test:ledger-sync": "node ./scripts/execution-ledger-sync-probe.js",
     "test:state-lock": "node ./scripts/shared-state-lock-probe.js",
     "test:lock-heartbeat": "node ./scripts/lock-heartbeat-probe.js",
-    "test:temp-cleanup": "node ./scripts/temp-cleanup-probe.js && node ./scripts/copy-tree-probe.js",
+    "test:temp-cleanup": "node ./scripts/temp-cleanup-probe.js && node ./scripts/copy-tree-probe.js && node ./scripts/safe-remove-probe.js",
     "test:path-setup": "node ./scripts/path-setup-powershell-probe.js",
     "test:skill-archive": "node ./scripts/skill-archive-probe.js",
     "test:memory-arena-cleanup": "node ./scripts/memory-arena-cleanup-probe.js",

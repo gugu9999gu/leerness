@@ -35,7 +35,10 @@ try {
     try {
       // What the probes used before: on Windows this fails at once despite maxRetries (reported, not asserted).
       let before = 'removed';
-      try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (error) { before = error.code; }
+      // T-0365: on a Windows Node whose failed fs.rmSync ends the process, a temp path with a character outside the
+      //   code page would end this probe here; the report is skipped on any non-ASCII temp path there.
+      if (require('../lib/safe-remove').rmSyncPathBug() && /[^\x00-\x7f]/.test(root)) before = 'not run (T-0365)';
+      else try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (error) { before = error.code; }
       console.log(`  rmSync with maxRetries on a held tree (${process.platform}, ${process.version}): ${before}`);
       if (fs.existsSync(root)) {
         const started = Date.now();

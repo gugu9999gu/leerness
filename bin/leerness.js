@@ -62,6 +62,7 @@ const path = require('path');
 const cp = require('child_process');
 const { log, ok, warn, fail, failJson, setQuiet, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel, setDryRunGuard, mkdirpRaw } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈 · 1.10.2 (UR-0146): setQuiet
 const { resolveNpmCliPath, spawnNpmSync } = require('../lib/npm-process');
+const { removeSync: _removeSync, rmSyncPathBug: _rmSyncPathBug } = require('../lib/safe-remove');  // T-0365
 const { resolvePortableLaunch, spawnPortable, spawnPortableSync } = require('../lib/portable-process');
 const { scanShellScriptsEncoding, applyShellScriptUtf8Bom } = require('../lib/shell-encoding');
 const { captureMemoryInput, assertMemoryInputCurrent, captureCheckedFileInput, assertCheckedFileCurrent } = require('../lib/memory-input');
@@ -115,7 +116,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.304';
+const VERSION = '1.36.305';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -1375,7 +1376,7 @@ function _pruneArchives(root, keep = 10) {
   const withTime = names.map(name => { let t = 0; try { t = fs.statSync(path.join(adir, name)).mtimeMs; } catch {} return { name, t }; });
   withTime.sort((a, b) => b.t - a.t);  // 최신 우선 (이름의 버전 문자열은 zero-pad 안 돼 사전순 부정확 → mtime 사용)
   let pruned = 0;
-  for (const e of withTime.slice(keep)) { try { fs.rmSync(path.join(adir, e.name), { recursive: true, force: true }); pruned++; } catch {} }
+  for (const e of withTime.slice(keep)) { try { _removeSync(path.join(adir, e.name), { recursive: true, force: true }); pruned++; } catch {} }
   return pruned;
 }
 function createBackup(root, reason, files, dry = false) {
@@ -2494,10 +2495,10 @@ function skillRemove(root, id) {
   try { _SKILLS_LIST_CACHE.delete(absRoot(root)); } catch {}
   if (_skillCatalog()[id]) {
     // catalog 스킬은 로컬 메타만 제거 (카탈로그는 패키지 내장이라 영구 제거 불가)
-    fs.rmSync(dir, { recursive: true, force: true });
+    _removeSync(dir, { recursive: true, force: true });
     ok(`local meta removed for catalog skill: ${id} (catalog 자체는 패키지에 내장)`);
   } else {
-    fs.rmSync(dir, { recursive: true, force: true });
+    _removeSync(dir, { recursive: true, force: true });
     ok(`user skill removed: ${id}`);
   }
 }
@@ -3712,7 +3713,7 @@ function _collectRuntimeEnv(opts = {}) {
 function _collectRuntimeEnvBase() {
   const env = {
     os: { platform: os.platform(), release: os.release(), arch: os.arch() },
-    node: { version: process.version, exe: process.execPath },
+    node: { version: process.version, exe: process.execPath, rmSyncPathBug: _rmSyncPathBug() },
     locale: {
       LANG: process.env.LANG || null,
       LC_ALL: process.env.LC_ALL || null,
@@ -3853,6 +3854,14 @@ function _scanShellScriptsEncoding(root) {
   return scanShellScriptsEncoding(root, { classifyCJK: _classifyCJK, riskLabel: _riskLabel });
 }
 
+// T-0365: Windows Node versions whose failed fs.rmSync ends the process (lib/safe-remove.js). leerness removes its own
+//   files around it; the advisory is for the user, since other programs on the same Node are not.
+function _rmSyncAdvisory(lang, version = process.versions.node, platform = process.platform) {
+  if (!_rmSyncPathBug(version, platform)) return null;
+  return lang === 'en'
+    ? `Node ${version} on Windows: when fs.rmSync fails on a path with a character outside the system code page, the process ends without an error (fixed in Node 24.22.0 and 26.9.0). leerness removes files without it on this version. Update Node to 24.22.0 or later, or 26.9.0 or later.`
+    : `Windows 의 Node ${version}: 시스템 코드 페이지에 없는 문자가 든 경로에서 fs.rmSync 가 실패하면 프로세스가 오류 없이 종료됩니다(Node 24.22.0·26.9.0 에서 수정). 이 버전에서 leerness 는 fs.rmSync 를 쓰지 않고 삭제합니다. Node 를 24.22.0 이상 또는 26.9.0 이상으로 올리세요.`;
+}
 function envCmd(root, sub) {
   root = absRoot(root);
   const isTty = process.stdout && process.stdout.isTTY;
@@ -3914,6 +3923,7 @@ function envCmd(root, sub) {
   log('');
   log(`  💻 OS: ${gr(env.os.platform)} ${env.os.release} (${env.os.arch})`);
   log(`  📦 Node: ${gr(env.node.version)}`);
+  { const advisory = _rmSyncAdvisory(_uiLang(root)); if (advisory) log(yl(`  ⚠ ${advisory}`)); }
   log(`  🌐 Locale: LANG=${env.locale.LANG || 'unset'} · CP=${env.locale.codepage || 'unknown'}${env.locale.isKoreanWindows ? yl(' (한국어 Windows)') : ''}`);
   // 1.9.252 (UR-0018 마무리): 인라인 Windows/POSIX 인코딩 분기를 _terminalEncodingNotice() 헬퍼로 통합 (DRY).
   //   이전 (1.9.249/250) 에는 env summary / handoff / install 에 거의 동일한 분기가 중복 → 단일 소스로 일원화.
@@ -4216,6 +4226,11 @@ function _selfTestCases() {
     { name: '_isSecretKey: NPM_TOKEN 차단', run: () => _isSecretKey('NPM_TOKEN') === true },
     { name: '_isSecretKey: API_KEY/SECRET/PASSWORD 차단', run: () => _isSecretKey('OPENAI_API_KEY') && _isSecretKey('MY_SECRET') && _isSecretKey('db_PASSWORD') },
     { name: '_isSecretKey: 비시크릿 LEERNESS_* 통과', run: () => _isSecretKey('LEERNESS_ENABLE_AGY') === false && _isSecretKey('LANG') === false },
+    { name: 'T-0365: Windows fs.rmSync 경로 변환 버그 판정 (24.22.0·26.9.0 에서 수정) + 안내 문구', run: () => {
+      const bug = [['22.23.3', false], ['23.0.0', true], ['24.21.0', true], ['24.22.0', false], ['25.9.0', true], ['26.8.2', true], ['26.9.0', false], ['27.0.0', false]];
+      return bug.every(([v, want]) => _rmSyncPathBug(v, 'win32') === want && _rmSyncPathBug(v, 'linux') === false)
+        && _rmSyncAdvisory('en', '26.3.0', 'win32') !== null && _rmSyncAdvisory('en', '26.9.0', 'win32') === null && _rmSyncAdvisory('ko', '24.0.0', 'linux') === null;
+    } },
     { name: 'compareVer: 대소 비교', run: () => compareVer('1.9.258', '1.9.257') === 1 && compareVer('1.9.0', '1.10.0') === -1 && compareVer('2.0.0', '2.0.0') === 0 },
     { name: 'compareVer: 누락 파트/null 안전', run: () => compareVer('1.9', '1.9.0') === 0 && compareVer(null, '0.0.0') === 0 },
     { name: 'parseHarnessVersion: exact canonical/legacy formats only', run: () => parseHarnessVersion('1.9.0').base === '1.9.0' && parseHarnessVersion('leerness@1.8.0+plus@1.0.1').plus === '1.0.1' && parseHarnessVersion('leerness@1.8.0').base === '1.8.0' && parseHarnessVersion('garbage leerness@1.8.0 trailing').base === null && parseHarnessVersion('leerness@1.8.0.1').base === null && parseHarnessVersion('plus@1.0.1 junk').plus === null },
@@ -8086,15 +8101,35 @@ function _controlSelftestEnv() {
   return Object.assign(dropped, { restore });
 }
 function selfTestCmd(opts = {}) {
+  // T-0365: the advisory's language is read before LEERNESS_LANG and the other controlled variables are dropped
+  //   (1.36.305 review round 1: read after, English mode printed it in Korean).
+  const lang = _uiLang(process.cwd());
   const droppedEnv = _controlSelftestEnv();
-  try { return _selfTestCmdInner(opts, droppedEnv); } finally { droppedEnv.restore(); }
+  try { return _selfTestCmdInner(opts, droppedEnv, lang); } finally { droppedEnv.restore(); }
 }
-function _selfTestCmdInner(opts, droppedEnv) {
+function _selfTestCmdInner(opts, droppedEnv, lang) {
   const isTty = process.stdout && process.stdout.isTTY;
   const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
   const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
   const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  // The heading, the controlled-environment note and the advisory come before the cases run (several minutes on
+  //   Windows), in the same order as before.
+  if (!opts.json) {
+    log(cy(`# leerness selftest (1.9.258) — 코어 함수 무결성 검증 (v${VERSION})`));
+    log('');
+    // 무시한 설정은 반드시 보인다 — 사용자가 켜 둔 것이 안 먹었다는 사실을 숨기면 그 자체가 거짓 보고다(1.36.125).
+    if (droppedEnv.length) {
+      log(dm(`  ⓘ 측정 통제: 검증 중에만 ${droppedEnv.length}개 환경설정을 무시합니다 — ${droppedEnv.join(', ')}`));
+      //   ⚠ 1.36.129: 여기에 다른 가드의 **실패 표지 문자열**을 그대로 적어 두었더니, 그 가드가 이 안내를
+      //     실패로 읽었다(안내 문구가 곧 표면이다 — 같은 클래스를 이 저장소에서 세 번째로 만났다).
+      //     뜻은 유지하고 표지 문자열만 피한다.
+      log(dm(`     (이 설정들이 켜져 있으면 selftest 가 정상 설치를 실패로 거짓 보고했습니다 — 실제 제품 동작은 그대로입니다)`));
+      log('');
+    }
+    const advisory = _rmSyncAdvisory(lang);
+    if (advisory) { log(`  ⚠ ${advisory}`); log(''); }
+  }
   const cases = _selfTestCases();
   const results = cases.map(c => {
     let ok = false, err = null;
@@ -8107,17 +8142,6 @@ function _selfTestCmdInner(opts, droppedEnv) {
     log(JSON.stringify({ version: VERSION, total: results.length, pass, fail, ok: fail === 0, controlledEnv: droppedEnv, results }, null, 2));
     if (fail > 0) process.exitCode = 1;
     return;
-  }
-  log(cy(`# leerness selftest (1.9.258) — 코어 함수 무결성 검증 (v${VERSION})`));
-  log('');
-  // 무시한 설정은 반드시 보인다 — 사용자가 켜 둔 것이 안 먹었다는 사실을 숨기면 그 자체가 거짓 보고다(1.36.125).
-  if (droppedEnv.length) {
-    log(dm(`  ⓘ 측정 통제: 검증 중에만 ${droppedEnv.length}개 환경설정을 무시합니다 — ${droppedEnv.join(', ')}`));
-    //   ⚠ 1.36.129: 여기에 다른 가드의 **실패 표지 문자열**을 그대로 적어 두었더니, 그 가드가 이 안내를
-    //     실패로 읽었다(안내 문구가 곧 표면이다 — 같은 클래스를 이 저장소에서 세 번째로 만났다).
-    //     뜻은 유지하고 표지 문자열만 피한다.
-    log(dm(`     (이 설정들이 켜져 있으면 selftest 가 정상 설치를 실패로 거짓 보고했습니다 — 실제 제품 동작은 그대로입니다)`));
-    log('');
   }
   results.forEach(r => {
     if (r.ok) log(`  ${gr('✓')} ${r.name}`);
@@ -25081,7 +25105,7 @@ function _cleanupNpmTempDir(tmpDir, sensitiveFile = null) {
         try { fs.chmodSync(sensitiveFile, 0o600); } catch {}
         fs.writeFileSync(sensitiveFile, '', { mode: 0o600 });
       }
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      _removeSync(tmpDir, { recursive: true, force: true });
       cleaned = !exists(tmpDir);
     } catch {}
   }
@@ -34174,6 +34198,8 @@ module.exports = {
   _shellFailuresPath, _loadShellFailures, _recordShellFailure: projectWriter(_recordShellFailure), _shellEnvDrift,
   // 1.36.287 (T-0304): 환경 수집의 프로세스당 1회·도구 조회 분리 — 자식 프로세스 수로 검증
   _collectRuntimeEnv,
+  // T-0365: the rmSync advisory and the npm temp cleanup, for scripts/safe-remove-probe.js
+  _rmSyncAdvisory, _cleanupNpmTempDir,
   // 1.9.265: CLI 에이전트 슬래시 명령어 레지스트리 (UR-0021 1단계) — 단위 테스트
   AGENT_SLASH_COMMANDS, _agentSlashFile, _loadAgentSlashCommands, _recordAgentSlashCommands, _agentSlashHint, slashCommandsCmd,
   _parseSlashFromHelp, _probeAgentSlash, _refreshAgentSlashCommands,
