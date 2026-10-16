@@ -12,9 +12,12 @@ const path = require('path');
 const RETRY_CODES = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
 
 function removeTree(target, rmOptions = {}, { timeoutMs = 5000, intervalMs = 100 } = {}) {
+  // T-0365: removeSync is fs.rmSync except on the Windows Node versions whose failed fs.rmSync ends the process. It is
+  //   loaded at first use, so requiring this file loads nothing from lib/ before trackTemp runs.
+  const { removeSync } = require('../lib/safe-remove');
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    try { return fs.rmSync(target, rmOptions); }
+    try { return removeSync(target, rmOptions); }
     catch (error) {
       if (!RETRY_CODES.has(error && error.code) || Date.now() >= deadline) throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, intervalMs);

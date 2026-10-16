@@ -164,21 +164,25 @@ fixture('nested.test.cjs', "require('node:test')('beta',async t=>{await t.test('
     await test('a briefly held selector fixture is waited out, not reported as an unavailable selector', async () => {
       // Windows can refuse the fixture delete while the last child test process exits, and Node 26
       // rmSync does not retry EPERM. Two refusals must not turn into runtime-selector-unavailable.
-      const original = fs.rmSync;
+      // T-0365: on a Windows Node whose failed fs.rmSync ends the process, lib/safe-remove.js removes the fixture
+      //   with unlink and rmdir, so the refusals go to the fixture folder's rmdirSync as well.
+      const original = fs.rmSync, originalRmdir = fs.rmdirSync;
       let refused = 0;
-      fs.rmSync = function (target, ...rest) {
+      const refuse = (impl, self, target, rest) => {
         if (refused < 2 && path.basename(String(target)).startsWith('leerness-node-selector-')) {
           refused++;
           throw Object.assign(new Error('injected hold'), { code: 'EPERM' });
         }
-        return original.call(this, target, ...rest);
+        return impl.call(self, target, ...rest);
       };
+      fs.rmSync = function (target, ...rest) { return refuse(original, this, target, rest); };
+      fs.rmdirSync = function (target, ...rest) { return refuse(originalRmdir, this, target, rest); };
       try {
         const result = await runNodeSelection(request('cases.test.cjs', 'beta'), arena);
         assert.equal(refused, 2, `fixture cleanup stopped after ${refused} refusal(s) instead of waiting`);
         assert.equal(result.fixtureSelectionVerified, true, JSON.stringify(result));
         assert.equal(result.selectedTestPassed, true);
-      } finally { fs.rmSync = original; }
+      } finally { fs.rmSync = original; fs.rmdirSync = originalRmdir; }
     });
   } finally {
     const actual = fs.realpathSync(arena);
