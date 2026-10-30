@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.36.306 - 2026-10-30 (release candidate)
+
+- Security hotfix (T-0085): shared Bearer token catalog recognizes `/` and `+` in opaque base64-style credentials without changing its minimum token length.
+- Added positive and negative UI-boundary security regressions. This entry records candidate code, not registry publication or release approval.
+
 ## 1.36.305 - 2026-10-16
 
 - Fixed: on Windows with Node 23.x, 24.0.0-24.21.x, 25.x or 26.0.0-26.8.x, a removal that failed (a file or folder another process holds: an editor, antivirus, a shell's working directory) could end leerness without any error when the path had a character outside the system code page, and on other non-ASCII paths the error named a garbled path (T-0365). This is a Node bug: when fs.rmSync fails, Node builds the error from the absolute path given, converted with the ANSI code page, which ends the process for a character the code page cannot hold (exit code 0xC0000409; no try/catch sees it). Node fixed it in 24.22.0 and 26.9.0; 22.x and older are not affected. Measured on this PC (Node 26.3.0, code page 949): the process ended for e-acute, u-umlaut, n-tilde, Thai, Arabic, an emoji and a CJK Extension B character, and not for ASCII, Hangul, hanja, kana, Cyrillic, Greek, the euro sign or the other characters code page 949 holds; also for a single held file; read-only files are removed normally.
