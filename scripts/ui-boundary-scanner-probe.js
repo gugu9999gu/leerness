@@ -200,6 +200,24 @@ for (const [name, text] of securityCases) test('shared catalog ' + name, () => {
   assert.ok(f.securityPatterns.includes(name)); assert.equal(f.subtype, 'DEBUG_METADATA');
   assert.equal(f.disposition, 'review-remediation'); assert.ok(!JSON.stringify(r).includes(text)); noAuthority(r);
 });
+test('Bearer catalog detects slash and plus within opaque tokens', () => {
+  const pattern = SECRET_PATTERNS.find(p => p.name === 'Hardcoded Bearer token');
+  assert.ok(pattern);
+  for (const token of ['abc12345/' + mixed, 'abc12345+' + mixed]) {
+    const text = 'Bearer ' + token;
+    assert.equal(new RegExp(pattern.re.source, pattern.re.flags).test(text), true);
+    const result = run(text);
+    assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].securityPatterns.includes('Hardcoded Bearer token'));
+    assert.ok(!JSON.stringify(result).includes(token));
+  }
+});
+test('Bearer catalog retains short-token and unrelated-prose boundaries', () => {
+  const pattern = SECRET_PATTERNS.find(p => p.name === 'Hardcoded Bearer token');
+  for (const text of ['Bearer abc12/+', 'Use Bearer authentication for API requests']) {
+    assert.equal(new RegExp(pattern.re.source, pattern.re.flags).test(text), false);
+  }
+});
 test('all current security catalog rules have a fixture', () => {
   assert.deepEqual(securityCases.map(c => c[0]), SECRET_PATTERNS.map(p => p.name));
 });
