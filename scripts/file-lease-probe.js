@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Exact-file leases are an opt-in coordination primitive. This probe deliberately
-// distinguishes them from the discarded ambient scope advisory: only explicit calls
-// may produce a conflict, unrelated files and separate roots remain independent, and
-// read-only list/check calls must not rewrite project state.
+ 
+ 
+ 
+ 
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -902,8 +902,8 @@ async function main() {
   makeDirLink(cacheTarget, cacheLink);
   const cacheLinkAcquire = runLease(cacheLinkRoot, ['acquire', 'x.js', '--session', alpha, '--ttl', '300']);
   check('lease cache symlinks or junctions are rejected before writing tracked project paths',
-    // Runtime admission now rejects the unsafe fixed descriptor parent before
-    // CLI bookkeeping or the lease-specific validator can run.
+     
+     
     cacheLinkAcquire.status === 1 && parseJson(cacheLinkAcquire)?.code === 'runtime_layout_incompatible'
       && parseJson(cacheLinkAcquire)?.error.includes('(layout_linked)')
       && !fs.existsSync(path.join(cacheTarget, 'file-leases.json')),

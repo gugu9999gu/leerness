@@ -22,8 +22,9 @@ This is a file synchronization boundary, not a power-loss guarantee. It does
 not synchronize directory metadata, provide hardware guarantees, make Git
 refs and JSONL writes one transaction. Appends now take the [shared state
 lock](state-store-locking.md) by default; `withExecutionLedgerLock` holds that
-same lock across multiple operations. `appendExecutionEvent` does not
-deduplicate event IDs or grant reviewer independence/approval.
+same lock across multiple operations; reclaiming a dead owner's lock never touches
+ledger bytes. `appendExecutionEvent` does not deduplicate event IDs or grant
+reviewer independence/approval.
 
 `node scripts/execution-ledger-sync-probe.js` checks real file writes,
 synthetic write/sync/close failures, short writes, retained incomplete lines,

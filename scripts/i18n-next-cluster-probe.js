@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const fs = require('fs');
 const os = require('os');
@@ -124,10 +124,10 @@ function normalizedJson(label, result) {
     throw new Error(`${label} did not return one JSON document: ${error.message}`);
   }
   if (parsed && typeof parsed === 'object') delete parsed.auditedAt;
-  // Milestone ETA is intentionally based on the wall clock. English and Korean
-  // probes run in separate processes, so they can legitimately straddle UTC
-  // midnight. Validate the public date shape, then remove only that volatility
-  // before comparing the locale-independent payloads.
+   
+   
+   
+   
   if (parsed && parsed.next && Object.prototype.hasOwnProperty.call(parsed.next, 'etaDate')) {
     const etaDate = parsed.next.etaDate;
     if (etaDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(etaDate))) {
@@ -155,9 +155,9 @@ const surfaces = [
 ];
 
 try {
-  // User-supplied paths may contain Hangul and are diagnostic evidence, not
-  // tool-authored UI. Keep the exclusion narrow and prove it does not hide
-  // adjacent product prose.
+   
+   
+   
   const syntheticUserPath = path.join(tmp, '사용자-경로');
   if (hangulLines(`path: ${syntheticUserPath}`, [syntheticUserPath]).length !== 0
       || hangulLines(`path: ${syntheticUserPath}\ntool text 한글`, [syntheticUserPath]).length !== 1) {
@@ -174,10 +174,10 @@ try {
   requireSuccess('decision add', run(['decision', 'add', 'Use JSON storage', '--reason', 'simplest', '--path', project]));
   requireSuccess('plan add', run(['plan', 'add', 'Ship the parser', '--path', project]));
 
-  // A user skill may predate English catalog fields or contain malformed
-  // legacy usage metadata. English mode must not fall back to Korean-only
-  // presentation fields, leak a non-numeric count, or call string methods on
-  // a numeric timestamp. JSON keeps those canonical source values unchanged.
+   
+   
+   
+   
   const koreanOnlySkillDir = path.join(project, '.leerness', 'skills', 'korean-only');
   fs.mkdirSync(koreanOnlySkillDir, { recursive: true });
   fs.writeFileSync(path.join(koreanOnlySkillDir, 'skill.json'), JSON.stringify({
@@ -233,10 +233,10 @@ try {
   const manifestFile = path.join(project, '.leerness', 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
 
-  // Stored project language, environment override, and explicit flag must all
-  // reach the same English renderer. Flip the stored language to Korean before
-  // checking overrides so a disconnected env/flag path cannot pass by falling
-  // back to the already-English manifest.
+   
+   
+   
+   
   const storedEnglish = new Map();
   for (const [label, args] of surfaces) {
     storedEnglish.set(label, requireNoHangul(`${label} (stored language)`, run(args)));
@@ -280,9 +280,9 @@ try {
   if (staleJson[0] !== staleJson[1]) {
     throw new Error('mode stale-version JSON changed with UI language');
   }
-  // `get`/`set` occupy args[1], so the shared stale checker must use the same
-  // positional-root parser as the mode handler instead of treating the child
-  // command itself as a directory.
+   
+   
+   
   const staleModePositional = requireNoHangul('mode stale-version positional root', run(
     ['mode', 'get', project], staleEnv, tmp
   ));
@@ -308,9 +308,9 @@ try {
   if (storedSkillList.split(/\r?\n/).some(line => /^\|\s*forged-/.test(line))) {
     throw new Error('skill list English metadata forged a physical Markdown row');
   }
-  // A real stored-Korean route prevents a default-English implementation from
-  // passing the stored-locale test accidentally. Run outside the target cwd so
-  // the locale must come from --path rather than cwd.
+   
+   
+   
   manifest.language = 'ko';
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
   const storedKoreanSkillList = requireSuccess('skill list stored Korean control', run(
@@ -321,8 +321,8 @@ try {
   }
   manifest.language = 'en';
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
-  // --path must outrank a conflicting positional root when resolving the
-  // stored locale. The pre-fix dispatcher passed args[2] straight through.
+   
+   
   const koreanPositionalProject = path.join(tmp, 'korean-positional-project');
   fs.mkdirSync(koreanPositionalProject, { recursive: true });
   fs.writeFileSync(path.join(koreanPositionalProject, 'package.json'), '{"name":"korean-positional","version":"0.1.0"}\n');
@@ -346,9 +346,9 @@ try {
     throw new Error('mode pre-dispatch human error ignored the --path target stored locale');
   }
 
-  // A separately loaded skillpack exercises the loader projection, including
-  // explicit English fields, legacy English fields, non-Latin text, complete
-  // Hangul-script coverage, and Markdown control-character sanitation.
+   
+   
+   
   const ambientSkillpackDir = path.join(project, 'node_modules', 'leerness-skillpack');
   fs.mkdirSync(ambientSkillpackDir, { recursive: true });
   fs.writeFileSync(path.join(ambientSkillpackDir, 'catalog.json'), JSON.stringify({
@@ -435,9 +435,9 @@ try {
       || externalTranslatedJson.capabilities[0] !== '한국어 기능') {
     throw new Error('skill list external skillpack JSON changed across locale routes or exposed presentation-only fields');
   }
-  // Valid Korean free text is a compatibility surface: unlike the English
-  // Markdown-safe projection it must retain repeated spaces byte-for-byte.
-  // Keep an ambient pack present so this also exercises explicit env priority.
+   
+   
+   
   const koreanBytePackDir = path.join(tmp, 'korean-byte-pack');
   fs.mkdirSync(koreanBytePackDir, { recursive: true });
   fs.writeFileSync(path.join(koreanBytePackDir, 'catalog.json'), JSON.stringify({
@@ -474,9 +474,9 @@ try {
   manifest.language = 'en';
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
 
-  // `mode` has read, mutation, and fail-closed branches. The aggregate ratchet
-  // sees only the healthy read path, so exercise the sibling human renderers
-  // here while keeping successful JSON locale-independent through `surfaces`.
+   
+   
+   
   const modeSetEnProject = path.join(tmp, 'mode-set-en');
   cloneProjectState(modeSetEnProject);
   const modeSetEn = requireNoHangul('mode set English', run(
@@ -515,9 +515,9 @@ try {
     throw new Error('mode set JSON or manifest state changed with UI language');
   }
 
-  // Corrupt the manifest while mode waits for its lock, then release the lock.
-  // Its checked descriptor read under that lock must reject the mutation,
-  // preserve both generated documents, and report a real failure.
+   
+   
+   
   const modeMidflightCorruptProject = path.join(tmp, 'mode-midflight-corrupt');
   cloneProjectState(modeMidflightCorruptProject);
   const midflightManifest = path.join(modeMidflightCorruptProject, '.leerness', 'manifest.json');
@@ -548,8 +548,8 @@ try {
     "  try { return fs.readdirSync(lock).some(name => /^owner-[a-f0-9]{32}\\.json$/.test(name)); }",
     "  catch { return false; }",
     "}",
-    // The checked manifest reader uses descriptor opens, not readFileSync.
-    // Observe those opens without replacing its byte reader or path checks.
+     
+     
     "fs.openSync = function(target, ...args) {",
     "  const fd = originalOpen.call(fs, target, ...args);",
     "  if (path.resolve(String(target)) === manifest) record('manifest-open', { phase: injected ? 'after-injection' : 'before-contention', ownerHeld: ownerHeld() });",
@@ -612,9 +612,9 @@ try {
     throw new Error('mode lock-time corruption was overwritten, regenerated documents, or reported the wrong failure');
   }
 
-  // A concurrent writer can leave valid JSON whose mode value is not safely
-  // coercible. Compute the previous mode before writing: a post-write coercion
-  // throw would otherwise commit the manifest while skipping both documents.
+   
+   
+   
   const modeMidflightObjectProject = path.join(tmp, 'mode-midflight-object');
   cloneProjectState(modeMidflightObjectProject);
   const objectManifest = path.join(modeMidflightObjectProject, '.leerness', 'manifest.json');
@@ -691,8 +691,8 @@ try {
     throw new Error('mode corrupt-manifest English set lost its fail-closed anchor');
   }
 
-  // The manifest reader exposes stable reason codes. Pin every human English
-  // mapping so a future reason cannot silently reintroduce Korean prose.
+   
+   
   const modeNotObjectProject = path.join(tmp, 'mode-not-object');
   cloneProjectState(modeNotObjectProject);
   fs.writeFileSync(path.join(modeNotObjectProject, '.leerness', 'manifest.json'), '"not an object"\n');
@@ -715,8 +715,8 @@ try {
     throw new Error('mode unreadable manifest English reason lost its stable mapping');
   }
 
-  // Shared guards can reject a mode invocation before the mode dispatcher.
-  // Their machine errors still belong to the mode JSON byte contract.
+   
+   
   const modeMissingPath = path.join(tmp, 'mode-path-does-not-exist');
   const modeFilePath = path.join(tmp, 'mode-file-root.txt');
   fs.writeFileSync(modeFilePath, 'not a directory\n');
@@ -770,7 +770,7 @@ try {
     }
   }
 
-  // Missing and milestone-free plans have separate human branches.
+   
   const planFile = path.join(project, '.leerness', 'plan.md');
   const originalPlan = fs.readFileSync(planFile, 'utf8');
   fs.rmSync(planFile);
@@ -786,9 +786,9 @@ try {
   }
   fs.writeFileSync(planFile, originalPlan);
 
-  // Public add commands normally deduplicate; --force deliberately creates
-  // realistic duplicate rows so the violation renderer and auto-fix summary
-  // cannot remain Korean while the empty-state probe passes.
+   
+   
+   
   requireSuccess('duplicate rule A', run(['rule', 'add', 'Run tests', '--trigger', 'every-session', '--force', '--path', project]));
   requireSuccess('duplicate rule B', run(['rule', 'add', 'Run tests', '--trigger', 'every-session', '--force', '--path', project]));
   requireSuccess('duplicate task A', run(['task', 'add', 'Resolve duplicate work', '--status', 'in-progress', '--force', '--path', project]));
@@ -801,9 +801,9 @@ try {
   fs.writeFileSync(requestFile, JSON.stringify(requestState, null, 2) + '\n');
   requireNoHangul('idempotency violation report', run(['idempotency', 'audit', '--path', project]));
 
-  // --auto-fix mutates its target, so compare two byte-identical fresh clones.
-  // This catches locale-dependent JSON fields as well as locale-dependent state
-  // writes that a post-fix clean audit would miss.
+   
+   
+   
   const autoFixEnProject = path.join(tmp, 'autofix-en');
   const autoFixKoProject = path.join(tmp, 'autofix-ko');
   cloneProjectState(autoFixEnProject);
@@ -831,8 +831,8 @@ try {
   }
   requireNoHangul('idempotency auto-fix report', run(['idempotency', 'audit', '--auto-fix', '--path', project]));
 
-  // Two annotated tags with distinct creation times exercise measured cadence
-  // and non-empty round history rather than only the insufficient-data branch.
+   
+   
   requireGitSuccess('git add first snapshot', git(['add', '-A']));
   const firstDate = '2026-08-28T00:00:00+09:00';
   requireGitSuccess('git commit first snapshot', git(['commit', '-qm', 'first'], {
@@ -852,9 +852,9 @@ try {
   requireGitSuccess('git tag second snapshot', git(['tag', '-a', 'v1.0.1', '-m', 'v1.0.1'], {
     GIT_COMMITTER_DATE: secondDate,
   }));
-  // Reach R25 without manufacturing another 23 commits. Annotated tags have
-  // independent creation times, which is exactly the evidence milestones
-  // consumes, and exercise reached/next/ETA rendering in one small fixture.
+   
+   
+   
   for (let i = 2; i < 25; i++) {
     const version = `v1.0.${i}`;
     const tagDate = `2026-08-29T00:${String(i).padStart(2, '0')}:00+09:00`;
@@ -866,9 +866,9 @@ try {
   requireNoHangul('round-history with tags', run(['round-history', '--path', project]));
   requireNoHangul('milestones with reached history', run(['milestones', '--path', project]));
 
-  // Machine payloads remain the canonical, locale-independent contract. The
-  // idempotency timestamp is intentionally volatile and is normalized only
-  // for this equality assertion.
+   
+   
+   
   for (const [label, args] of surfaces) {
     const en = normalizedJson(`${label} English JSON`, run([...args, '--json']));
     const ko = normalizedJson(`${label} Korean JSON`, run([...args, '--json'], { ...baseEnv, LEERNESS_LANG: 'ko' }));
@@ -923,9 +923,9 @@ try {
     if (missing.length) throw new Error(`${label} Korean control lost anchors: ${missing.join(', ')}`);
   }
 
-  // Exercise the terminal 500+ renderer without spawning another 475 `git tag`
-  // processes. Lightweight semver refs are valid release tags and one atomic
-  // update-ref process gives the real CLI a 500-tag history.
+   
+   
+   
   const headResult = git(['rev-parse', 'HEAD']);
   requireGitSuccess('git resolve terminal milestone fixture', headResult);
   const head = String(headResult.stdout || '').trim();

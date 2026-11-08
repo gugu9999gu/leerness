@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const fs = require('fs');
 const crypto = require('crypto');
@@ -158,8 +158,8 @@ check('missing --path retains its specific no-value diagnostic',
   missingPath.status === 1 && /--path 에 값이 없습니다|--path was given without a value/.test((missingPath.stdout || '') + (missingPath.stderr || '')),
   missingPath);
 
-// --cmd exists elsewhere in leerness, so the global registry alone cannot catch
-// it. The commands command must reject a foreign, command-specific flag too.
+ 
+ 
 const foreign = run(['commands', '--cmd', 'ignored-value', '--json']);
 const foreignJson = json(foreign);
 check('commands rejects a known-but-foreign command flag',
@@ -195,8 +195,8 @@ check('about rejects a known-but-foreign value flag',
   aboutForeign.status === 1 && json(aboutForeign)?.code === 'unknown_flag' && !aboutForeign.stderr,
   aboutForeign);
 
-// The external evaluation's concrete case was verify-code --cmd/--test-cmd:
-// both are valid names elsewhere, but this command does not consume them.
+ 
+ 
 const emptyProject = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-command-flags-'));
 try {
   const initialized = run(['init', emptyProject, '--yes', '--json']);
@@ -346,8 +346,8 @@ try {
   fs.rmSync(emptyProject, { recursive: true, force: true });
 }
 
-// Invalid input must not trigger the legacy workspace auto-migration that is
-// normally allowed for a valid command.
+ 
+ 
 const legacyProject = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-command-flags-legacy-'));
 try {
   const legacyWorkspaceName = ['.', 'harness'].join('');

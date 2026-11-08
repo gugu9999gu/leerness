@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0307: session close keeps user-written handoff text by position, and every reader of the
-// handoff looks at the current generated region rather than the whole file.
-//   - a note under the title or a section the generator never writes survives, exactly once
-//   - the generator's own title / Last generated / sections are still replaced (no over-keeping)
-//   - drift and audit read the region, so legacy text kept below it no longer reports stale state
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');
@@ -21,7 +21,7 @@ const block = when => ['# Session Handoff', '', `Last generated: ${when}`, '', '
   '## Next Exact Step', '- continue', ''].join('\n');
 const count = (text, needle) => text.split(needle).length - 1;
 
-// 1. updateHandoff keeps user text by position.
+ 
 {
   const userNote = '## 2026-09-10 수동 인계 — KEEP-NOTE\n\n사용자가 직접 쓴 문단.\n\n```md\n## Completed\n예시 코드 안의 제목\n```';
   const userTail = '## My follow-ups\n- ask the owner about KEEP-TAIL';
@@ -43,7 +43,7 @@ const count = (text, needle) => text.split(needle).length - 1;
   const indented = current.updateHandoff(`${START}\n# Session Handoff\n\n    indented owner note\n\nLast generated: 2026-09-01T00:00:00.000Z\n\n## Completed\n- x\n${END}\n`,
     block('2026-09-28T00:00:00.000Z'), 'fixture');
   assert(indented.includes(`${END}\n\n    indented owner note\n`), 'kept text keeps its indentation');
-  // Control: when the generator itself writes free text under the title, that text is its own.
+   
   const first = current.updateHandoff('# User\n', '# Session Handoff\nfirst\n', 'fixture');
   const second = current.updateHandoff(first, '# Session Handoff\nsecond\n', 'fixture');
   assert(!second.includes('first\n') && second.includes('second\n'), 'generated head text is not kept as user text');
@@ -51,7 +51,7 @@ const count = (text, needle) => text.split(needle).length - 1;
   console.log('PASS: updateHandoff keeps user text by position, once, and still replaces generated text');
 }
 
-// 2. Real session close, drift and audit.
+ 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-handoff-keep-'));
 const env = {
   ...process.env,
@@ -81,7 +81,7 @@ try {
   assert(!/never auto-generated/.test(cliRun(['audit', project], project)), 'audit sees the generated region after close');
   console.log('PASS: session close keeps the owner note; drift and audit read the current region');
 
-  // A legacy handoff without markers keeps its text below the new region; its old date is history.
+   
   const legacy = path.join(root, 'legacy');
   fs.mkdirSync(legacy);
   cliRun(['init', legacy, '--yes'], legacy);

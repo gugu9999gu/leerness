@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Snapshot selection must preserve the resolver's decisions and diagnostics
-// while adding no filesystem calls, writes, or ambient environment dependency.
+ 
+ 
 const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -191,8 +191,8 @@ try {
     const state = freeze(W.inspectWorkspace(envRoot));
     const original = new Map();
     const calls = [];
-    // Intercept every sync fs primitive, including reads and writes, after
-    // acquiring the snapshot. Restore before assertions or fixture cleanup.
+     
+     
     for (const key of Object.keys(fs).filter(key => /Sync$/.test(key) && typeof fs[key] === 'function')) {
       original.set(key, fs[key]);
       fs[key] = (...args) => { calls.push(key); throw new Error(`unexpected fs.${key}`); };

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// 기존 JSON 구문 검사의 실행 순서만 검증한다. 완전한 schema/트랜잭션 검사가 아니다.
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -21,7 +21,7 @@ const results = [];
 const run = (root, args) => cp.spawnSync(process.execPath, [cli, ...args, '--path', root, '--json'], {
   cwd: root, env, encoding: 'utf8', timeout: 120000, maxBuffer: 2 * 1024 * 1024,
 });
-// T-0343: with --json the reason is on stdout, so a CI failure printed only "exit=1"; keep the tail of both streams.
+ 
 const requireSuccess = result => assert.strictEqual(result.status, 0,
   `exit=${result.status} signal=${result.signal} error=${result.error?.code} stderr=${(result.stderr || '').slice(-400)} stdout=${(result.stdout || '').slice(-400)}`);
 const snapshot = root => Object.fromEntries([
@@ -122,7 +122,7 @@ try {
     });
     check(`${surface} missing canonical retains legacy fallback`, () => {
       const root = fixture();
-      fs.unlinkSync(canonical(root, surface)); // 테스트 소유 단일 fixture 파일만 제거.
+      fs.unlinkSync(canonical(root, surface));  
       requireSuccess(run(root, [singular, add, 'new']));
       assert.strictEqual(items(root, surface).length, 2);
     });

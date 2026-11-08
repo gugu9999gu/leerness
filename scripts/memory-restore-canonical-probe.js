@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Real CLI tests for canonical-value preservation during legacy archive restore.
-// Raw JSON bytes, manual Markdown, and already-lossy archived fields are separate contracts.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -213,8 +213,8 @@ try {
       assert.strictEqual(f.load().at(-1)[f.identity], 'archived');
       assert(fs.readFileSync(f.file('archive.md'), 'utf8').includes(kept));
     });
-    // Integration controls: canonical admission and selected-archive validation
-    // retain their order and preservation guarantees when both apply.
+     
+     
     for (const forced of [false, true]) {
       const mode = forced ? 'forced' : 'normal';
       const restoreArgs = ['memory', 'restore', surface, 'selected', ...(forced ? ['--force'] : [])];

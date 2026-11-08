@@ -1,10 +1,10 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0352: the archive step of `leerness skill publish --bundle-only` (_createArchive in bin/leerness.js).
-// It ran `tar -czf <absolute path>`. Git for Windows' GNU tar, first on PATH in Git Bash and in agent shells built on
-// it, reads the drive letter of an absolute Windows path as a remote host and failed, so the .zip fallback ran
-// instead of the .tgz. The e2e check accepted either. This probe asks for the .tgz with each tar the machine has
-// first on PATH and checks that tar made it, with the expected entries.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -17,7 +17,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('PASS ' + name); }
   catch (error) { failed++; console.error('FAIL ' + name + ': ' + (error && error.stack || error)); }
 }
-// Entry names of a .tgz, read with zlib and the ustar header layout (name at 0, prefix at 345).
+ 
 function tgzEntries(file) {
   const tar = zlib.gunzipSync(fs.readFileSync(file)), names = [];
   for (let at = 0; at + 512 <= tar.length;) {

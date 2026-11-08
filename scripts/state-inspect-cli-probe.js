@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('assert');
 const fs = require('fs');
@@ -11,7 +11,7 @@ const cp = require('child_process');
 const { gitSpawn, _shouldDrop } = require('../lib/git');
 const { LEGACY_WORKSPACE_DIR, CANONICAL_WORKSPACE_DIR } = require('../lib/workspace-dir');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
-// Match canonical product paths even when TEMP uses a Windows short-name alias.
+ 
 const fixture = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'leerness-state-inspect-cli-'));
 let passed = 0;
 
@@ -141,21 +141,21 @@ try {
   check('mutation and permission classifiers do not reinterpret path content', () => {
     const { _cliMutationClass, _requiredTier } = require('../bin/leerness.js');
     assert.strictEqual(_cliMutationClass(['state', 'inspect', 'publish'], 'state'), 'observation-only');
-    assert.strictEqual(_cliMutationClass(['state', 'show'], 'state'), 'stateful');
+    assert.strictEqual(_cliMutationClass(['state', 'show'], 'state'), 'observation-only');
     assert.strictEqual(_cliMutationClass(['state', 'start'], 'state'), 'stateful');
     for (const prefix of ['', 'leerness ', 'npx -y leerness@1.0.0 ']) {
       assert.strictEqual(_requiredTier(`${prefix}state inspect ./release publish/web`), 'read-only');
       assert.strictEqual(_requiredTier(`${prefix}state inspect "C:\\work\\release (draft)\\publish"`), 'read-only');
       assert.strictEqual(_requiredTier(`${prefix}state inspect "\\\\server\\c$\\R&D\\web"`), 'read-only');
       assert.strictEqual(_requiredTier(`${prefix}state inspect '/work/R&D/publish'`), 'read-only');
-      // Pure classification only: these strings are never executed as commands.
+       
       assert.strictEqual(_requiredTier(`${prefix}state inspect . && git push`), 'git-write');
       assert.strictEqual(_requiredTier(`${prefix}state inspect .; npm publish`), 'publish');
       assert.strictEqual(_requiredTier(`${prefix}state inspect "C:\\work\\R&D" && git push`), 'git-write');
     }
   });
 
-  // Instrument the real entry point, not a test-only --internal fast path.
+   
   const preload = path.join(fixture, 'observe.cjs');
   fs.writeFileSync(preload, `
     const fs = require('fs'), cp = require('child_process'), path = require('path');
@@ -205,6 +205,6 @@ try {
   });
   console.log(`state-inspect CLI probe: ${passed}/${passed} PASS`);
 } finally {
-  // Only this probe's freshly allocated fixture is eligible for cleanup.
+   
   fs.rmSync(fixture, { recursive: true, force: true });
 }

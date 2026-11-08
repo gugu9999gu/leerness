@@ -54,7 +54,7 @@ const positives = [
   ['raw status', 'raw_status = STATE_WAITING_09', 'internal-metadata', 'DEBUG_METADATA'],
   ['quoted internal label', '"system_prompt": "internal instruction"', 'internal-metadata', 'DEBUG_METADATA'],
   ['JSON internal label', '{"status":"ok","system_prompt":"internal instruction"}', 'internal-metadata', 'DEBUG_METADATA'],
-  // v2: a matching view keeps full-width, wide-space, zero-width and bulleted markers recognizable.
+   
   ['full-width colon', 'TODO\uFF1Areplace', 'developer-marker', 'DEVELOPER_NOTE'],
   ['full-width letters', '\uFF34\uFF2F\uFF24\uFF2F\uFF1Areplace', 'developer-marker', 'DEVELOPER_NOTE'],
   ['non-breaking indent', '\u00A0TODO: replace', 'developer-marker', 'DEVELOPER_NOTE'],
@@ -90,10 +90,10 @@ const positives = [
   ['raw localization key', 'home.hero.title', 'raw-i18n-key', 'DEBUG_METADATA'],
   ['response dump', '{"ok":true,"savedId":42}', 'json-dump', 'DEBUG_METADATA'],
   ['labelled response dump', '상태 확인: {"state":"idle","retry":0}', 'json-dump', 'DEBUG_METADATA'],
-  // Independent review (Codex, 1.36.288): exemptions that were too broad, and JSON framing that was too narrow.
+   
   ['object coercion before an ordinary verb', 'Your order [object Object] is ready.', 'object-coercion', 'DEBUG_METADATA'],
   ['object coercion opening a sentence', '[object Object] is typing…', 'object-coercion', 'DEBUG_METADATA'],
-  // Same class in Korean: a topic particle alone is an ordinary sentence, not an explanation.
+   
   ['object coercion as a Korean topic', '[object Object]는 품절입니다.', 'object-coercion', 'DEBUG_METADATA'],
   ['explanation word in the next sentence', '[object Object]는 품절입니다. 다른 상품은 아래에 표시됩니다.', 'object-coercion', 'DEBUG_METADATA'],
   ['placeholder beside the word variable', 'Your variable interest rate is ${rate}%.', 'unresolved-template', 'DEBUG_METADATA'],
@@ -115,7 +115,7 @@ for (const name of ['data-debug', 'data-debug-only', 'data-internal-debug', 'dat
   assert.equal(r.findings[0].signals[0].code, 'debug-attribute'); noAuthority(r);
 });
 
-// Human-labelled controls for this finite syntax policy, not a corpus estimate.
+ 
 const controls = [
   '저장', '다시 시도', '작업 상태', '실행 모델', 'OpenAI', 'Claude', 'React 시작하기',
   'Next.js 설정', 'Node.js 버전', 'DEBUG 모드 안내', 'Todo list', 'FIXME라는 주석의 의미',
@@ -124,7 +124,7 @@ const controls = [
   'model: example-model', 'agent: reviewer', 'status: running', 'HTTP 500 오류: 다시 시도하세요',
   'Error recovery guide', 'TypeError handling', 'Stack trace documentation', 'Basic authentication flow',
   'API key 설정', 'Bearer 인증', 'password="provided"', 'api_key="your-api-key-here"',
-  // v2 counterexamples: legitimate copy next to each new rule.
+   
   '할 일 3개 남음', 'TODO 리스트 앱 — 할 일을 추가해 보세요', 'Life hack: 5분 정리법', 'Note: changes apply to all members.',
   'The Developer notes section lists release changes.', '수정 필요 항목 3건', '개발 중인 기능입니다',
   '임시 저장됨', '임시 비밀번호가 발급되었습니다', '배터리 교체 예정일: 10월 3일', '나중에 다시 연결해 주세요',
@@ -150,8 +150,8 @@ test('technical docs with exact debug syntax remain advisory, never auto removed
   noAuthority(run('http://localhost:3000'));
   assert.equal(run('TODO: example of a comment').findings[0].severity, 'advisory');
 });
-// Tooling products legitimately show these shapes (a template editor's variable, a localization
-// manager's key, an API client's response). Syntax cannot tell; the candidate goes to review.
+ 
+ 
 test('tooling-context artifacts stay advisory review candidates', () => {
   for (const text of ['{{customer.name}}', 'home.title', '{"id":7,"status":"sent"}']) {
     const r = run(text); assert.equal(r.findings.length, 1);
@@ -199,6 +199,24 @@ for (const [name, text] of securityCases) test('shared catalog ' + name, () => {
   assert.equal(f.category, 'security'); assert.equal(f.severity, 'delegated');
   assert.ok(f.securityPatterns.includes(name)); assert.equal(f.subtype, 'DEBUG_METADATA');
   assert.equal(f.disposition, 'review-remediation'); assert.ok(!JSON.stringify(r).includes(text)); noAuthority(r);
+});
+test('Bearer catalog detects slash and plus within opaque tokens', () => {
+  const pattern = SECRET_PATTERNS.find(p => p.name === 'Hardcoded Bearer token');
+  assert.ok(pattern);
+  for (const token of ['abc12345/' + mixed, 'abc12345+' + mixed]) {
+    const text = 'Bearer ' + token;
+    assert.equal(new RegExp(pattern.re.source, pattern.re.flags).test(text), true);
+    const result = run(text);
+    assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].securityPatterns.includes('Hardcoded Bearer token'));
+    assert.ok(!JSON.stringify(result).includes(token));
+  }
+});
+test('Bearer catalog retains short-token and unrelated-prose boundaries', () => {
+  const pattern = SECRET_PATTERNS.find(p => p.name === 'Hardcoded Bearer token');
+  for (const text of ['Bearer abc12/+', 'Use Bearer authentication for API requests']) {
+    assert.equal(new RegExp(pattern.re.source, pattern.re.flags).test(text), false);
+  }
 });
 test('all current security catalog rules have a fixture', () => {
   assert.deepEqual(securityCases.map(c => c[0]), SECRET_PATTERNS.map(p => p.name));

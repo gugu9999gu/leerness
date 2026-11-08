@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Real CLI regression: invalid UTF-8 must not pass a memory mutation guard.
-// Scope is canonical decisions/lessons; Markdown retention and checked snapshots
-// are separate contracts. All test data and captured output belong to this probe.
+ 
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -117,7 +117,7 @@ try {
           const f = fixture(surface, payload);
           const before = f.domain();
           const result = run(f.project, operation.args);
-          // Check preservation even when the old CLI incorrectly reports success.
+           
           const after = f.domain();
           assert(result.status > 0, `invalid UTF-8 accepted (exit ${result.status}); unchanged=${JSON.stringify(before) === JSON.stringify(after)}`);
           assert.strictEqual(JSON.parse(result.stdout).code, 'store_corrupt');
@@ -128,7 +128,7 @@ try {
     for (const [encoding, value, bom] of valid) {
       for (const operation of operations(surface)) {
         check(`${surface}: ${encoding} permits ${operation.name} and preserves survivors`, () => {
-          // JSON string content, not literal unescaped newlines.
+           
           const payload = Buffer.from(JSON.stringify(value).slice(1, -1));
           const f = fixture(surface, payload, bom);
           const before = f.domain(), survivor = f.load()[0];
@@ -162,11 +162,33 @@ try {
       success(run(f.project, operations(surface)[0].args));
       assert.deepStrictEqual(f.load().map(f.identity), ['fresh']);
     });
-    check(`${surface}: read-only legacy behavior remains unchanged`, () => {
+    check(`${surface}: read-only malformed UTF-8 is refused without domain writes`, () => {
       const f = fixture(surface, Buffer.from([0xc3, 0x28]));
-      const before = f.domain();
-      success(run(f.project, [surface === 'decisions' ? 'decision' : 'lesson', 'list']));
-      assert.deepStrictEqual(f.domain(), before);
+      const before = f.domain(), bytes = Object.fromEntries(Object.keys(before)
+        .map(name => [name, fs.readFileSync(path.join(f.project, '.leerness', name))]));
+      const result = run(f.project, [surface === 'decisions' ? 'decision' : 'lesson', 'list']);
+      assert.deepStrictEqual(f.domain(), before, 'read refusal changed memory-domain paths, hashes, sizes or mtimes');
+      for (const [name, original] of Object.entries(bytes)) assert.deepStrictEqual(fs.readFileSync(path.join(f.project, '.leerness', name)), original);
+      assert.strictEqual(result.status, 1);
+      const response = JSON.parse(result.stdout);
+      assert.strictEqual(response.ok, false);
+      assert.strictEqual(response.code, 'store_corrupt');
+      assert.match(response.error, /invalid UTF-8/);
+      assert.match(response.error, /no replacement was attempted/);
+    });
+    check(`${surface}: read-only valid BOM and literal replacement character preserve full canonical entries`, () => {
+      const f = fixture(surface, Buffer.from(JSON.stringify('\ufffd').slice(1, -1)), true);
+      const before = f.domain(), expected = f.load(), bytes = Object.fromEntries(Object.keys(before)
+        .map(name => [name, fs.readFileSync(path.join(f.project, '.leerness', name))]));
+      assert.strictEqual(expected.length, 2);
+      assert.strictEqual(expected[0].extension.value, '\ufffd');
+      const result = run(f.project, [surface === 'decisions' ? 'decision' : 'lesson', 'list']);
+      assert.deepStrictEqual(f.domain(), before, 'valid read changed memory-domain paths, hashes, sizes or mtimes');
+      for (const [name, original] of Object.entries(bytes)) assert.deepStrictEqual(fs.readFileSync(path.join(f.project, '.leerness', name)), original);
+      success(result);
+      const response = JSON.parse(result.stdout);
+      assert.strictEqual(response.total, 2);
+      assert.deepStrictEqual(response[surface], expected);
     });
   }
 } catch (error) { results.push({ name: 'setup', ok: false, error: error.message }); }
@@ -176,4 +198,4 @@ const report = { node: process.version, platform: process.platform, temp, passed
   cliCalls: executions.length, sourceBefore, sourceAfter: sourceState(), results, executions };
 fs.writeFileSync(path.join(temp, 'results.json'), JSON.stringify(report, null, 2) + '\n');
 console.log(`memory UTF-8 admission: ${passed}/${results.length} passed; CLI calls: ${executions.length}; Evidence: ${temp}`);
-if (passed !== results.length || results.length !== 81) process.exitCode = 1;
+if (passed !== results.length || results.length !== 83) process.exitCode = 1;

@@ -2,6 +2,8 @@
 
 # leerness
 
+**2.0.0 주요 호환성 변경:** 일반 handoff 조회는 세션을 기록하지 않으며 기본 JSON은 진단 필드를 생략할 수 있고 `doctor.healthy`는 null일 수 있습니다. 기존 1.x 연동은 [전환 안내](docs/lean-readonly-compatibility.md)와 [2.0.0 변경 안내](docs/release-notes-2.0.0.md)를 확인해야 합니다. 소스나 후보 버전은 공개 배포의 증거가 아닙니다. [설치·업데이트·롤백 안내](docs/release-candidate-guide.md)에 따라 승인된 파일과 실제 레지스트리 버전을 확인하세요.
+
 ```
 ██╗     ███████╗███████╗██████╗ ███╗   ██╗███████╗███████╗
 ██║     ██╔════╝██╔════╝██╔══██╗████╗  ██║██╔════╝██╔════╝
@@ -13,7 +15,11 @@
 
 > **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다.
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-102-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-104-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
+
+**2.0.0은 미공개 후보(UNRELEASED)입니다.** 2026-11-08 확인한 공개 릴리스는 **1.36.305**입니다. 소스 버전이나 로컬 tarball은 공개 배포·릴리스 승인의 증거가 아니며, 기존 1.36.305 사용자가 이 후보를 설치할 필요는 없습니다.
+
+2.0 후보는 일반 handoff의 세션 기록·환경 진단을 기본 실행에서 제외하고, 기본 JSON의 진단 필드를 생략할 수 있으며, `doctor.healthy`가 `null`일 수 있습니다. 훅·JSON 연동을 바꾸기 전에 [2.0.0 호환성·업그레이드·롤백 안내](docs/release-notes-2.0.0.md)를 확인하세요. 패키지 설치만으로 기존 지침이나 프로젝트 데이터가 모두 마이그레이션·복원되지는 않습니다.
 
 ---
 
@@ -35,7 +41,7 @@ leerness는 이 문제들을 해결하는 **외부 운영 substrate**입니다. 
 |---|---|
 | 세션 간 맥락·결정·다음 작업 유실 | `task`/`decision`/`lesson`/`plan`/`rule` 메모리를 영속화하고, 세션 시작 시 `handoff` 1콜로 회수 |
 | 증거 없는 "완료" 주장 | `verify-claim --require-evidence`, `lazy detect`, anti-lazy 정책으로 차단 |
-| Claude → Codex → Cursor 교체 시 맥락 소실 | 표준 세션 워크플로(handoff → 작업 → session close)로 에이전트 독립 인수인계 |
+| Claude → Codex → Cursor 교체 시 맥락 소실 | 필요할 때 handoff 조회와 session close 기록을 선택해 에이전트 독립 인수인계 |
 | 하드코딩 시크릿 · 인코딩 깨짐(BOM/CP949) | `scan secrets`, `encoding check` 자동 감지 (CI 게이트) |
 | 워크스페이스 노화(drift)를 에이전트가 모름 | `drift check [--auto-fix]` 점수화 + 자동 회복 |
 | 명세 ↔ 구현 불일치 | `contract verify spec.md impl.js` 함수/필드 일치 검사 |
@@ -51,31 +57,33 @@ MIT, **런타임 의존성 0**, offline-first, 모든 상태가 *당신의* 저�
 
 ## 빠른 시작
 
+아래 설치 예시는 공개 1.36.305를 지정하며 미공개 2.0 후보를 설치하지 않습니다. 버전을 생략한 npm/npx도 공개 패키지를 선택합니다. 이후 명령은 용도별 예시로, 모두 실행해야 하는 기본 절차가 아닙니다. 실제 사용자·프로젝트 규칙을 우선합니다.
+
 ```bash
-# 설치 (런타임 의존성 0 — 추가 패키지 없음)
-npm install -g leerness
+# 공개 버전 설치 (런타임 의존성 0 — 추가 패키지 없음)
+npm install -g leerness@1.36.305
 
 # 프로젝트 초기화 (.leerness/ 거버넌스 문서 + .claude/.cursor/.github 어댑터 생성)
 leerness init .
 
-# 세션 시작 — 이전 맥락/기억/다음 작업을 1콜로 회수
+# 맥락이 필요할 때 조회 — 기록·진단 효과는 선택한 버전에 따라 다름
 leerness handoff .
 
 #   ... 에이전트가 작업 ...
 leerness task add "사용자 인증 API 구현"
 leerness gate .                 # verify + audit + scan secrets + encoding + lazy 통합 게이트
 
-# 세션 종료 — 마감 통계 + 다음 라운드 추천 + 인수인계 문서 자동 생성
+# 마감·인수인계 기록이 필요할 때 명시적으로 실행
 leerness session close .
 ```
 
-기본 `handoff`는 여러 AI 세션에서 동시에 실행해도 Git 추적 하네스 파일을 다시 쓰지 않고, `.leerness/cache/sessions/` 아래 ignored 세션별 레코드만 갱신합니다. 구형 자동화가 `current-state.md`, `environment.json`, `last-handoff.json`, 생성 그래프 projection 갱신을 명시적으로 필요로 할 때만 `handoff --writeback`을 사용하세요.
+2.0 후보의 일반 `handoff`, `handoff --compact`, `handoff --json`은 저장된 맥락을 읽으며 세션·freshness 기록, 환경/provider 목록 조회, 자동 워크스페이스 마이그레이션을 수행하지 않습니다. Leerness 캐시가 없는 첫 조회에도 같지만 실행 시간 보장은 아닙니다. 세션 존재·freshness 영수증이 필요하면 `--record`, 진단은 `--inspect`, 구형 자동화의 상태 갱신은 `--writeback`을 명시하세요. `--no-record`는 기록 요청을 억제합니다. 조회만 한 세션은 다른 세션에게 보이지 않으므로 빈 목록이 다른 작업자의 부재를 뜻하지 않습니다. [정확한 옵션 효과와 읽기 한계](docs/lean-readonly.md)를 확인하세요.
 
-기존 `.harness/` 프로젝트는 그 프로젝트에서 실행하거나 `--path`로 명시한 첫 일반 명령에서 `.leerness/`로 트랜잭션 마이그레이션됩니다. positional 프로젝트 경로는 먼저 `leerness migrate-workspace-dir <path> --dry-run`으로 확인하고, 적용할 때 `--dry-run`을 빼세요. canonical 복사와 해시 검증이 모두 끝난 뒤에만 레거시 원본 트리를 ignored `.leerness-backup/`으로 원자적 이동해 바이트 단위로 보존하고, 기존 `.leerness/` 구조화 상태 substrate도 유지합니다. 구형 관측 run은 `.leerness/cache/agent-runs/`로 분리하고 실제 경로 참조만 갱신합니다. 두 디렉터리에 독립적인 live 상태가 있거나 백업 이름이 이미 존재하거나 링크/junction이 프로젝트 밖을 가리키면 자동 병합하지 않고 차단합니다. 경로처럼 보이는 일반 명령 본문은 마이그레이션 대상으로 해석하지 않습니다.
+기존 `.harness/`는 2.0 후보의 일반 관측 명령에서 그대로 유지되며, 상태를 쓰는 명령은 기존 워크스페이스 전환을 일으킬 수 있습니다. 먼저 원본 전체를 보존한 격리 복사본에서 `leerness migrate-workspace-dir <project-copy> --dry-run`으로 확인하고, 명시적으로 전환하기로 선택한 경우에만 `--dry-run`을 빼세요. canonical 복사와 해시 검증이 모두 끝난 뒤에만 레거시 원본 트리를 ignored `.leerness-backup/`으로 원자적 이동해 바이트 단위로 보존하고, 기존 `.leerness/` 구조화 상태 substrate도 유지합니다. 구형 관측 run은 `.leerness/cache/agent-runs/`로 분리하고 실제 경로 참조만 갱신합니다. 두 디렉터리에 독립적인 live 상태가 있거나 백업 이름이 이미 존재하거나 링크/junction이 프로젝트 밖을 가리키면 자동 병합하지 않고 차단합니다. 경로처럼 보이는 일반 명령 본문은 마이그레이션 대상으로 해석하지 않습니다. 숨김·미추적 파일, 지침과 기존 백업도 보존하세요. 패키지 롤백과 데이터 복원은 별개입니다. [원본 보존·복구 절차](docs/release-notes-2.0.0.md#upgrade-with-originals-preserved)를 따르세요.
 
-Cursor 프로젝트에는 `leerness adapter cursor --path .`를 한 번 실행하세요. 기존 project hook을 보존하면서 로컬 `sessionStart` 브리지를 추가해 Cursor 세션 주소를 `LEERNESS_SESSION_ID`로 전달하므로 Cursor/Claude/Codex 동시 세션을 각각 추적할 수 있습니다. Cursor Cloud는 현재 `sessionStart`/`sessionEnd` hook을 실행하지 않으므로, 그 환경에서는 에이전트가 명시 세션 주소를 전달하거나 직접 `handoff`를 실행해야 합니다.
+Cursor용 `leerness adapter cursor --path .`는 기존 project hook을 보존하면서 호스트 세션 주소를 `LEERNESS_SESSION_ID`로 전달하는 로컬 `sessionStart` 브리지를 생성합니다. 실제 설치한 에디터에서 훅 실행과 규칙 적용 범위를 확인한 뒤 사용하세요. 호스트가 세션 식별자를 제공하지 않으면 명시적으로 전달하고, 2.0 후보에서 영수증이 필요하면 `handoff --record`를 요청하세요.
 
-CLAUDE.md / AGENTS.md 에 `세션 시작 시 leerness handoff .`, `종료 전 leerness session close .` 지침을 추가하면 에이전트가 자동으로 호출합니다.
+2.0 후보의 새 canonical AGENTS/CLAUDE/Cursor/Copilot 지침은 호스트 에이전트의 계획·테스트 도구를 재사용하고, 필요한 Leerness 명령만 선택하도록 안내합니다. 기존 사용자 지침·보존 원문·활성 규칙을 임의로 완화하지 않습니다. 실제 프로젝트 갱신은 복사본에서 검토하고 명시적으로 적용하세요. 진단 통과는 작업 완료나 배포 승인이 아니며, 공개 게시·배포는 실제 소유자 승인 요건을 따릅니다.
 
 ---
 
@@ -119,7 +127,7 @@ leerness verify-claim T-0001 --require-evidence
 - **개발 브랜치의 미게시 추가 기능**: `review-checkpoint assess --stdin` 및 `leerness_review_checkpoint`로 검수 묶음을 읽기 전용 판정합니다. 모델 호출·검수 승인·상태 저장은 하지 않습니다. [입출력 계약](docs/review-checkpoint-transport.md).
 - **미게시 스냅샷 비교**: `review-snapshot candidate|compare --stdin` 및 `leerness_review_snapshot`으로 전달된 스냅샷 결박 정보를 식별·비교합니다. 실제 소스 조회·저장·모델 호출·검수 승인은 하지 않습니다. [입출력 계약](docs/review-snapshot-transport.md).
 
-- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 102개 도구 노출 (verify-claim --all 일괄 검증 포함)
+- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 104개 도구 노출 (verify-claim --all 일괄 검증 포함)
 
 전체 명령은 `leerness commands` 또는 `leerness --help` 로 확인하세요.
 
@@ -129,7 +137,7 @@ leerness verify-claim T-0001 --require-evidence
 
 ## 대표 워크플로
 
-**기본 세션 사이클**
+**필요에 따라 선택하는 세션 인수인계 예시**
 ```bash
 leerness handoff .                          # 이전 맥락 자동 로드
 leerness task add "API 응답 검증 로직 구현"
@@ -160,7 +168,7 @@ leerness agents history --json
 
 **MCP (외부 AI 에이전트에 도구로 노출)**
 ```bash
-leerness mcp serve                          # JSON-RPC over stdio, 102개 도구
+leerness mcp serve                          # JSON-RPC over stdio, 104개 도구
 ```
 
 ---
@@ -176,8 +184,8 @@ Common-Control / Immutable-Record / Generated-View의 제안 경로를 확인할
 - **canonical JSON 단일 진실소스 + 마크다운 projection** — 메모리는 JSON 으로 저장하고 사람이 읽는 `.md` 는 파생물. 파이프(`|`)·개행·백틱·이모지·한글이 마크다운 테이블에서도 안전(셀 이스케이프 + round-trip).
 - **원자적 UTF-8 쓰기** — temp + rename 으로 부분쓰기 손상 방지, BOM 자동 strip.
 - **shell 미경유 MCP** — `mcp serve` 의 도구 호출은 셸을 거치지 않고 인자를 직접 전달(명령 주입 차단).
-- **순수 `--json` / 일관 exit code** — 성공·실패·미존재 경로 모두 파싱 가능한 JSON(`{ok,error,code}`) + 실패 시 exit 1. 자동화·CI 친화.
-- **모듈 분리(DI)** + **내장 자가검증** — `lib/` 순수 유틸/IO/카탈로그 분리, `selftest` 가 코어 함수 무결성을 자가 검증(`doctor` 가 함께 실행하며 케이스 수를 실측 출력). 문서(README) 부재에도 코어 무결성 진단은 통과.
+- **`--json` / 명령별 결과 계약** — 각 명령의 JSON 스키마와 종료 코드를 함께 확인합니다. 기본 handoff의 진단 필드 부재나 `doctor.healthy: null`은 검사 통과가 아닙니다.
+- **모듈 분리(DI)** + **내장 자가검증** — `lib/` 순수 유틸/IO/카탈로그 분리. 2.0 후보의 `doctor`는 기본적으로 환경만 관측하며 `selftest.status: "not_run"`, `selftest.ok: null`, `healthy: null`을 반환합니다. 코어 검사는 `leerness selftest --json`으로 명시하거나 `LEERNESS_DOCTOR_SELFTEST=1`로 doctor에 포함하세요. `doctor --selftest` 옵션은 없습니다.
 
 ---
 

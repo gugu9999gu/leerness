@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// P-0021 compatibility reader: disposable local fixtures, no activation or
-// provider/network calls. Product files and fixture data remain byte-preserved.
+ 
+ 
 const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -31,15 +31,15 @@ const standaloneOutputDirectories = [
   'previews', 'api-skills', 'skills', 'personas', 'skills-export', 'reviews',
   'incidents', 'skills-publish', 'skills-publish-tarball',
 ];
-// Literal top-level stores of existing init-free CLI producers. Classification
-// recognizes only each exact filename and regular-file kind, never its body.
+ 
+ 
 const standaloneOutputFiles = [
   'user-requests.json', 'shell-failures.json', 'platform-constraints.json',
   'wakeup-history.json', 'agent-slash-commands.json', 'environment.json',
   'agent-permissions.json', 'credentials.local.json', 'llm-bench-history.md',
   'glossary.md', 'glossary.json', 'reuse-map.md', 'design-system.md',
   'skill-suggestions.md', 'skill-auto-cache.json', 'provider-probe-cache.json',
-  'orchestrate-log.md', 'feature-graph.md', 'enforce.json', 'agent-reminders.md',
+  'orchestrate-log.md', 'feature-graph.md', 'enforce.json', 'agent-reminders.md', 'loop-ledger.json',
 ];
 let total = 0;
 let failed = 0;
@@ -92,9 +92,9 @@ function snapshot(root, heartbeatLock = null) {
   const rows = [];
   function visit(file, relative) {
     const stat = fs.lstatSync(file, { bigint: true });
-    // The lock worker can touch its owner's mtime while the writer is paused
-    // inside a diagnostic callback. Keep checking its bytes and every other
-    // field; only that concurrent lease timestamp is outside this read check.
+     
+     
+     
     const leaseTimestamp = heartbeatLock && stat.isFile()
       && path.dirname(file) === heartbeatLock
       && /^owner-[a-f0-9]{32}\.json$/.test(path.basename(file));
@@ -113,10 +113,10 @@ function noWrites(fn, heartbeatLock = null) {
   const before = snapshot(arena, heartbeatLock);
   try { return fn(); }
   finally {
-    // T-0343: on Node 18-22, assert.strictEqual drops its message when the strings are longer than util.inspect
-    //   shows ("Values have same structure but are not reference-equal"), and the checks below match the message.
-    //   Compare here and fail with the message on every Node version (an AssertionError built with the strictEqual
-    //   operator drops it too).
+     
+     
+     
+     
     if (snapshot(arena, heartbeatLock) !== before) assert.fail('diagnosis changed fixture bytes or mtimes');
   }
 }
@@ -358,7 +358,7 @@ try {
     check(`exact standalone ${name} file is admitted without reading its contents`, () => {
       const root = directory('producer-file');
       const output = path.join(root, '.leerness', name);
-      write(output, sentinel); // Deliberately not a valid domain document.
+      write(output, sentinel);  
       let reads = 0;
       const forbidBody = original => function (file, ...args) {
         if (String(file) === output) { reads++; throw new Error('Producer contents must not be read'); }
@@ -380,8 +380,8 @@ try {
           write(output, sentinel);
           write(path.join(root, '.leerness', 'private-note'), sentinel);
         } else {
-          // The same unprivileged junction/POSIX symlink fixture as directory
-          // negatives: a reserved filename must never authorize following it.
+           
+           
           const outside = directory('producer-file-link-target');
           write(path.join(outside, 'private-file'), sentinel);
           fs.symlinkSync(outside, output, linkKind);
@@ -417,7 +417,7 @@ try {
       return JSON.parse(result.stdout);
     };
     const ids = [];
-    // Unsupported FTP is rejected before any request; --skeleton exercises the real writer offline.
+     
     for (const direction of ['alpha', 'beta']) {
       const result = run(['add', `ftp://example.test/docs?${direction}`, '--skeleton', '--no-crawl',
         '--direction', `${direction}-direction`]);
@@ -540,8 +540,8 @@ try {
     assert.deepStrictEqual(signature(retained), retainedBefore);
     noWrites(() => expect(root, 'legacy_absent'));
   });
-  // Real fresh-process admissions, not cached readers or no-op controls. These
-  // six local commands never invoke providers, fetch endpoints, or credentials.
+   
+   
   check('standalone requests add preserves the first request on a second admission', () => {
     const root = directory('requests-round-trip');
     const file = path.join(root, '.leerness', 'user-requests.json');
@@ -563,7 +563,7 @@ try {
   check('standalone shell failure recording preserves the first entry on a second admission', () => {
     const root = directory('shell-failures-round-trip');
     const file = path.join(root, '.leerness', 'shell-failures.json');
-    // --record stores command text; it does not execute that command.
+     
     standaloneCli(root, ['shell-guard', '--record', '--cmd', 'echo compat-first', '--shell', 'bash', '--exit', '1', '--json']);
     const first = JSON.parse(fs.readFileSync(file, 'utf8')).failures;
     assert.strictEqual(first.length, 1);
@@ -982,13 +982,14 @@ try {
     assert.deepStrictEqual(signature(retained), retainedBefore);
     noWrites(() => expect(root, 'legacy_absent'));
   });
-  check('an operation can create its init temporary file without reclassifying its contents', () => {
+  check('init marker temporaries remain admissible on a later operation without being deleted', () => {
     const root = directory('init-temporary');
     const reader = R.createRuntimeCompatibilityReader(root);
     const temporary = path.join(root, '.leerness', `HARNESS_VERSION.tmp-${process.pid}-1`);
     write(temporary, '1\n');
     assert.strictEqual(reader().writeDisposition, 'allowed');
-    noWrites(() => blocked(root, 'workspace_ambiguous'));
+    noWrites(() => expect(root, 'legacy_absent'));
+    assert.strictEqual(fs.readFileSync(temporary, 'utf8'), '1\n');
     fs.renameSync(temporary, path.join(root, '.leerness', 'HARNESS_VERSION'));
     noWrites(() => expect(root, 'legacy_absent'));
   });
@@ -1208,6 +1209,81 @@ try {
     assert.strictEqual(actualGit[0].options.maxBuffer, 65536);
     assert(actualGit[0].args.includes('--no-optional-locks'));
     assert(!Object.keys(actualGit[0].options.env).some(G._shouldDrop));
+  });
+  if (process.platform === 'win32') check('Windows long canonical directories preserve identity and fail closed', () => {
+    const memory = require('../lib/memory-input');
+    const parents = require('../lib/memory-parent');
+    const snapshots = require('../lib/stored-read-snapshot');
+    let root = directory('long-canonical');
+    while (root.length + 62 < 270) root = path.join(root, 'x'.repeat(60));
+    root = path.join(root, 'p'.repeat(270 - root.length - 1));
+    assert.strictEqual(root.length, 270);
+    fs.mkdirSync(root, { recursive: true });
+    const expected = fs.realpathSync.native(path.toNamespacedPath(root));
+    const identity = file => {
+      const stat = fs.statSync(file, { bigint: true });
+      return [stat.dev, stat.ino, stat.mode, stat.nlink];
+    };
+    const shortAlias = path.join(arena, 'long-canonical-alias');
+    const longAlias = path.join(root, 'alias');
+    fs.symlinkSync(root, shortAlias, linkKind);
+    fs.symlinkSync(root, longAlias, linkKind);
+    const file = path.join(root, 'ordinary-file');
+    write(file, sentinel);
+    const absentFile = path.join(root, 'absent-file');
+    const stored = snapshots.createSnapshot(root);
+    const aliasStored = snapshots.createSnapshot(shortAlias);
+    let present;
+    noWrites(() => {
+      assert.strictEqual(expected, root);
+      for (const input of [root, root.toLowerCase(), shortAlias, longAlias]) {
+        assert.strictEqual(SG.canonicalDirectory(input), expected);
+        assert.deepStrictEqual(identity(SG.canonicalDirectory(input)), identity(root));
+      }
+      assert.throws(() => SG.canonicalDirectory(path.join(root, 'missing')), { code: 'path_not_found' });
+      assert.throws(() => SG.canonicalDirectory(file), { code: 'path_not_directory' });
+      const absent = memory.captureCheckedFileInput(absentFile);
+      assert.strictEqual(absent.exists, false);
+      memory.assertCheckedFileCurrent(absent, absentFile);
+      present = memory.captureCheckedFileInput(file);
+      assert.deepStrictEqual(present.bytes, Buffer.from(sentinel));
+      memory.assertCheckedFileCurrent(present, file);
+      assert.strictEqual(parents.resolveMemoryParent(file), file);
+      assert.deepStrictEqual(identity(parents.resolveMemoryParent(file)), identity(file));
+      assert.throws(() => memory.captureCheckedFileInput(path.join(longAlias, 'ordinary-file')), { code: 'E_STORE_INVALID' });
+      stored.capture(file);
+      stored.capture(absentFile);
+      stored.verify();
+      aliasStored.verify();
+      for (const code of ['EACCES', 'EPERM', 'EIO']) {
+        const calls = [];
+        withMethod(fs.realpathSync, 'native', () => input => {
+          calls.push(input);
+          throw Object.assign(new Error(sentinel), { code });
+        }, () => {
+          assert.throws(() => SG.canonicalDirectory(root), { code: 'path_unreadable' });
+          assert.throws(() => memory.captureCheckedFileInput(file), { code: 'E_STORE_UNREADABLE' });
+          assert.throws(() => parents.resolveMemoryParent(file), { code });
+          assert.throws(() => stored.verify(), { code: 'E_STORE_CHANGED' });
+        });
+        assert.deepStrictEqual(calls, [root, root, file, root].map(value => path.toNamespacedPath(value)));
+      }
+    });
+    fs.renameSync(file, `${file}-retained`);
+    write(file, sentinel);
+    noWrites(() => {
+      assert.throws(() => memory.assertCheckedFileCurrent(present, file), { code: 'E_STORE_CHANGED' });
+      assert.throws(() => stored.verify(), { code: 'E_STORE_CHANGED' });
+    });
+    const targetB = directory('long-canonical-other');
+    fs.renameSync(shortAlias, `${shortAlias}-retained`);
+    fs.symlinkSync(targetB, shortAlias, linkKind);
+    noWrites(() => {
+      assert.strictEqual(SG.canonicalDirectory(shortAlias), SG.canonicalDirectory(targetB));
+      assert.deepStrictEqual(identity(SG.canonicalDirectory(shortAlias)), identity(targetB));
+      assert.notDeepStrictEqual(identity(SG.canonicalDirectory(shortAlias)), identity(root));
+      assert.throws(() => aliasStored.verify(), { code: 'E_STORE_CHANGED' });
+    });
   });
 } catch (error) {
   check('fixture setup and probe runner complete', () => { throw error; });

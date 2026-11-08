@@ -1,11 +1,11 @@
 'use strict';
-// T-0350: a decisions or lessons restore with an explicit write policy must work when the project root is spelled
-// differently from its real path. Until 1.36.297 the footprint capture named its snapshots under the realpath.native
-// workspace while admission and preparation named the same files under the caller's spelling, so
-// assertCheckedFileCurrent refused every such restore with "snapshot does not belong to this file".
-// Spellings: as created, and on Windows a lowercase drive letter, a junction and the 8.3 short name (reported as
-// skipped when the volume has no short names); elsewhere a symlink. Each restore must leave the same files as the
-// restore through the real path. One MCP restore per surface uses a non-canonical spelling too.
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const S = require('./memory-write-budget-support');
 const { assert, fs, path, cp, arena, entry, test, finish, fixture, row, options } = S;
 const { renderLosslessArchiveEntries } = require('../lib/memory-archive');
@@ -18,10 +18,10 @@ const win = process.platform === 'win32';
 
 const make = s => fixture(s,[row(s,'base')],'\nPRIVATE suffix\n',
   { [s+'.archive.md']: '# Archive\n\n## 제거 2026-09-01 (target: "recover")\n'+renderLosslessArchiveEntries(s,[row(s,'revive')])+'\n' });
-// What a restore leaves, read through the real path.
+ 
 const state = (p, s) => ({ rows: JSON.parse(fs.readFileSync(path.join(p,'.leerness',s+'.json'),'utf8')),
   projection: fs.readFileSync(path.join(p,'.leerness',s+'.md'),'utf8'), archive: fs.readFileSync(path.join(p,'.leerness',s+'.archive.md'),'utf8') });
-// The 8.3 name of an existing folder, or null when the volume gives none.
+ 
 function shortName(p) {
   const r = cp.spawnSync(process.env.ComSpec || 'cmd.exe', ['/d','/s','/c',`"for %I in ("${p}") do @echo %~sI"`],
     { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true });
@@ -52,8 +52,8 @@ function restoreMcp(spelled, s) {
   assert(!r.error && !r.signal, r.error && r.error.message); assert.equal(r.status,0,r.stderr);
   return JSON.parse(r.stdout.trim().split(/\r?\n/)[0]);
 }
-// T-0355: a spelling this machine cannot give counts as absent: a test arena on a UNC path has no drive letter, and
-// a link may be refused there. The MCP and resolve-check tests take the first non-canonical spelling that exists.
+ 
+ 
 const trySpell = (spell, p) => { try { return spell(p); } catch { return null; } };
 function alternate(p) {
   for (const [name, spell] of spellings.slice(1)) { const spelled = trySpell(spell, p); if (spelled && spelled !== p) return [name, spelled]; }
@@ -77,7 +77,7 @@ for (const s of ['decisions','lessons']) {
   }
   const pm = make(s), alt = alternate(pm);
   if (!alt) { console.log(`SKIP ${s}: MCP policy restore (this volume or path gives no non-canonical spelling)`); continue; }
-  const [mcpName, spelled] = alt; // a lowercase drive letter on Windows when there is one, a symlink elsewhere
+  const [mcpName, spelled] = alt;  
   test(`${s}: MCP policy restore through ${mcpName}`, () => {
     const p = pm;
     const reply = restoreMcp(spelled, s);
@@ -85,9 +85,9 @@ for (const s of ['decisions','lessons']) {
     assert.deepEqual(state(p, s).rows.map(entry => entry.title || entry.text), ['base','revive']);
   });
 }
-// The capture names files under the given spelling only after that spelling's workspace resolves to the resolved
-// one. Make it resolve elsewhere (as a swapped link would between the two resolutions) and the capture must refuse
-// before reading a file; without the check the files of the other folder would be measured as this project's.
+ 
+ 
+ 
 const resolveCheckProject = make('decisions'), resolveCheckAlternate = alternate(resolveCheckProject);
 if (!resolveCheckAlternate) console.log('SKIP a spelled workspace that resolves to another folder (no non-canonical spelling here)');
 else test('a spelled workspace that resolves to another folder is refused before any file is read', () => {

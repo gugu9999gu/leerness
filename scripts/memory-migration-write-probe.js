@@ -89,4 +89,42 @@ test('enforced read-only policy rejects a confirmed mutation', () => {
   assert.equal(_requiredTier('memory-migration rollback lessons ; git push'), 'git-write');
   assert.equal(_requiredTier('memory-migration prepare decisions ; echo finished'), 'project-write');
 });
+// Only apply and rollback change active files. A killed prepare touched nothing active, so its lock must stay reclaimable: the lock
+// options the transport passes are what decide that, and a stub that stops before the callback shows them for each action.
+for (const action of ['prepare', 'apply', 'rollback']) test(`the ${action} lock is marked kept for recovery only for apply and rollback`, () => {
+  const { runMigration } = require('../lib/memory-migration-write'), root = fixture('decisions'), seen = [];
+  const out = runMigration(root, action, 'decisions', action === 'prepare' ? undefined : 'a'.repeat(32),
+    { authorize: () => true, withLock: (target, fn, options) => { seen.push({ target: path.basename(target), options }); return 'stopped before the callback'; } });
+  assert.equal(out, 'stopped before the callback'); assert.equal(seen.length, 1); assert.equal(seen[0].target, 'decisions.json');
+  assert.deepStrictEqual(seen[0].options, action === 'prepare' ? {} : { keepOnCrash: 'memory-migration' });
+});
+for (const action of ['apply', 'rollback']) test(`a killed ${action} keeps its lock for a person: the owner record carries the marker, writers are refused, verify reports it`, () => {
+  // A prepared bundle looks the same whether or not apply began, so only the marker can keep this lock after a kill.
+  const { withStateLock } = require('../lib/state-lock'), { withErrorLanguage } = require('../lib/error-language');
+  const surface = 'decisions', root = fixture(surface), p = action === 'apply' ? prepared(root, surface) : applied(root, surface);
+  const killer = S.hook(`const path=require('path'),out=require(${S.modulePath('memory-output')}),original=out.publishMemoryOutput;
+out.publishMemoryOutput=function(t,f,b){if(path.basename(String(f))==='decisions.md')process.kill(process.pid,'SIGKILL');return original.apply(this,arguments);};`);
+  const active = () => ({ json: fs.existsSync(file(root, surface, '.json')) ? fs.readFileSync(file(root, surface, '.json')) : null, md: fs.readFileSync(file(root, surface, '.md')) });
+  const before = active();
+  const run = S.cp.spawnSync(process.execPath, [...killer, S.entry, 'memory-migration', action, surface, p.operationId, '--confirm', '--path', root, '--json'],
+    { cwd: root, encoding: 'utf8', timeout: 25000, windowsHide: true, env: { ...process.env, LEERNESS_NO_AUTOCHCP: '1' } });
+  assert.equal(run.error, undefined); assert.notEqual(run.status, 0, 'the migration must have been killed: ' + run.stdout + run.stderr); assert.equal(run.stdout.trim(), '');
+  const after = active();
+  assert(after.md.equals(before.md), 'the kill came before the projection was written');
+  if (action === 'apply') { assert.equal(before.json, null); assert(after.json && after.json.length > 0, 'apply had already created the canonical file'); }
+  else assert(after.json.equals(before.json), 'rollback was stopped before it changed anything');
+  const lock = file(root, surface, '.json') + '.lock', [ownerName] = fs.readdirSync(lock), ownerFile = path.join(lock, ownerName);
+  const owner = JSON.parse(fs.readFileSync(ownerFile, 'utf8'));
+  assert.equal(owner.pid, run.pid); assert.equal(owner.keepOnCrash, 'memory-migration');
+  const old = new Date(Date.now() - 600000); fs.utimesSync(ownerFile, old, old); fs.utimesSync(lock, old, old);   // old enough that freshness is not the reason
+  let failure = null;
+  try { withErrorLanguage('en', () => withStateLock(file(root, surface, '.json'), () => assert.fail('entered a lock that must stay'), { maxWaitMs: 1500 })); } catch (e) { failure = e; }
+  assert(failure && failure.code === 'E_LOCK_TIMEOUT', failure && failure.stack); assert.equal(failure.lockState, 'kept-for-recovery');
+  assert(/A memory migration stopped partway/.test(failure.message) && /memory-migration inspect/.test(failure.message), failure.message);
+  assert(fs.existsSync(ownerFile), 'the owner record is never removed automatically');
+  const verify = command(root, ['verify', root, '--json', '--language', 'en']), data = JSON.parse(verify.stdout);
+  assert.equal(verify.status, 1, verify.stdout); assert.equal(data.ok, false);
+  assert(data.locks.stuck.some(x => x.reason === 'kept-for-recovery' && x.path === '.leerness/decisions.json.lock' && /memory-migration inspect/.test(x.action)), verify.stdout);
+  assert(data.failures.some(f => /^Stuck lock: \.leerness\/decisions\.json\.lock \(kept-for-recovery\)\./.test(f)), verify.stdout);
+});
 S.finish('memory migration write');

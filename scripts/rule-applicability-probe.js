@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Offline advisory contract probe. Owned fixtures are retained with byte/mtime
-// evidence; passing an assessment never constitutes verification or approval.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

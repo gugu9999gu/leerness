@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Windows/Linux 플랫폼 경계의 빠른 회귀:
-// 1) selftest가 Windows 8.3(`RUNNER~1`) 실행 경로를 허용하는지,
-// 2) 공유 hooksPath의 같은 pre-commit이 현재 sibling worktree의 handoff를 보는지.
-// 전체 e2e의 같은 검증은 Windows에서 80분가량 걸리므로 CI fast 단계에서 먼저 실행한다.
+ 
+ 
+ 
+ 
 
 const fs = require('fs');
 const os = require('os');
@@ -22,8 +22,8 @@ const env = Object.assign({}, process.env, {
   LEERNESS_OFFLINE: '1',
   LEERNESS_NO_PROMPT: '1',
   LEERNESS_NO_STALE_CHECK: '1',
-  // 일부 POSIX 셸은 CDPATH를 사용한 cd 성공 경로를 stdout에 출력한다. 훅의 명령 치환이
-  // 그 출력에 오염되지 않는지 실제로 검증하도록 일부러 비어 있지 않게 둔다.
+   
+   
   CDPATH: '.',
 });
 for (const key of [
@@ -67,9 +67,9 @@ let failed = null;
 let cleanupError = null;
 const debug = {};
 try {
-  // This fast check needs one pure Windows path case. The full 355-case
-  // selftest still runs explicitly later in test:core and npm test; repeating
-  // it here delayed this smoke check past its 240-second child deadline.
+   
+   
+   
   const pathCases = require(CLI)._selfTestCases().filter(row => /Windows 8\.3 tilde/.test(row.name || ''));
   let pathCase = null;
   if (pathCases.length === 1) {
@@ -92,17 +92,19 @@ try {
   fs.writeFileSync(path.join(main, 'seed.txt'), 'seed\n');
   setup.push(git(main, ['add', '-A']), git(main, ['commit', '-qm', 'seed']));
   const initMain = leerness(main, ['init', main, '--yes', '--minimal', '--no-enforce', '--no-stale-check']);
-  const mainHandoff = leerness(main, ['handoff', main]);
+  const mainHandoff = leerness(main, ['handoff', main, '--record']);
+  const mainReceipts = path.join(main, '.leerness', 'cache', 'handoffs');
+  const mainHasReceipt = fs.existsSync(mainReceipts) && fs.readdirSync(mainReceipts).length > 0;
   const addWorktree = git(main, ['worktree', 'add', '-qb', 'sibling', sibling]);
   const initSibling = leerness(sibling, ['init', sibling, '--yes', '--minimal', '--no-enforce', '--no-stale-check']);
   for (const marker of [path.join(sibling, '.leerness', 'last-handoff.json'), path.join(sibling, '.leerness', 'cache', 'handoffs')]) {
     try { fs.rmSync(marker, { recursive: true, force: true }); } catch {}
   }
   debug.fixture = {
-    setup: setup.map(output), initMain: output(initMain), mainHandoff: output(mainHandoff),
+    setup: setup.map(output), initMain: output(initMain), mainHandoff: output(mainHandoff), mainHasReceipt,
     addWorktree: output(addWorktree), initSibling: output(initSibling),
   };
-  if (!failed && (setup.some(r => r.status !== 0) || initMain.status !== 0 || mainHandoff.status !== 0
+  if (!failed && (setup.some(r => r.status !== 0) || initMain.status !== 0 || mainHandoff.status !== 0 || !mainHasReceipt
       || addWorktree.status !== 0 || initSibling.status !== 0)) {
     failed = '공유 훅 worktree 픽스처 생성 실패';
   }
@@ -138,20 +140,24 @@ try {
     failed = '공유 hooksPath를 두 worktree가 함께 본다는 설치 계약 실패';
   }
 
-  // main에는 fresh handoff가 있지만 sibling에는 없다. 공유 훅이 설치한 main 상태를 빌려보지 않고
-  // 현재 commit 대상의 toplevel을 계산해야 두 호출 모두 sibling에서 차단된다.
+   
+   
   const directBefore = git(sibling, ['hook', 'run', 'pre-commit']);
   fs.writeFileSync(path.join(sibling, 'platform-probe.txt'), 'probe\n');
   const staged = git(sibling, ['add', '-A']);
   const commitBefore = git(sibling, ['commit', '-m', 'must-block-before-sibling-handoff']);
-  const siblingHandoff = leerness(sibling, ['handoff', sibling]);
+  const siblingRead = leerness(sibling, ['handoff', sibling]);
+  const directAfterRead = git(sibling, ['hook', 'run', 'pre-commit']);
+  const siblingHandoff = leerness(sibling, ['handoff', sibling, '--record']);
   const directAfter = git(sibling, ['hook', 'run', 'pre-commit']);
   const commitAfter = git(sibling, ['commit', '-m', 'passes-after-sibling-handoff']);
   debug.lifecycle = {
     directBefore: output(directBefore), staged: output(staged), commitBefore: output(commitBefore),
+    siblingRead: output(siblingRead), directAfterRead: output(directAfterRead),
     siblingHandoff: output(siblingHandoff), directAfter: output(directAfter), commitAfter: output(commitAfter),
   };
   if (!failed && (directBefore.status === 0 || staged.status !== 0 || commitBefore.status === 0
+      || siblingRead.status !== 0 || directAfterRead.status === 0
       || siblingHandoff.status !== 0 || directAfter.status !== 0 || commitAfter.status !== 0)) {
     failed = '공유 훅이 sibling handoff 전 차단/후 통과 수명주기를 지키지 않음';
   }

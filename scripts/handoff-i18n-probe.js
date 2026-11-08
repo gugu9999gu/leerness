@@ -1,23 +1,23 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0317: English handoff output carries no Korean-only tool text. An English project on Korean Windows saw the
-// terminal-encoding notice, skill suggestions, the official-skill cache note, next-step suggestions and the compact
-// "다음:" line in Korean. Every line the tool writes on the handoff paths now goes through a language helper whose
-// first argument is the unchanged Korean text. Document bodies and user data are shown as stored, so the checks
-// ignore lines that appear verbatim in the project's documents.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const HANGUL = /\p{Script=Hangul}/u;
 
-// ---- static guard: Korean string literals on the handoff paths must be the Korean argument of a language helper
+ 
 const HELPERS = new Set(['_ht', 't', '_t', '_bt']);
 const FUNCTIONS = ['handoff', 'handoffCmd', '_handoffWorkspace', 'hookSessionStartCmd', 'pulseCmd', '_emitHandoffVersionSkew',
-  '_suggestNextActions', '_detectAbnormalShutdown', '_sessionSignalFlags', '_sessionSignal'];
-// Persisted file content outside this surface: the drift reminder body is written to .leerness/agent-reminders.md,
-// and the headline label is pinned by a selftest source check in its original ternary form.
+  '_suggestNextActions', '_detectAbnormalShutdown', '_sessionSignalFlags', '_sessionSignalParts', '_sessionSignal'];
+ 
+ 
 const ALLOWED = ['`# 메인 에이전트용 자동 reminder', "'헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215/220/223/226)'"];
-// Literals are [start, end, expressionSpans]; a template's ${ } code is not literal text.
+ 
 function lexLiterals(src) {
   const lits = [], masks = []; let i = 0, last = '';
   const str = q => { const s = i; i++; while (i < src.length && src[i] !== q) { if (src[i] === '\\') i++; i++; } i++; lits.push([s, i, []]); last = 'str'; };
@@ -49,11 +49,11 @@ function lexLiterals(src) {
   while (i < src.length) step(false);
   return { lits, masks };
 }
-// Returns the Korean literals that are neither a helper's first argument nor inside one, nor allow-listed.
+ 
 function unlocalizedKorean(src, ranges) {
   const { lits, masks } = lexLiterals(src);
   const inExpr = (exprs, k) => exprs.some(([a, b]) => k >= a && k < b);
-  // Blank literal text and comments/regexes; keep ${ } code so helper calls inside a template stay visible.
+   
   const chars = src.split('');
   for (const [s, e, exprs = []] of [...lits, ...masks]) for (let k = s; k < e; k++) if (chars[k] !== '\n' && !inExpr(exprs, k)) chars[k] = ' ';
   const masked = chars.join('');
@@ -73,7 +73,7 @@ function unlocalizedKorean(src, ranges) {
     }
     return false;
   };
-  // A helper's Korean argument covers everything inside it, including nested literals; so does an allow-listed literal.
+   
   const ok = lits.filter(([s]) => firstArgOfHelper(s) || ALLOWED.some(a => src.startsWith(a, s)));
   return lits.filter(l => inRange(l[0]) && HANGUL.test(textOf(l)) && !ok.some(([s2, e2]) => l[0] >= s2 && l[1] <= e2))
     .map(([s, e]) => ({ line: src.slice(0, s).split('\n').length, text: src.slice(s, Math.min(e, s + 90)) }));
@@ -88,7 +88,11 @@ function functionRanges(src, names) {
   });
 }
 
-// ---- runtime fixtures
+ 
+function copyWithoutFixtureRoot(value, root) {
+  return String(value).split(root).join('<fixture-root>');
+}
+
 function main() {
   const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-handoff-i18n-'));
   const env = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1',
@@ -108,7 +112,7 @@ function main() {
     must(run(dir, ['init', dir, '--yes', '--language', lang, '--no-setup-agents', '--no-mcp', ...(mode === 'minimal' ? ['--mode', 'minimal'] : [])], { LEERNESS_LANG: lang }), 'init');
     return dir;
   };
-  // Lines copied from the project's documents are data; so is the text a fixture wrote itself.
+   
   const docLines = dir => {
     const set = new Set();
     const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name);
@@ -118,14 +122,17 @@ function main() {
   };
   const koreanLines = (out, dir) => { const data = docLines(dir); return String(out).split(/\r?\n/).filter(l => HANGUL.test(l) && !data.has(l.trim())); };
   const jsonKorean = out => { const j = JSON.parse(out); delete j.files; const hits = []; JSON.stringify(j, (k, v) => { if (typeof v === 'string' && HANGUL.test(v)) hits.push(k + ': ' + v.slice(0, 80)); return v; }); return hits; };
-  const handoff = (dir, lang, args = [], pre) => must(run(dir, ['handoff', dir, '--no-record', ...args], { LEERNESS_LANG: lang }, pre), 'handoff ' + args.join(' '));
+  const handoff = (dir, lang, args = [], pre) => must(run(dir, ['handoff', dir, '--no-record', ...(args.includes('--compact') ? [] : ['--inspect']), ...args], { LEERNESS_LANG: lang }, pre), 'handoff ' + args.join(' '));
 
   test('static guard: every Korean literal on the handoff paths is the Korean argument of a language helper', () => {
     const src = fs.readFileSync(CLI, 'utf8');
     const bad = unlocalizedKorean(src, functionRanges(src, FUNCTIONS));
     assert.deepStrictEqual(bad, [], bad.map(b => `${b.line}: ${b.text}`).join('\n'));
-    // Control: the guard sees a bare Korean literal, a Korean second argument and a bare Korean literal inside a
-    // template expression; it accepts a helper call nested in a template, and ignores comments and regexes.
+    const direct = fs.readFileSync(path.resolve(__dirname, '../lib/handoff-read.js'), 'utf8');
+    const directBad = unlocalizedKorean(direct, [[0, direct.length]]);
+    assert.deepStrictEqual(directBad, [], directBad.map(b => `${b.line}: ${b.text}`).join('\n'));
+     
+     
     const sample = "function handoff(root) {\n  log(`세션 ${x}`);\n  log(_ht(`세션 ${x}`, `session ${x}`));\n  log(_ht('en first', '한국어'));\n"
       + "  log(`a ${y ? '가' : 'b'}`);\n  log(`n ${t('회', 'x')}`);\n  // 주석 한글\n  const r = /[가-힣]+/;\n}\n";
     const found = unlocalizedKorean(sample, functionRanges(sample, ['handoff'])).map(b => b.line);
@@ -154,7 +161,7 @@ function main() {
       assert.match(full, /no official skill catalog cache/);
       assert.match(handoff(dir, 'en', ['--compact']), /^Next: T-\d+ \[in-progress\]/m);
     }
-    // Short session flags (compact and hook) follow the project language too; an invalid explicit key raises one.
+     
     const dir = project('en', 'minimal'), bad = { LEERNESS_LANG: 'en', LEERNESS_SESSION_ID: 'bad key!' };
     const compact = must(run(dir, ['handoff', dir, '--no-record', '--compact'], bad), 'compact flags');
     const hook = JSON.parse(must(run(dir, ['hook', 'session-start', dir], bad), 'hook flags')).hookSpecificOutput.additionalContext;
@@ -165,7 +172,7 @@ function main() {
     assert.match(must(run(dir, ['handoff', dir, '--no-record', '--compact'], { ...bad, LEERNESS_LANG: 'ko' }), 'compact ko'), /LEERNESS_SESSION_ID 형식 오류\("bad key!"\) — 무시됨/);
   });
 
-  // One project that raises most conditional sections at once. Fixture text is English data.
+   
   const kitchenSink = lang => {
     const dir = project(lang);
     const L = { LEERNESS_LANG: lang };
@@ -234,8 +241,8 @@ function main() {
     assert.deepStrictEqual(missingEn, [], 'English sections missing (fixture or render failure):\n' + en);
     assert.deepStrictEqual(missingKo, [], 'Korean sections missing:\n' + ko);
     assert.deepStrictEqual(koreanLines(en, enSink), [], en);
-    assert.deepStrictEqual(jsonKorean(must(run(enSink, ['handoff', enSink, '--json', '--no-record'], { LEERNESS_LANG: 'en' }), 'json')), []);
-    const koJson = JSON.parse(must(run(koSink, ['handoff', koSink, '--json', '--no-record'], { LEERNESS_LANG: 'ko' }), 'json ko'));
+    assert.deepStrictEqual(jsonKorean(must(run(enSink, ['handoff', enSink, '--json', '--no-record', '--inspect'], { LEERNESS_LANG: 'en' }), 'json')), []);
+    const koJson = JSON.parse(must(run(koSink, ['handoff', koSink, '--json', '--no-record', '--inspect'], { LEERNESS_LANG: 'ko' }), 'json ko'));
     assert.ok(koJson.abnormalShutdown.resumeGuide.includes('1. leerness handoff . — 현재 상태 종합 확인'), JSON.stringify(koJson.abnormalShutdown));
   });
 
@@ -248,8 +255,8 @@ function main() {
         + " return { pid: 0, status: 0, signal: null, stdout: enc ? out : Buffer.from(out), stderr: enc ? '' : Buffer.alloc(0), output: [null, out, ''] }; } return orig.apply(this, arguments); };\n");
     } else extra = { LANG: 'C', LC_ALL: '', LC_CTYPE: '' };
     const dirEn = project('en', 'minimal'), dirKo = project('ko', 'minimal');
-    const en = must(run(dirEn, ['handoff', dirEn, '--no-record'], { LEERNESS_LANG: 'en', ...extra }, pre), 'handoff en');
-    const ko = must(run(dirKo, ['handoff', dirKo, '--no-record'], { LEERNESS_LANG: 'ko', ...extra }, pre), 'handoff ko');
+    const en = must(run(dirEn, ['handoff', dirEn, '--no-record', '--inspect'], { LEERNESS_LANG: 'en', ...extra }, pre), 'handoff en');
+    const ko = must(run(dirKo, ['handoff', dirKo, '--no-record', '--inspect'], { LEERNESS_LANG: 'ko', ...extra }, pre), 'handoff ko');
     if (process.platform === 'win32') {
       assert.match(en, /## ⚠ Terminal encoding — Korean Windows \+ CP949 \(UR-0018\)/);
       assert.match(ko, /## ⚠ 터미널 인코딩 — 한국어 Windows \+ CP949 \(1\.9\.249, UR-0018\)/);
@@ -260,29 +267,39 @@ function main() {
     assert.deepStrictEqual(koreanLines(en, dirEn), [], en);
   });
 
+  test('known Unicode fixture paths are data but Korean interface copy still fails', () => {
+    const root = path.join(os.tmpdir(), 'fixture-é-한글');
+    const message = `Ignoring --include: ${root}/plain (no .leerness directory)`;
+    assert.ok(HANGUL.test(message));
+    assert.ok(!HANGUL.test(copyWithoutFixtureRoot(message, root)));
+    assert.ok(HANGUL.test(copyWithoutFixtureRoot(message + '\n잘못된 안내', root)));
+    assert.ok(HANGUL.test(copyWithoutFixtureRoot('unrelated 한글', root)));
+    assert.strictEqual(copyWithoutFixtureRoot('English interface copy', root), 'English interface copy');
+  });
+
   test('workspace handoff, uninitialized directory, missing path and version skew are English in English mode', () => {
     const a = project('en'), b = project('en');
     const base = path.join(arena, 'workspace'); fs.mkdirSync(base);
     const plain = path.join(arena, 'plain-dir'); fs.mkdirSync(plain);
     const ignored = must(run(base, ['handoff', base, '--include', `${a},${plain}`], { LEERNESS_LANG: 'en' }), 'workspace ignored');
-    assert.match(ignored, /Ignoring --include: .*\(no \.leerness directory\)/); assert.ok(!ignored.split(/\r?\n/).some(l => HANGUL.test(l)), ignored);
+    assert.match(ignored, /Ignoring --include: .*\(no \.leerness directory\)/); assert.ok(ignored.includes(plain)); assert.ok(!copyWithoutFixtureRoot(ignored, arena).split(/\r?\n/).some(l => HANGUL.test(l)), ignored);
     for (const args of [['--include', `${a},${b}`], ['--include', `${a},${b}`, '--compact'], ['--include', `${a},${b}`, '--since', '24h']]) {
       const out = must(run(base, ['handoff', base, ...args], { LEERNESS_LANG: 'en' }), 'workspace ' + args.join(' '));
-      assert.deepStrictEqual(out.split(/\r?\n/).filter(l => HANGUL.test(l)), [], out);
+      assert.deepStrictEqual(copyWithoutFixtureRoot(out, arena).split(/\r?\n/).filter(l => HANGUL.test(l)), [], out);
     }
     assert.match(must(run(base, ['handoff', base, '--include', `${a},${b}`], { LEERNESS_LANG: 'en' }), 'ws'), /## 📊 Workspace totals/);
     assert.match(must(run(base, ['handoff', base, '--include', `${a},${b}`], { LEERNESS_LANG: 'ko' }), 'ws ko'), /## 📊 워크스페이스 총합/);
     const bare = path.join(arena, 'bare'); fs.mkdirSync(bare);
     const u = must(run(bare, ['handoff', bare, '--no-record'], { LEERNESS_LANG: 'en' }), 'uninitialized');
     assert.match(u, /leerness is not initialized in this directory/); assert.match(u, /--yes --language en/);
-    assert.ok(!u.split(/\r?\n/).some(l => HANGUL.test(l)), u);
+    assert.ok(u.includes(bare)); assert.ok(!copyWithoutFixtureRoot(u, arena).split(/\r?\n/).some(l => HANGUL.test(l)), u);
     const uk = must(run(bare, ['handoff', bare, '--no-record'], { LEERNESS_LANG: 'ko' }), 'uninitialized ko');
     assert.match(uk, /leerness init 미실행 디렉토리/); assert.match(uk, /--yes --language ko/);
     const missing = run(arena, ['handoff', path.join(arena, 'nope'), '--json'], { LEERNESS_LANG: 'en' });
     assert.notStrictEqual(missing.status, 0); assert.match(missing.stdout + missing.stderr, /path not found or not a directory/);
     fs.writeFileSync(path.join(a, '.leerness', 'HARNESS_VERSION'), '9.9.9\n');
     const skew = handoff(a, 'en', ['--compact']);
-    assert.match(skew, /version mismatch: CLI v[\d.]+ < project harness v9\.9\.9/); assert.ok(!skew.split(/\r?\n/).some(l => HANGUL.test(l)), skew);
+    assert.match(skew, /version mismatch: CLI v[\d.]+ < project harness v9\.9\.9/); assert.ok(!copyWithoutFixtureRoot(skew, arena).split(/\r?\n/).some(l => HANGUL.test(l)), skew);
   });
 
   console.log(`Tests: ${passed}/${passed + failed} passed`);

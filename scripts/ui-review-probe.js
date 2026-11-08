@@ -62,8 +62,8 @@ test('fixed packet requests every subtype without granting approval', () => {
   assert.deepEqual(p.taskCoverage[0].requiredSubtypes, SUBTYPES); assert.equal(Object.keys(p.questions).length, 5); noAuthority(p);
 });
 test('review questions cover every visible string and name the legitimate case', () => {
-  // The scanner cannot see requirement, criterion or narration wording, so the reviewer must read
-  // all copy, not only scanner candidates, and must know what is not a finding.
+   
+   
   const p = packet(fixture());
   assert.match(p.questions.SPEC_TO_COPY, /every visible string and accessible name, not only scanner candidates/);
   assert.match(p.questions.SPEC_TO_COPY, /speaks to the user or to the builder/);

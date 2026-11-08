@@ -30,7 +30,7 @@ for(const s of ['decisions','lessons'])for(const scenario of ['update','new','dr
   const retained=path.join(p,'.leerness/archive/mutation-recovery/prior.bin');fs.mkdirSync(path.dirname(retained),{recursive:true});fs.writeFileSync(retained,Buffer.alloc(17));
   const noun=s==='decisions'?'decision':'lesson';let candidate,operation,args;
   if(scenario==='drop'||scenario==='new-archive'){
-    // T-0331: a drop writes its integrity record right after the header line.
+     
     const gone=renderLosslessArchiveEntries(s,[rows[1]]);
     candidate=[rows[0]];operation={kind:'drop',archiveText:(scenario==='new-archive'?header:'')+'\n## 제거 '+today()+' (target: "selected")\n'+archiveCheckLine(1,gone)+gone+'\n'};args=[noun,'drop','selected'];
   }else if(scenario.startsWith('restore')){

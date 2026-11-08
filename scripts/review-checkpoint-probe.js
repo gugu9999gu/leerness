@@ -1,6 +1,6 @@
 'use strict';
 
-// Direct assertions for the RB-01 pure module; no CLI/model/production actions.
+ 
 const assert = require('node:assert/strict');
 const { assessReviewCheckpoint: assess, validateReviewCheckpointInput: validate, ReviewCheckpointInputError, INPUT_SCHEMA, MAX_BYTES } = require('../lib/review-checkpoint');
 const cases = [];

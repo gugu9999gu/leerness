@@ -16,8 +16,8 @@ function warningSuppressionReasons(env) {
     if (/(?:^|[\s"'])--no-(?:deprecation|warnings)(?=$|[\s"'])/i.test(options)) {
       reasons.push('NODE_OPTIONS warning suppression');
     }
-    // Fail closed for every disable-warning value. A future/runtime alias must not
-    // silently disable DEP0190 while the gate claims it observed all warnings.
+     
+     
     if (/(?:^|[\s"'])--disable-warning(?:=|\s)/i.test(options)) {
       reasons.push('NODE_OPTIONS --disable-warning');
     }

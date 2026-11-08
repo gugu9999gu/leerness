@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -97,7 +97,7 @@ const parse = p => JSON.parse(text(p).replace(/^\uFEFF/, ''));
 const files = ['.leerness/manifest.json', 'AGENTS.md', 'CLAUDE.md'];
 test('valid multilingual metadata, signatures and authored notes survive both modes', () => {
   const f = fixture(), original = parse(f.manifest);original.__proto__ = undefined;
-  // Define an own key without invoking Object.prototype's setter.
+   
   Object.defineProperty(original, '__proto__', { value: { note: sample }, enumerable: true });
   for (const key of ['manifest', 'agents', 'claude']) fs.writeFileSync(f[key], '\uFEFF' + (key === 'manifest' ? JSON.stringify(original) : authored));
   for (const mode of ['minimal', 'standard']) {

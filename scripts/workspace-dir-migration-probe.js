@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const fs = require('fs');
 const os = require('os');
@@ -60,8 +60,8 @@ function rollbackDiagnostics(result) {
     status: result.status, signal: result.signal || null, error: result.error?.code || null,
     stdout: String(result.stdout || ''), stderr: String(result.stderr || ''),
   };
-  // Keep complete reports when they fit (including multiple JSON documents).
-  // Bound the whole diagnostic as UTF-8 JSON, not just the first path prefix.
+   
+   
   while (Buffer.byteLength(JSON.stringify(detail), 'utf8') > 4096) {
     const field = detail.stdout.length >= detail.stderr.length ? 'stdout' : 'stderr';
     detail[field] = detail[field].slice(0, Math.floor(detail[field].length * 0.75));
@@ -248,9 +248,17 @@ try {
   const autoTarget = path.join(tempRoot, 'auto-path-target');
   write(path.join(autoTarget, '.harness', 'HARNESS_VERSION'), '1.36.161\n');
   write(path.join(autoTarget, '.harness', 'progress-tracker.md'), '# auto-target\n');
-  // Handoff is intentionally stateful even with --no-record: it is a normal
-  // workflow entrypoint, unlike observation-only status/about/identity routes.
-  const autoStatus = run(['handoff', '--path', autoTarget, '--json', '--no-record', '--no-drift-check', '--no-headline']);
+   
+   
+  const autoReads = [[], ['--no-record'], ['--record', '--no-record']].map((flags) => run(['handoff', '--path', autoTarget, '--json', ...flags, '--no-drift-check', '--no-headline']));
+  passed = check(
+    autoReads.every((result) => result.status === 0)
+      && fs.readdirSync(autoTarget).join() === '.harness'
+      && fs.readFileSync(path.join(autoTarget, '.harness', 'progress-tracker.md'), 'utf8') === '# auto-target\n',
+    'read-only-handoff-leaves-legacy-workspace-unmigrated',
+    `exits=${autoReads.map((result) => result.status).join()} entries=${fs.readdirSync(autoTarget).join()}`,
+  ) && passed;
+  const autoStatus = run(['handoff', '--path', autoTarget, '--json', '--record', '--no-drift-check', '--no-headline']);
   const autoIgnore = fs.readFileSync(path.join(autoTarget, '.gitignore'), 'utf8').split(/\r?\n/);
   passed = check(
     !fs.existsSync(path.join(autoTarget, '.harness'))

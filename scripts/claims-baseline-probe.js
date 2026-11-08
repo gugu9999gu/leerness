@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0145 regression probe: a reviewed legacy debt boundary unblocks only exact
-// historical failures. Raw/per-task audits, changed rows, new failures, invalid
-// input, and corrupt stores must all remain fail-closed.
+ 
+ 
+ 
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -84,7 +84,7 @@ try {
   const boundaryId = (result.stdout.match(/T-\d{4,}/) || [])[0];
   check('explicit non-done boundary fixture is created', result.status === 0 && !!boundaryId, result);
 
-  // Keep the five heuristic gate checks clean so --claims is the only failing dimension.
+   
   fs.writeFileSync(path.join(root, '.leerness', 'session-handoff.md'), '# Handoff\nLast generated: 2026-08-26T00:00:00Z\n\n## Completed\n- calc.js add() 구현 + 테스트\n\n## Next Exact Step\n- migration\n', 'utf8');
   fs.writeFileSync(path.join(root, '.leerness', 'review-evidence.md'), '# Evidence\n## Test run\n- npm test: 1/1 passing\n', 'utf8');
 

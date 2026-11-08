@@ -1,7 +1,7 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// 실제 지원 writer 경계 검증. 모든 descriptor와 데이터는 이 probe의 임시 root에만 둔다.
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -84,8 +84,8 @@ function gitWriterCases() {
   }
 }
 
-// Run real lock/worker lifecycles in an isolated process. The coordinator writes
-// the fixture descriptor outside the held operation's AsyncLocalStorage scope.
+ 
+ 
 async function lockLifecycle() {
   const [cliPath, root, mode, futureText] = process.argv.slice(1);
   const { _withLock } = require(cliPath);
@@ -113,7 +113,7 @@ async function lockLifecycle() {
       await until(() => fs.statSync(ownerPath, { bigint: true }).mtimeNs !== createdMtime, 'healthy heartbeat');
       fs.writeFileSync(descriptorPath, futureText);
       const before = snapshot(root);
-      await pause(2300); // Observe more than two normal 1000ms worker ticks.
+      await pause(2300);  
       assert.deepStrictEqual(snapshot(root), before, 'incompatible layout did not stop heartbeat writes');
     } else {
       const messages = [];
@@ -236,7 +236,7 @@ function retainedFdCase() {
   const file = path.join(roots[0], '.leerness/cache/retained.jsonl');
   write(file, '{"before":true}\n');
   const fd = runtime.withRuntimeWrites(roots[0], () => fs.openSync(file, 'a'));
-  descriptor(roots[0]); // External fixture change after operation A has returned.
+  descriptor(roots[0]);  
   const before = snapshot();
   let caughtCode;
   let outerError;
@@ -264,19 +264,31 @@ function mcpTelemetryCase() {
   assert.strictEqual(compatibility.inspectRuntimeCompatibility(root).writeDisposition, 'allowed');
   const before = snapshot(usagePath);
   const originalRead = fs.readFileSync;
+  const originalOpen = fs.openSync, originalReadFd = fs.readSync, handles = new Set();
   let flipped = false;
   let rejection;
-  // A single deterministic scheduling seam: change only the owned descriptor
-  // after the real usage read, without replacing admission or mutation methods.
+   
+   
   fs.readFileSync = function (file, ...args) {
     const value = originalRead.call(this, file, ...args);
     if (file === usagePath && !flipped) { flipped = true; descriptor(root); }
     return value;
   };
+  fs.openSync = function (file, ...args) {
+    const fd = originalOpen.call(this, file, ...args);
+    if (file === usagePath) handles.add(fd);
+    return fd;
+  };
+  fs.readSync = function (fd, ...args) {
+    const count = originalReadFd.call(this, fd, ...args);
+    if (count > 0 && handles.has(fd) && !flipped) { flipped = true; descriptor(root); }
+    return count;
+  };
   try { cli._bumpMcpUsage(root, 'leerness_state_start'); }
   catch (error) { rejection = error; }
   finally {
     fs.readFileSync = originalRead;
+    fs.openSync = originalOpen; fs.readSync = originalReadFd;
     descriptor(root, { ...FUTURE, requiredWriterProtocol: 1 });
   }
   assert(flipped, 'telemetry did not execute its real usage read');
@@ -496,7 +508,7 @@ try {
     assert.deepStrictEqual(snapshot(), before);
   });
 } finally {
-  // only this probe's canonical, newly-created temp tree is removed.
+   
   const real = fs.realpathSync(directory);
   assert.strictEqual(real, directory);
   assert.strictEqual(path.dirname(real), tempParent);

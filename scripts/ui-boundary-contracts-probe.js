@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -295,8 +295,8 @@ try {
     catch (error) { failed++; console.error('FAIL ' + name + ': ' + error.stack); }
   }
 } finally {
-  // This exact absolute directory was created by this probe; never delete a
-  // caller-supplied path or follow a directory outside the temp prefix.
+   
+   
   const resolved = path.resolve(temp);
   assert.equal(path.dirname(resolved), path.resolve(os.tmpdir()));
   assert.ok(path.basename(resolved).startsWith('leerness-uib02-'));

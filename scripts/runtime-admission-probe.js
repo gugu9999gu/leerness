@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Writer-only joining of the existing legacy migration lock. Actual competing
-// processes/copy barriers live in workspace-dir-lock-order-probe. These local
-// fixtures isolate deadlines, denial latching, and shared operation identity.
+ 
+ 
+ 
 const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -133,7 +133,7 @@ try {
     const root = directory('removed-descriptor');
     unsupported(root);
     let removed = false;
-    // Simulate the external peer immediately after the actual bounded FD read.
+     
     patch(fs, 'closeSync', original => function (...args) {
       const result = original.apply(this, args);
       if (!removed) {
@@ -237,7 +237,7 @@ try {
     fs.symlinkSync(first, alias, kind);
     const before = snapshot(second);
     assert.throws(() => RW.withRuntimeWrites(alias, () => {
-      // Explicit fixture-owner action, outside the metadata subtree.
+       
       fs.rmSync(alias, { recursive: true });
       fs.symlinkSync(second, alias, kind);
       try { write(path.join(alias, '.leerness', 'lessons.md'), 'must not reach a newly selected root\n'); } catch {}

@@ -4,7 +4,7 @@ const file = (p,role) => path.join(p,'.leerness','decisions'+({canonical:'.json'
 const recovery = p => path.join(p,'.leerness/archive/mutation-recovery');
 function seed(p) { const f=path.join(recovery(p),'unmanifested.bin'); fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'PRIVATE');return f; }
 function patch(object,key,make,fn) { const raw=object[key];object[key]=make(raw);try{return fn();}finally{object[key]=raw;} }
-// Fire during cost assembly, after checked source capture and before final recheck.
+ 
 function duringCosts(p,mutate,expected) {
   let calls=0,fired=false;
   patch(Buffer,'byteLength',raw=>function(value,...args){

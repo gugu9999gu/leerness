@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0182: execute the original E2E counter and failure assertion, with real
-// process-local TMP isolation. No product implementation or fs/os mock.
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const crypto = require('crypto');
@@ -103,7 +103,7 @@ function run() {
       }
     }
   } finally {
-    // Never enumerate or remove pre-existing global prefix artifacts.
+     
     const stat = fs.lstatSync(arena, { bigint: true });
     assert(stat.isDirectory() && !stat.isSymbolicLink(), 'cleanup target is not an owned directory');
     assert.strictEqual(path.resolve(arena), realpath(arena), 'cleanup canonical path changed');

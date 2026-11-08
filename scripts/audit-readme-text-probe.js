@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -74,13 +74,18 @@ input.captureCheckedFileInput=function(p,...a){
 const rename=fs.renameSync.bind(fs);fs.renameSync=function(a,b){if(mode==='publication'&&a===target)inject(a);return rename(a,b);};
 const spawn=cp.spawnSync.bind(cp);cp.spawnSync=function(a,b,o){if(o?.env?.LEERNESS_REPLACE_TO===target){if(mode==='publication')inject(target);const r=spawn(a,b,o);if(mode==='after-publication'&&r.status===0)inject(target);return r;}return spawn(a,b,o);};
 const link=fs.linkSync.bind(fs);fs.linkSync=function(a,b){if(mode==='publication')inject(b);const r=link(a,b);if(mode==='after-publication')inject(b);return r;};
+if(mode==='stamp-version'){
+  const audit=require(path.join(base,'audit')),originalAudit=audit.audit,VERSION=process.env.AUDIT_README_STAMP_VERSION;
+  if(!/^\d+\.\d+\.\d+$/.test(VERSION))throw Error('invalid controlled stamp version');
+  audit.audit=function(root,options,deps){return originalAudit(root,options,{...deps,VERSION});};
+}
 `);
 function call(f, opts = {}) {
   const r = cp.spawnSync(process.execPath, [...(opts.mode ? ['--require', hook] : []), cli, 'audit', f.dir, ...(opts.args || ['--fix']), ...(opts.human ? [] : ['--json'])], {
     cwd: f.dir, encoding: 'utf8', timeout: 45000, windowsHide: true,
     env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_HOOK: '', LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1', LEERNESS_LANG: 'en',
       AUDIT_README_LIB: path.resolve(__dirname, '../lib'), AUDIT_README_MODE: opts.mode || '', AUDIT_README_TARGET: f.readme, AUDIT_README_WINNER: Buffer.from(opts.winner || '# Competing README\n' + sample).toString('base64'),
-      AUDIT_README_PACKAGE: f.pkg, AUDIT_README_PACKAGE_WINNER: Buffer.from(opts.packageWinner || '{"version":"8.9.0"}\n').toString('base64') }
+      AUDIT_README_PACKAGE: f.pkg, AUDIT_README_PACKAGE_WINNER: Buffer.from(opts.packageWinner || '{"version":"8.9.0"}\n').toString('base64'), AUDIT_README_STAMP_VERSION: opts.stampVersion || '' }
   });
   assert.ifError(r.error);return r;
 }
@@ -190,7 +195,21 @@ test('force cannot bypass README source checks', () => {
 });
 test('source fits four MiB but oversized prepared stamp is refused', () => {
   const f = fixture('stamp'), prefix = '\uFEFF' + body.stamp, value = prefix + 'x'.repeat(4 * 1024 * 1024 - Buffer.byteLength(prefix));fs.writeFileSync(f.readme, value);
-  assert.strictEqual(failedFix(rejectUnchanged(f)).causeCode, 'E_TEXT_LIMIT');
+  const stampVersion = '10.0.0', prepared = value.replace(/Last synced by Leerness v\d+\.\d+\.\d+/g, () => 'Last synced by Leerness v' + stampVersion);
+  assert.strictEqual(Buffer.byteLength(value), 4 * 1024 * 1024);assert.strictEqual(Buffer.byteLength(prepared), 4 * 1024 * 1024 + 1);
+  console.log('Boundary bytes: source=' + Buffer.byteLength(value) + ' prepared=' + Buffer.byteLength(prepared));
+  assert.strictEqual(failedFix(rejectUnchanged(f, { mode: 'stamp-version', stampVersion })).causeCode, 'E_TEXT_LIMIT');
+});
+
+test('exactly four MiB including BOM permits a same-size prepared stamp change', () => {
+  const f = fixture('stamp'), oldStamp = version.replace(/^\d/, digit => digit === '9' ? '8' : '9');
+  const prefix = '\uFEFF' + body.stamp.replace(/Last synced by Leerness v\d+\.\d+\.\d+/g, () => 'Last synced by Leerness v' + oldStamp);
+  const value = prefix + 'x'.repeat(4 * 1024 * 1024 - Buffer.byteLength(prefix));fs.writeFileSync(f.readme, value);
+  const prepared = fixedBody('stamp', value);
+  assert.notStrictEqual(oldStamp, version);assert.strictEqual(Buffer.byteLength(oldStamp), Buffer.byteLength(version));
+  assert.strictEqual(Buffer.byteLength(value), 4 * 1024 * 1024);assert.strictEqual(Buffer.byteLength(prepared), 4 * 1024 * 1024);
+  console.log('Boundary bytes: source=' + Buffer.byteLength(value) + ' prepared=' + Buffer.byteLength(prepared));
+  assert.strictEqual(success(call(f)).fixed, 1);assert.strictEqual(text(f.readme), prepared);
 });
 test('exactly four MiB including BOM permits a same-size badge change', () => {
   const f = fixture(), prefix = '\uFEFF' + body.badge.replace('-blue', '-green'), value = prefix + 'x'.repeat(4 * 1024 * 1024 - Buffer.byteLength(prefix));fs.writeFileSync(f.readme, value);
@@ -248,4 +267,88 @@ test('all supported badge colors and stamp occurrences follow existing replaceme
   fs.writeFileSync(f.readme, value);assert.strictEqual(success(call(f)).fixed, 2);assert.strictEqual(text(f.readme), fixedBody('stamp', fixedBody('badge', value)));
 });
 test('README capture uses the canonical lock', () => { assert.strictEqual(success(call(fixture(), { mode: 'lock-check' })).fixed, 1); });
+
+const managedStart = '<!-- leerness:project-readme:start -->', managedEnd = '<!-- leerness:project-readme:end -->';
+function managedFixture(lang = 'en', eol = '\n') {
+  const f = fixture('stamp');
+  fs.writeFileSync(path.join(f.ws, 'LANGUAGE'), lang + '\n');
+  fs.writeFileSync(f.readme, '# Project\n');
+  const r = cp.spawnSync(process.execPath, [cli, 'readme', 'sync', f.dir], {
+    cwd: f.dir, encoding: 'utf8', timeout: 30000, windowsHide: true,
+    env: { ...process.env, LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_PROMPT: '1' }
+  });
+  assert.ifError(r.error);assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const synced = text(f.readme), start = synced.indexOf(managedStart), end = synced.indexOf(managedEnd) + managedEnd.length;
+  assert.ok(start >= 0 && end > start);
+  f.block = synced.slice(start, end).replace(/\r?\n/g, eol);
+  f.prefix = '\uFEFF# Authored project' + eol + sample + eol + eol;
+  f.suffix = eol + eol + '## Authored footer' + eol + sample + eol;
+  f.fresh = f.prefix + f.block + f.suffix;
+  f.stale = f.block.split(version).join('0.0.1').replace(/\*\*\d+( tools|개 도구)\*\*/g, '**1$1**');
+  fs.writeFileSync(f.readme, f.prefix + f.stale + f.suffix);
+  return f;
+}
+for (const lang of ['en', 'ko']) test('managed README repair refreshes body and tool counts using the explicit sync renderer: ' + lang, () => {
+  const f = managedFixture(lang), data = success(call(f));
+  assert.strictEqual(data.fixed, 1);assert.strictEqual(text(f.readme), f.fresh);
+  assert.ok(!text(f.readme).includes('0.0.1'));
+  const before = snapshot(f.readme), again = success(call(f));
+  assert.strictEqual(again.fixed, 0);assert.deepStrictEqual(snapshot(f.readme), before);
+});
+test('managed README with a falsely current stamp still exposes and repairs stale body', () => {
+  const f = managedFixture();
+  fs.writeFileSync(f.readme, f.prefix + f.stale.replace('Last synced by Leerness v0.0.1', 'Last synced by Leerness v' + version) + f.suffix);
+  const before = snapshot(f.readme), observed = success(call(f, { args: [] }));
+  assert.ok(observed.findings.some(x => x.kind === 'readme_managed_content_stale'));
+  assert.strictEqual(observed.fixed, 0);assert.deepStrictEqual(snapshot(f.readme), before);
+  assert.strictEqual(success(call(f)).fixed, 1);assert.strictEqual(text(f.readme), f.fresh);
+});
+test('managed README repair preserves BOM CRLF and authored prefix and suffix exactly', () => {
+  const f = managedFixture('en', '\r\n');
+  assert.strictEqual(success(call(f)).fixed, 1);assert.strictEqual(text(f.readme), f.fresh);
+  assert.ok(!fs.readFileSync(f.readme).subarray(3).includes(Buffer.from('\n\n')));
+});
+test('managed README ignores a stale author-owned stamp outside its region', () => {
+  const f = managedFixture(), value = f.prefix + 'Last synced by Leerness v0.0.1: 2000-01-01\n' + f.block + f.suffix;
+  fs.writeFileSync(f.readme, value);const before = snapshot(f.readme);
+  assert.strictEqual(success(call(f)).fixed, 0);assert.deepStrictEqual(snapshot(f.readme), before);
+});
+test('managed README refresh keeps author-owned stamps unchanged', () => {
+  const f = managedFixture(), authored = 'Last synced by Leerness v0.0.2: 2001-01-01\n';
+  fs.writeFileSync(f.readme, f.prefix + authored + f.stale + f.suffix);
+  assert.strictEqual(success(call(f)).fixed, 1);assert.strictEqual(text(f.readme), f.prefix + authored + f.block + f.suffix);
+});
+test('managed README date alone does not trigger a rewrite', () => {
+  const f = managedFixture(), value = f.fresh.replace(/(Last synced by Leerness v[\d.]+): \d{4}-\d{2}-\d{2}/, '$1: 2000-01-01');
+  fs.writeFileSync(f.readme, value);const before = snapshot(f.readme);
+  assert.strictEqual(success(call(f)).fixed, 0);assert.deepStrictEqual(snapshot(f.readme), before);
+});
+for (const shape of ['missing-end', 'missing-start', 'duplicate', 'reversed']) test('ambiguous managed README is refused without changing its stamp: ' + shape, () => {
+  const f = managedFixture();
+  const middle = shape === 'missing-end' ? f.stale.replace(managedEnd, '')
+    : shape === 'missing-start' ? f.stale.replace(managedStart, '')
+      : shape === 'duplicate' ? f.stale + '\n' + f.stale : managedEnd + '\n' + f.stale.replace(managedEnd, '');
+  fs.writeFileSync(f.readme, f.prefix + middle + f.suffix);
+  const item = failedFix(rejectUnchanged(f));assert.strictEqual(item.causeCode, 'E_AUDIT_README_BLOCK');
+});
+test('managed README source damage remains refused before regeneration', () => {
+  const f = managedFixture();fs.appendFileSync(f.readme, Buffer.from([0xff]));
+  assert.strictEqual(failedFix(rejectUnchanged(f)).causeCode, 'E_TEXT_ENCODING');
+});
+test('managed README publication failure does not falsely advance the stamp', () => {
+  const f = managedFixture();failedFix(rejectUnchanged(f, { mode: 'write-failure' }), 'publication');
+});
+test('managed README concurrent edit is retained rather than overwritten', () => {
+  const f = managedFixture(), winner = f.prefix + '# Changed by another writer\n' + sample + f.suffix;
+  failedFix(call(f, { mode: 'after-capture', winner }));assert.strictEqual(text(f.readme), winner);
+});
+test('managed README current source acquired under lock is not rewritten again', () => {
+  const f = managedFixture();
+  assert.strictEqual(success(call(f, { mode: 'before-capture', winner: f.fresh })).fixed, 0);
+  assert.strictEqual(text(f.readme), f.fresh);assert.strictEqual(fs.statSync(f.readme).mtimeMs, 1000000000000);
+});
+test('managed README package source conflict prevents publication', () => {
+  const f = managedFixture();assert.strictEqual(failedFix(rejectUnchanged(f, { mode: 'package-after' })).causeCode, 'E_STORE_CHANGED');
+});
+
 console.log(`Tests: ${passed}/${passed + failed} passed`);process.exitCode = failed || passed === 0 ? 1 : 0;

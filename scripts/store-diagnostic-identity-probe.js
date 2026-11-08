@@ -1,7 +1,7 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Actual files and CLI, with narrow metadata/I/O seams. No provider execution.
+ 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');

@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const cp = require('node:child_process');
@@ -162,10 +162,10 @@ fixture('nested.test.cjs', "require('node:test')('beta',async t=>{await t.test('
       assert.equal(result.selectedCount, 1);
     });
     await test('a briefly held selector fixture is waited out, not reported as an unavailable selector', async () => {
-      // Windows can refuse the fixture delete while the last child test process exits, and Node 26
-      // rmSync does not retry EPERM. Two refusals must not turn into runtime-selector-unavailable.
-      // T-0365: on a Windows Node whose failed fs.rmSync ends the process, lib/safe-remove.js removes the fixture
-      //   with unlink and rmdir, so the refusals go to the fixture folder's rmdirSync as well.
+       
+       
+       
+       
       const original = fs.rmSync, originalRmdir = fs.rmdirSync;
       let refused = 0;
       const refuse = (impl, self, target, rest) => {

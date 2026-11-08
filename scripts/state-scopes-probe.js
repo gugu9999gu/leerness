@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// P-0020: exercise real Git layouts and controlled discovery failures without
-// enabling runtime writers, migration, providers, or any remote operation.
+ 
+ 
 const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -16,8 +16,8 @@ const I = require('../lib/state-inspect');
 const SG = require('../lib/state-git');
 const { removeTree } = require('./temp-cleanup');
 
-// Hosted Windows runners may expose TEMP through an 8.3 name (RUNNER~1).
-// Compare/inject metadata at the same canonical path the product inspects.
+ 
+ 
 const tempDirectory = fs.realpathSync.native(os.tmpdir());
 const arena = fs.mkdtempSync(path.join(tempDirectory, 'leerness-state-scopes-'));
 const originalCwd = process.cwd();
@@ -106,8 +106,8 @@ const snapshot = root => {
 };
 
 const noWrites = fn => {
-  // The arena includes an unrelated cwd, every project target, and every Git
-  // common/private/external metadata directory. Links are recorded, not followed.
+   
+   
   const before = snapshot(arena);
   try { return fn(); }
   finally { assert.strictEqual(snapshot(arena), before, 'inspection changed arena bytes or mtimes'); }

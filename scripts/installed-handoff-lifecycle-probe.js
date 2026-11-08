@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Exercise the actual installed harness function with real, owned Node children.
-// Only long timeout/output limits are shortened; production argv/env are observed.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -12,7 +12,7 @@ const vm = require('vm');
 const assert = require('assert');
 const { childDiagnostics } = require('./e2e-child-diagnostics');
 const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-installed-lifecycle-'));
-// An optional source path lets bugfix registration replay a frozen baseline.
+ 
 const filename = path.resolve(process.argv[2] || path.join(__dirname, 'installed-cleanroom-probe.js'));
 const source = fs.readFileSync(filename, 'utf8');
 const anchor = 'function spawnHandoff(cli, sessionId) {';
@@ -35,8 +35,8 @@ function load(options = {}) {
     children.push(entry);
     launched.push(entry);
     child.once('close', () => { entry.closed = true; });
-    // A test observer prevents the baseline's unhandled error from crashing this
-    // probe, but never resolves the implementation's missing completion handler.
+     
+     
     child.on('error', error => entry.errors.push(error.code));
     return child;
   };
@@ -80,7 +80,7 @@ async function measure(label, script, options, predicate) {
     ]);
   } catch (error) { value = { rejected: error.code || error.message }; }
   finally { clearTimeout(timer); }
-  // Allow close observers to run after the native execFile callback.
+   
   await new Promise(resolve => setImmediate(resolve));
   const directClosed = harness.launched.every(entry => entry.closed
     || (!entry.child.pid && entry.errors.includes('ENOENT')));
@@ -93,7 +93,7 @@ async function main() {
     r => r.status === 0 && !r.error && !r.timedOut && r.stdout.includes('handoff-ok'));
   const call = success.harness.calls[0];
   check('shell-free isolated handoff argv and environment', call.file === process.execPath
-    && JSON.stringify(call.args.slice(1)) === JSON.stringify(['handoff', arena, '--quiet', '--no-drift-check'])
+    && JSON.stringify(call.args.slice(1)) === JSON.stringify(['handoff', arena, '--record', '--quiet', '--no-drift-check'])
     && call.config.env.LEERNESS_SESSION_ID === 'success' && call.config.shell !== true);
   check('finite native deadline and output budget', call.config.timeout === 180000
     && call.config.killSignal === 'SIGKILL' && call.config.maxBuffer === 1024 * 1024);
@@ -147,8 +147,8 @@ function checkWatchdog() {
 }
 
 async function checkHandoffGate() {
-  // Actual call-site statements, controlled result packets, and real owned record
-  // files. These are predicate/retention controls, not additional live handoffs.
+   
+   
   const start = "  const sessionIds = ['cleanroom-codex-01'";
   const end = '  preserveTempRoot = false;';
   assert.strictEqual(source.split(start).length, 2);
@@ -187,7 +187,7 @@ async function checkHandoffGate() {
     if (process.argv[3] !== '--watchdog-child') checkWatchdog();
   }
   finally {
-    // Exact handles created by this probe only; never enumerate/kill host processes.
+     
     for (const entry of children) {
       if (entry.closed) continue;
       await new Promise((resolve, reject) => {

@@ -1,14 +1,14 @@
 'use strict';
-// T-0351: the Windows PATH registration of `leerness path-setup --apply` (_winPathPsScript and _registerPath in
-// bin/leerness.js). From 1.9.254 the script's lines were joined with spaces only, so PowerShell refused it as a whole
-// (UnexpectedToken after SetEnvironmentVariable) and the registration never ran. It also used Write-Output and
-// Where-Object, module cmdlets that cost 21.5-52 s per launch without PSModulePath on a GitHub Windows runner (T-0343).
-// The script now edits HKCU\Environment\Path keeping its raw text and registry type.
-// This probe parses the script with PowerShell's own parser (CommandAst nodes and parse errors), then runs it through
-// _registerPath without PSModulePath against a throwaway registry key. The spawn hook checks that it is about to run
-// exactly the product script, points its one registry open at the throwaway key, and replaces the settings broadcast
-// with a marker; afterwards nothing in the script may still reach HKCU\Environment. The probe also checks that the
-// real user Path (raw text and type) is unchanged.
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const crypto = require('crypto');
@@ -30,7 +30,7 @@ if (process.platform !== 'win32') {
 const cli = require('../bin/leerness.js');
 const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 const SCRIPT = cli._winPathPsScript();
-// The script as shipped from 1.9.254 to 1.36.297, kept as the control for the command check.
+ 
 const OLD_SCRIPT = [
   "$b = $env:LEERNESS_PATH_BIN;",
   "$u = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $u) { $u = '' }",
@@ -53,27 +53,27 @@ function ps(command, env = {}) {
   assert.strictEqual(r.status, 0, 'PowerShell helper failed: ' + (r.error ? r.error.code : r.stderr));
   return r.stdout;
 }
-// PowerShell's parser counts CommandAst nodes (cmdlets, aliases, functions, programs; not text inside strings) and
-// parse errors. The parse is a .NET call and invokes no command.
+ 
+ 
 const commandsAndErrors = text => ps("$e = $null; $a = [System.Management.Automation.Language.Parser]::ParseInput($env:T0351_COMMAND, [ref]$null, [ref]$e); "
   + "[Console]::Out.Write(('{0}|{1}' -f @($a.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)).Count, @($e).Count))",
   { T0351_COMMAND: text }).trim();
-// Type and raw text of a Path value (no expansion), or 'absent' / 'nokey'.
+ 
 const READ_PATH = "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($env:T0351_KEY); if ($null -eq $k) { [Console]::Out.Write('nokey') } "
   + "else { try { if ($k.GetValueNames() -contains 'Path') { $v = $k.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); "
   + "if ($v -is [array]) { $v = $v -join '|' }; [Console]::Out.Write([string]$k.GetValueKind('Path') + '=' + $v) } else { [Console]::Out.Write('absent') } } finally { $k.Close() } }";
 const readPath = key => ps(READ_PATH, { T0351_KEY: key });
-// Sets the throwaway Path (or removes it), and optionally one more REG_SZ value named `extraName`.
+ 
 function presetTestPath(kind, raw, extraName = '', extraValue = '') {
   ps("$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($env:T0351_KEY); try { if ($env:T0351_KIND -eq 'absent') { $k.DeleteValue('Path', $false) } "
-    // Not `$v = if (...) { [string[]]... }`: an if expression unrolls a one-item array into a string.
+     
     + "elseif ($env:T0351_KIND -eq 'MultiString') { $k.SetValue('Path', [string[]]@($env:T0351_RAW), [Microsoft.Win32.RegistryValueKind]::MultiString) } "
     + "else { $k.SetValue('Path', $env:T0351_RAW, [Microsoft.Win32.RegistryValueKind]$env:T0351_KIND) }; "
     + "foreach ($n in $k.GetValueNames()) { if ($n -ne 'Path') { $k.DeleteValue($n) } }; "
     + "if ($env:T0351_EXTRA_NAME) { $k.SetValue($env:T0351_EXTRA_NAME, $env:T0351_EXTRA_VALUE, [Microsoft.Win32.RegistryValueKind]::String) } } finally { $k.Close() }",
   { T0351_KEY: TEST_KEY, T0351_KIND: kind, T0351_RAW: raw, T0351_EXTRA_NAME: extraName, T0351_EXTRA_VALUE: extraValue });
 }
-// The other values of the throwaway key, as name=value lines.
+ 
 const readOthers = () => ps("$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($env:T0351_KEY); try { foreach ($n in $k.GetValueNames()) { if ($n -ne 'Path') { [Console]::Out.Write($n + '=' + $k.GetValue($n) + ';') } } } finally { $k.Close() }",
   { T0351_KEY: TEST_KEY });
 function removeTestKey() {
@@ -81,12 +81,12 @@ function removeTestKey() {
     + "if ($null -ne $p) { $n = $p.SubKeyCount + $p.ValueCount; $p.Close(); if ($n -eq 0) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKey($env:T0351_PARENT, $false) } }",
   { T0351_KEY: TEST_KEY, T0351_PARENT: PARENT_KEY });
 }
-// The product script pointed at the throwaway key. Each swap must match exactly once. Afterwards the script may not
-// open HKCU\Environment, set an environment variable, or reach any other hive.
+ 
+ 
 function againstTestKey(script, { readOnly = false, markWrite = false } = {}) {
   const open = readOnly ? `[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('${TEST_KEY}', $false)` : `[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('${TEST_KEY}')`;
   const swaps = [[OPEN_REAL, open], [NOTIFY, "[Console]::Error.Write('NOTIFY;')"]];
-  // The marker shows the script reached the write, so a script that never runs (a parse error) cannot pass.
+   
   if (markWrite) swaps.push([WRITE, "[Console]::Error.Write('BEFORE_WRITE;'); " + WRITE]);
   let out = script;
   for (const [from, to] of swaps) {
@@ -94,29 +94,29 @@ function againstTestKey(script, { readOnly = false, markWrite = false } = {}) {
     out = out.replace(from, () => to);
   }
   assert(!/SetEnvironmentVariable|LocalMachine|Registry::|HK(CU|LM|EY_[A-Z_]+):|OpenSubKey\(\s*["']Environment/i.test(out), 'the test script can still reach the real environment');
-  // Case-insensitive counts: one hive reference and one key open, both the throwaway key's (round 2: a lowercase
-  // `currentuser.OpenSubKey(('Environ' + 'ment'), $true)` passed a case-sensitive count).
+   
+   
   assert.strictEqual((out.match(/CurrentUser/gi) || []).length, 1, 'only the throwaway key may be opened');
   assert.strictEqual((out.match(/OpenSubKey|CreateSubKey|OpenBaseKey|OpenRemoteBaseKey/gi) || []).length, 1, 'only one key open is allowed');
-  // Round 3: the static Registry members write by path (Registry::SetValue('HKEY_CURRENT_USER\Environment', ...)).
-  // Only the one Registry member reference (CurrentUser) and the one key write ($k.SetValue) may remain.
+   
+   
   assert.strictEqual((out.match(/Registry\s*\]\s*::/gi) || []).length, 1, 'only one Registry member reference is allowed');
   assert.strictEqual((out.match(/SetValue/gi) || []).length, 1, 'only one registry write is allowed');
   assert(!/Delete(Value|SubKey)/i.test(out), 'the test script may not delete registry values or keys');
   assert(out.includes(open), 'the throwaway key open is missing');
   return out;
 }
-// Installs the spawn hook used while _registerPath runs. The caller restores cp.spawnSync.
+ 
 function hookRegistration(options = {}) {
   const seen = [];
   cp.spawnSync = function (command, args, spawnOptions) {
-    // While _registerPath runs, only two launches may happen: where.exe resolving `powershell` (read-only), and
-    // PowerShell with exactly the product script, which is then pointed at the throwaway key. Anything else is
-    // refused without running, so a future change that writes another way cannot reach the real user Path.
+     
+     
+     
     if (/^where(\.exe)?$/i.test(path.basename(String(command)))) return original.spawn.call(this, command, args, spawnOptions);
     assert(/^powershell(\.exe)?$/i.test(path.basename(String(command))), 'unexpected launch during registration: ' + command);
-    // The whole argument list, not just the -Command value: PowerShell joins every argument after -Command into the
-    // command text, so an extra argument could carry its own write (round 2).
+     
+     
     assert.deepStrictEqual(args, ['-NoProfile', '-Command', SCRIPT], 'the PATH spawn must run exactly the product script');
     const env = { ...spawnOptions.env, ...(options.env || {}) };
     for (const key of Object.keys(env)) if (/^PSModule(Path|AnalysisCachePath)$/i.test(key)) delete env[key];
@@ -127,12 +127,12 @@ function hookRegistration(options = {}) {
   };
   return seen;
 }
-// T-0353: the parser check is a precondition for every run below. A script with a command in it (an appended
-// `reg.exe add HKCU\Environment ...`, say) would pass the text rewrite, and the final Path hash would only see the
-// damage afterwards; so when the script does not parse to zero commands, no registry run happens at all.
+ 
+ 
+ 
 let commandCheck = null;
 const scriptIsCommandFree = () => (commandCheck === null ? (commandCheck = commandsAndErrors(SCRIPT)) : commandCheck) === '0|0';
-// Runs _registerPath with the spawn hook. Returns its result, what the child printed, and the throwaway Path after.
+ 
 function register(bin, preset, options = {}) {
   assert(scriptIsCommandFree(), 'the PATH script must parse to zero commands before any registry run: ' + commandCheck);
   presetTestPath(...preset);
@@ -155,17 +155,17 @@ try {
     assert.strictEqual(commandsAndErrors(SCRIPT), '0|0');
     assert(SCRIPT.includes('$env:LEERNESS_PATH_BIN'), 'the bin path must stay a data channel');
   });
-  // The two guards that keep the runs below off the real user Path, checked without running anything.
+   
   test('the registration hook refuses any other launch without running it', () => {
     hookRegistration();
     assert.throws(() => cp.spawnSync('reg.exe', ['add', 'HKCU\\Environment', '/v', 'Path', '/d', 'x', '/f']), /unexpected launch/);
     assert.throws(() => cp.spawnSync(powershell, ['-NoProfile', '-Command', "[Console]::Out.Write('x')"]), /exactly the product script/);
-    // Round 2: PowerShell joins the arguments after -Command, so an appended argument would run as more script.
+     
     assert.throws(() => cp.spawnSync(powershell, ['-NoProfile', '-Command', SCRIPT, "; [Environment]::SetEnvironmentVariable('PATH','BROKEN','User')"]),
       /exactly the product script/);
   });
   test('the throwaway-key rewrite refuses a script that could still reach the real environment', () => {
-    againstTestKey(SCRIPT); // the product script itself is accepted, so the refusals below are about the extra text
+    againstTestKey(SCRIPT);  
     for (const extra of ['; [Environment]::SetEnvironmentVariable("PATH", $nu, "User")',
       '; $x = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)',
       '; $x = [Microsoft.Win32.Registry]::LocalMachine', '; $x = Get-Item HKCU:\\Environment',
@@ -180,12 +180,12 @@ try {
     ['REG_EXPAND_SZ keeps its %VAR% text and type', ['ExpandString', windowsApps], 'ADDED', 'ExpandString=%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;' + BIN],
     ['REG_SZ keeps its type', ['String', 'C:\\a;C:\\b'], 'ADDED', 'String=C:\\a;C:\\b;' + BIN],
     ['present among empty entries', ['String', 'C:\\a;;' + BIN + ';'], 'EXISTS', 'String=C:\\a;;' + BIN + ';'],
-    // Round 3 (owner's choice): entries count only as written. A %VAR% entry that this shell would expand to the bin
-    // path is not taken as present, since new terminals may lack the variable; the bin path is added as text.
+     
+     
     ['a %VAR% entry counts only as written', ['ExpandString', 'C:\\a;%LEERNESS_T0351_DIR%'], 'ADDED', 'ExpandString=C:\\a;%LEERNESS_T0351_DIR%;' + BIN, { LEERNESS_T0351_DIR: BIN }],
     ['present in other letter case', ['String', 'C:\\a;' + BIN.toUpperCase()], 'EXISTS', 'String=C:\\a;' + BIN.toUpperCase()],
-    // Round 2: Windows expands %VAR% in a REG_EXPAND_SZ Path only, and the bin path's own data channel is gone before
-    // the comparison, so neither can make an entry look present.
+     
+     
     ['REG_SZ is compared as written', ['String', '%LEERNESS_T0351_DIR%'], 'ADDED', 'String=%LEERNESS_T0351_DIR%;' + BIN, { LEERNESS_T0351_DIR: BIN }],
     ['%LEERNESS_PATH_BIN% never matches', ['ExpandString', '%LEERNESS_PATH_BIN%'], 'ADDED', 'ExpandString=%LEERNESS_PATH_BIN%;' + BIN],
   ];
@@ -199,8 +199,8 @@ try {
     assert.strictEqual(r.after, after);
     assert.deepStrictEqual({ ok: r.result.ok, method: r.result.method }, { ok: true, method: word === 'ADDED' ? 'powershell-user-path' : 'already' });
   });
-  // T-0353: the match is ordinal. PowerShell's -eq and -contains compare with the culture and ignore a soft hyphen,
-  // so an entry that only looks like the bin path counted as present.
+   
+   
   test('an entry that differs from the bin path by an ignorable character is not taken as present', () => {
     const softHyphen = String.fromCharCode(0xad);
     const lookalike = BIN.slice(0, -1) + softHyphen + BIN.slice(-1);
@@ -218,8 +218,8 @@ try {
   test('a Path of another registry type is refused and left as it is', () => {
     const r = register(BIN, ['MultiString', 'C:\\a']);
     assert.strictEqual(r.seen[0].status, 1);
-    // The script's own refusal, not a later SetValue failure on the wrong value type.
-    // PowerShell may wrap the error text at the console width, so whitespace is ignored.
+     
+     
     assert(r.seen[0].stderr.replace(/\s+/g, '').includes('theuserPathhasregistrytypeMultiString'), r.seen[0].stderr.slice(0, 300));
     assert.strictEqual(r.seen[0].stdout.toString(), '');
     assert.strictEqual(r.after, 'MultiString=C:\\a');

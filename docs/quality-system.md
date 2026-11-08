@@ -10,6 +10,19 @@ Leerness already does most of what a quality system does: it checks a request be
 - New blocking switches start off (`leerness toggle`). An advisory result never grants approval.
 - Leerness is cooperative by default. A required CI check that runs `leerness gate` is what makes it a guardrail.
 
+## Task boundaries and hybrid reviewer packets (opt-in candidate)
+
+The pure task-review assessor proposes a scope lock from a frozen manifest,
+checks the caller-supplied acceptance/test evidence, flags repeated stalls,
+and summarizes measured verification costs without granting completion.
+Its independent reviewer packet intentionally omits earlier reviewer findings,
+whereas a repair recheck preserves those findings. The current review-feedback
+v2 ledger remains authoritative for accepted rounds, reviewer-session separation,
+and stopped budgets; the assessor neither writes that ledger nor authenticates
+model calls. See [task-review operations](task-review-operations.md).
+The project owner removed the mandatory cross-model review rule on 2026-10-29.
+No blanket external-model gate is silently restored.
+
 ## The map
 
 | Quality term | What it means here | Leerness |

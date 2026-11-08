@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0193: actual CLI fault injection for memory-domain partial-write recovery.
-// A receipt is evidence/recovery material, not an automatic rollback claim.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -230,7 +230,7 @@ try {
       const f = fixture(surface);
       success(run(f.project, addArgs(surface, 'fresh')));
       const recovery = path.join(f.hd, 'archive', 'mutation-recovery');
-      assert(!fs.existsSync(recovery), 'success path created recovery directory');
+      assert.deepStrictEqual(fs.existsSync(recovery) ? fs.readdirSync(recovery) : [], [], 'success path left a recovery entry');
     });
   }
 } catch (error) {

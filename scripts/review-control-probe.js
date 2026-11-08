@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -132,12 +132,12 @@ async function main() {
       const before = stamp(repo); assert.equal(API.readReviewControl(repo, 'B-empty').head, null); assert.deepEqual(stamp(repo), before);
     });
     await test('a project folder too deep for Git refs on Windows is refused before any write and works once core.longpaths is on', () => {
-      // T-0326: refs here are refs/leerness/<family>/v1/project-<64 hex>/<64 hex>. On Windows, Git without core.longpaths
-      // cannot lock such a ref once its lock path reaches 260 characters (the claim used to fail as git_failed), and a
-      // ref written with long paths breaks the user's own Git there (git log --all, fsck and gc fail). So the claim and
-      // the read are refused with git_long_paths_required before anything is written; after
-      // `git config core.longpaths true` both work and the user's own Git still reads the repository.
-      // The user's global and system Git configuration are switched off so that every machine runs the same case.
+       
+       
+       
+       
+       
+       
       const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
       const empty = path.join(arena, 'empty.gitconfig'); fs.writeFileSync(empty, '');
       process.env.GIT_CONFIG_GLOBAL = empty; process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';
@@ -151,7 +151,7 @@ async function main() {
           reject(() => write(deep, req), 'git_long_paths_required');
           reject(() => API.readReviewControl(deep, req.batchId), 'git_long_paths_required');
           assert.deepEqual(stamp(deep), before);
-          // Only ref operands count: a path given to ls-tree after `--` is not a ref, however it is spelled.
+           
           const listed = G.run(G.context(deep, req.batchId), ['ls-tree', '-z', 'HEAD', '--', `refs/leerness/${'a'.repeat(200)}/run.json`]);
           assert.equal(listed.status, 0, String(listed.stderr));
           command(deep, ['config', 'core.longpaths', 'true']);
@@ -166,11 +166,11 @@ async function main() {
       }
     });
     await test('at the exact boundary only what Git cannot do is refused: a 260-character lock, not a 259-character lock or a 259-character read', () => {
-      // Measured with Git for Windows 2.54.0 without core.longpaths: update-ref works up to a 259-character lock path
-      // and fails from 260; a read works up to a 259-character ref path. The review-control ref has 169 characters, so
-      // its ref file path is the project root plus 175 characters and its lock file the root plus 180. Lengths come
-      // from the real path (a TEMP given in 8.3 form is longer once resolved), and the 259 case has a capital dotted I,
-      // which lower-casing turns into two characters. Other platforms have no such limit and run the same claims.
+       
+       
+       
+       
+       
       const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
       const empty = path.join(arena, 'empty.gitconfig'); fs.writeFileSync(empty, '');
       process.env.GIT_CONFIG_GLOBAL = empty; process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';
@@ -186,19 +186,19 @@ async function main() {
         for (const root of [edge, first, band]) setup(root);
         const req = request('B-edge'), lock = root => path.join(root, '.git', G.context(root, req.batchId).ref + '.lock');
         if (windows) { assert.equal(lock(edge).length, 259); assert.equal(lock(first).length, 260); assert.equal(lock(band).length, 264); }
-        // A 259-character lock: Git can take it, so the claim works without the setting.
+         
         const edgeClaim = write(edge, req);
         assert.equal(API.readReviewControl(edge, req.batchId).head, edgeClaim.head);
         if (windows) {
-          // A 260-character lock: refused with no ref written (the claim's Git objects may already exist, unreachable),
-          // and the 255-character read still works.
+           
+           
           reject(() => write(first, req), 'git_long_paths_required');
           assert.equal(API.readReviewControl(first, req.batchId).head, null);
           assert.equal(command(first, ['-c', 'core.longpaths=true', 'for-each-ref', 'refs/leerness/']), '');
           command(band, ['config', 'core.longpaths', 'true']);
         }
-        // A 259-character ref with a 264-character lock: written with the setting on, read with it off; the next write
-        // is refused until the setting is back.
+         
+         
         const bandClaim = write(band, req);
         if (windows) command(band, ['config', '--unset', 'core.longpaths']);
         assert.equal(API.readReviewControl(band, req.batchId).head, bandClaim.head);
@@ -214,10 +214,10 @@ async function main() {
       }
     });
     await test('a claim is refused exactly when the user\'s own Git cannot lock a ref of the same length, whatever git config reports', () => {
-      // Git for Windows 2.54.0 does not combine core.longpaths the usual way (measured): with a global true and a
-      // repository false it handles long paths, with a global false and a repository true it does not, while
-      // `git config --get` reports the repository's value. Whatever a Git version does, the claim must be refused exactly
-      // when that Git cannot lock a ref as long as the claim's, and what is written must be readable by that Git.
+       
+       
+       
+       
       const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
       process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';
       try {
@@ -246,8 +246,8 @@ async function main() {
       }
     });
     await test('a reftable repository in a deep folder needs no long paths: a claim is written and read back', () => {
-      // With the reftable format Git keeps refs in a few short table files, so a long ref name does not reach the path
-      // limit and the check must not refuse. Skipped only when this Git does not know the reftable format.
+       
+       
       const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
       const empty = path.join(arena, 'empty.gitconfig'); fs.writeFileSync(empty, '');
       process.env.GIT_CONFIG_GLOBAL = empty; process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';
@@ -269,8 +269,8 @@ async function main() {
       }
     });
     await test('a damaged control ref in a deep folder with long paths on gets the code it gets in a shallow folder, not git_long_paths_required', () => {
-      // The check reads a name next to the ref that Leerness never creates, never the ref itself, so damage to a record
-      // ref is reported the same way at any depth.
+       
+       
       const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
       const empty = path.join(arena, 'empty.gitconfig'); fs.writeFileSync(empty, '');
       process.env.GIT_CONFIG_GLOBAL = empty; process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';

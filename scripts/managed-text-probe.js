@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -26,7 +26,7 @@ const { withStateLock } = require('../lib/state-lock');
 const io = require('../lib/io');
 const arena = process.env.MANAGED_TEXT_PROBE_ROOT, cli = path.resolve(__dirname, '../bin/leerness.js');
 const sample = '한글 English 日本語 中文 🐝 e\u0301 \uFFFD \u0081\u009F';
-// Existing table cells replace control characters with spaces; raw storage does not.
+ 
 const renderedSample = '한글 English 日本語 中文 🐝 e\u0301 \uFFFD   ';
 const header = '# Progress Tracker\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n';
 const original = header + `| T-0001 | planned | ${sample} | source | 다음 | 2026-09-21 |\n\n사용자 메모: ${sample}\n`;

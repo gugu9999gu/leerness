@@ -1,8 +1,8 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Real filesystem writes and process termination; injected I/O faults are
-// explicitly synthetic. These checks do not simulate physical power loss.
+ 
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -70,7 +70,7 @@ if (process.argv[2] === '--child') {
     throw new Error('termination seam was not reached');
   } else {
     assert.equal(ledger.appendExecutionEvent(root, event('evt-child')).ok, true);
-    process.kill(process.pid, 'SIGKILL'); // success exists on disk, caller receives no acknowledgement
+    process.kill(process.pid, 'SIGKILL');  
     throw new Error('termination did not stop process');
   }
 } else {
@@ -146,7 +146,7 @@ if (process.argv[2] === '--child') {
     assert.throws(() => require('../lib/state-lock').withStateLock(f.file, () => write(f), { maxWaitMs: 10 }));
     assert(fs.readFileSync(f.file).equals(partial));
   });
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(PATH|PATHEXT|SystemRoot|WINDIR|COMSPEC|TEMP|TMP)$/i.test(k)));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(PATH|PATHEXT|SystemRoot|WINDIR|COMSPEC|TEMP|TMP|HOME|USERPROFILE|LOCALAPPDATA|XDG_STATE_HOME)$/i.test(k)));
   const child = (mode, root) => cp.spawnSync(process.execPath, [__filename, '--child', mode, root], {
     env, cwd: arena, encoding: 'utf8', timeout: 15000, windowsHide: true,
   });
@@ -167,6 +167,33 @@ if (process.argv[2] === '--child') {
     assert.equal(JSON.parse(reader.stdout).ok, false);
     assert.throws(() => require('../lib/state-lock').withStateLock(f.file, () => write(f), { maxWaitMs: 10 }));
     assert(fs.readFileSync(f.file).equals(partial));
+  });
+  // The two checks above give up after 10 ms, so they pass whether or not the dead writer's lock is ever reclaimed.
+  // This one gives the lock time to be reclaimed and then expects the ledger's own refusal, with the bytes untouched.
+  test('append: process death during write, the dead writer\'s lock is reclaimed and the ledger still refuses its partial line', () => {
+    const { withStateLock } = require('../lib/state-lock'), saved = process.env.LEERNESS_NO_LOCK_WARN;
+    const f = fixture(true), writer = child('partial', f.root);
+    assert.ifError(writer.error); assert.notEqual(writer.status, 0);
+    const partial = fs.readFileSync(f.file); assert.equal(partial.length, f.before.length + 17);
+    const lock = f.file + '.lock', [name] = fs.readdirSync(lock);
+    assert(/^owner-[a-f0-9]{32}\.json$/.test(name), 'the killed writer left its owner record: ' + name);
+    const attempt = maxWaitMs => { let error = null; try { withStateLock(f.file, () => write(f), { maxWaitMs }); } catch (e) { error = e; } return error; };
+    process.env.LEERNESS_NO_LOCK_WARN = '1';
+    try {
+      const early = attempt(500);   // the owner file was touched a moment ago, which is inside the 5 s veto
+      assert(early && early.code === 'E_LOCK_TIMEOUT' && early.lockState === 'dead-owner', 'a fresh dead owner is not reclaimed: ' + (early && early.code));
+      assert(fs.existsSync(lock)); assert(fs.readFileSync(f.file).equals(partial));
+      const old = new Date(Date.now() - 60000);
+      fs.utimesSync(path.join(lock, name), old, old); fs.utimesSync(lock, old, old);
+      const error = attempt(2000);
+      assert(error, 'the ledger must still refuse the partial line');
+      assert.notEqual(error.code, 'E_LOCK_TIMEOUT', 'the dead owner must have been reclaimed: ' + error.message);
+      assert.equal(error.code, 'ledger_invalid_lines', error.stack);
+    } finally { if (saved === undefined) delete process.env.LEERNESS_NO_LOCK_WARN; else process.env.LEERNESS_NO_LOCK_WARN = saved; }
+    assert(fs.readFileSync(f.file).equals(partial), 'reclaiming the lock must not touch the ledger bytes');
+    assert.equal(fs.existsSync(lock), false, 'the lock is gone after the refused append');
+    const reader = child('read', f.root); assert.equal(reader.status, 0, reader.stderr);
+    assert.equal(JSON.parse(reader.stdout).ok, false, 'the ledger itself is still rejected');
   });
   const args = process.argv.slice(2);
   let selected = cases;

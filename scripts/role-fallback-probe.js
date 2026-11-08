@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('assert');
 const cp = require('child_process');
@@ -32,8 +32,8 @@ const { classify, applyDeclaredRiskFloor, plan: routingPlan } = require('../lib/
 const roleStore = require('../lib/role-store');
 const { _executionProvenanceSummary } = require('../lib/session-close');
 
-// Only this probe's temporary fixtures may be recursively removed. Windows can
-// briefly retain a handle after heartbeat/file I/O; retry cleanup, not assertions.
+ 
+ 
 function removeFixture(target) {
   const resolved = path.resolve(target);
   const relative = path.relative(path.resolve(os.tmpdir()), resolved);
@@ -703,8 +703,8 @@ test('linked execution-ledger parents are rejected before any external target is
     assert.strictEqual(history.code, 'ledger_parent_linked');
     assert.throws(
       () => appendExecutionEvent(dir, { event: 'execution.started', taskId: 'T-LINK' }),
-      // Direct reads retain their ledger diagnostic; writer admission rejects
-      // the linked workspace before entering the append implementation.
+       
+       
       error => error && error.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE'
         && error.reasonCode === 'workspace_dir_symlink',
     );
@@ -797,8 +797,8 @@ test('dangling execution-ledger symlinks are rejected without creating their tar
     fs.mkdirSync(path.dirname(ledger), { recursive: true });
     fs.writeFileSync(path.join(base, 'outside-sentinel.txt'), 'unchanged\n', 'utf8');
     assert.strictEqual(fs.existsSync(missingTarget), false);
-    // Keep native file-symlink coverage wherever available, including Windows CI.
-    // Only Windows permission failures fall back to the same lstat guard via a junction.
+     
+     
     try { fs.symlinkSync(missingTarget, ledger, linkType); }
     catch (error) {
       if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code)) throw error;
@@ -808,8 +808,8 @@ test('dangling execution-ledger symlinks are rejected without creating their tar
     assert.ok(fs.lstatSync(ledger).isSymbolicLink());
     assert.strictEqual(fs.existsSync(missingTarget), false);
 
-    // A standalone store containing a link is not an accepted workspace. The first
-    // writer refuses admission before the ledger domain can inspect or create its target.
+     
+     
     const standaloneBefore = snapshot();
     assert.throws(
       () => appendExecutionEvent(dir, { event: 'execution.started', taskId: 'T-DANGLING' }),
@@ -819,8 +819,8 @@ test('dangling execution-ledger symlinks are rejected without creating their tar
     assert.strictEqual(fs.existsSync(missingTarget), false);
     assert.deepStrictEqual(snapshot(), standaloneBefore);
 
-    // A normal initialized marker admits the workspace, preserving the original
-    // read/append domain-link checks instead of replacing them with the admission error.
+     
+     
     fs.writeFileSync(path.join(dir, '.leerness', 'HARNESS_VERSION'), require('../package.json').version + '\n', 'utf8');
     const initializedBefore = snapshot();
     const history = readExecutionEvents(dir, 20);
@@ -842,8 +842,8 @@ test('dangling execution-ledger symlinks are rejected without creating their tar
     assert.strictEqual(actual, base);
     assert.strictEqual(path.dirname(actual), temp);
     assert.match(path.basename(actual), /^leerness-ledger-dangling-[A-Za-z0-9]{6}$/);
-    // T-0343: removeFixture accepts paths below os.tmpdir() as spelled. On GitHub's Windows runners that is the 8.3
-    // form (C:\Users\RUNNER~1\...) and `actual` is below the long real path, so pass the same entry by that spelling.
+     
+     
     removeFixture(path.join(os.tmpdir(), path.basename(actual)));
   }
 });
@@ -2078,8 +2078,8 @@ try {
     fs.mkdirSync(ledger);
     const result = run(['agents', 'history', '--path', fixture, '--json'], { env });
     assert.strictEqual(result.status, 1, result.stderr || result.stdout);
-    // The CLI has startup bookkeeping, so ambiguous standalone ownership is
-    // refused first. The read-only store API still reports its exact reason.
+     
+     
     assert.strictEqual(json(result).code, 'runtime_layout_incompatible');
     assert.ok(json(result).error.includes('(workspace_ambiguous)'));
     assert.strictEqual(readExecutionEvents(fixture, 20).code, 'ledger_not_regular_file');

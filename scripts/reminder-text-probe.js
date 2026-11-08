@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -113,6 +113,15 @@ for (const mode of ['bad-output', 'large-output']) test('invalid generated candi
 for (const [name, opts] of [['default', { args: [] }], ['JSON', { args: ['--writeback', '--json'] }], ['pulse', { args: ['--writeback', '--pulse'] }], ['hook', { env: { LEERNESS_HOOK: '1' } }], ['skip drift', { args: ['--writeback', '--no-drift-check'] }]]) {
   test(name + ' handoff leaves malformed reminders untouched', () => { const f = fixture(true, Buffer.from([0xff]));unchanged(f, opts); });
 }
+for (const [language, note] of [['en', /Not shown: this file has bytes that are not valid UTF-8\. It was left unchanged\. Save it as UTF-8 to show it here\./], ['ko', /표시하지 않음: UTF-8 로 읽을 수 없는 바이트가 있습니다\. 파일은 바꾸지 않았습니다\. UTF-8 로 저장하면 여기에 표시됩니다\./]]) test('default handoff says a malformed reminder is not shown and loads the rest: ' + language, () => {
+  const f = fixture(false, Buffer.from([0xff]));fs.writeFileSync(path.join(f.ws, 'manifest.json'), '{"language":"en","mode":"standard"}');fs.writeFileSync(path.join(f.ws, 'plan.md'), '# Plan body\n');
+  const r = unchanged(f, { args: [], env: { LEERNESS_LANG: language } });
+  assert.match(r.stdout, note);assert.match(r.stdout, /=== Plan \(\.leerness\/plan\.md\) ===\n# Plan body/);assert.doesNotMatch(r.stdout, /�/);
+});
+for (const name of ['session-handoff.md', 'current-state.md', 'plan.md', 'progress-tracker.md', 'decisions.md', 'task-log.md']) test('default handoff still refuses malformed bytes in ' + name, () => {
+  const f = fixture(false, owned(authored)), file = path.join(f.ws, name);fs.writeFileSync(file, Buffer.from([0xff]));
+  const before = snapshot(file), r = failure(call(f, { args: [] }));assert.match(r.stdout + r.stderr, /invalid UTF-8/);assert.deepStrictEqual(snapshot(file), before);
+});
 test('save failure details retain publication and recovery evidence', () => { const f = fixture(true, owned(authored)), r = failure(call(f, { mode: 'after-save' })), d = details(r);assert.strictEqual(d.action, 'refresh');assert.strictEqual(d.phase, 'publication');assert.strictEqual(d.outputPublished, true);assert.strictEqual(d.backupFile, f.file + '.recovery');assert.ok(d.recoveryArtifacts.length);assert.ok(require('../lib/reminder-text').isOwnedReminder(text(f.file))); });
 test('uncertain deletion does not claim rollback or confirmed removal', () => { const f = fixture(false, owned(authored)), d = details(failure(call(f, { mode: 'after-delete' })));assert.strictEqual(d.phase, 'removal');assert.strictEqual(d.removalStarted, true);assert.strictEqual(d.removedConfirmed, false);assert.strictEqual(snapshot(f.file), null); });
 for (const stale of [true, false]) test((stale ? 'refresh' : 'cleanup') + ' reports lock-release failure after mutation', () => { const f = fixture(stale, owned(authored)), d = details(failure(call(f, { mode: 'release-error' })));assert.strictEqual(d.phase, 'lock-release');if (stale) assert.strictEqual(d.outputPublished, true);else { assert.strictEqual(d.removedConfirmed, true);assert.strictEqual(snapshot(f.file), null); } });

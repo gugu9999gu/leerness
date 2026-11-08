@@ -4,7 +4,7 @@ const {assert,fs,path,test,finish,fixture,arena}=S;
 const {createRecoverySink}=require('../lib/memory-recovery-sink');
 const {createRecoveryTransfer}=require('../lib/memory-recovery-transfer');
 const {attachMemoryRecovery}=require('../lib/memory-recovery');
-require('../lib/runtime-writes'); // Module loading is outside the recovery-data read meter.
+require('../lib/runtime-writes');  
 const code=value=>error=>error.code===value;
 function sinkFixture(options={}){
   const p=fixture(),dir=path.join(p,'recovery');fs.mkdirSync(dir);
@@ -83,6 +83,22 @@ test('path replacement during copy retains bytes from the opened original and ma
 test('missing and directory sources are described without opening a copy',()=>{
   const f=copyFixture('original');const missing=f.transfer.copy(path.join(f.p,'missing'),'missing.bin'),directory=f.transfer.copy(f.p,'directory.bin');
   assert.equal(missing.kind,'missing');assert.equal(missing.exists,false);assert.equal(directory.kind,'directory');assert.deepEqual(fs.readdirSync(f.dir),[]);
+});
+test('source moved between observation and open is not reported as stable absence',()=>{
+  const bytes=Buffer.from('original 복구 bytes'),f=copyFixture(bytes),moved=f.source+'.moved';
+  const open=fs.openSync;let fired=false,result;
+  fs.openSync=function(file,...args){
+    if(file===f.source&&!fired){fired=true;fs.renameSync(f.source,moved);}
+    return open.call(fs,file,...args);
+  };
+  try{result=f.transfer.copy(f.source,'moved.bin');}finally{fs.openSync=open;}
+  assert.equal(fired,true);assert.deepEqual(fs.readFileSync(moved),bytes);
+  assert.equal(result.stable,false);assert.equal(result.exists,true);assert.equal(result.kind,'file');
+  assert.equal(result.error,'ENOENT');assert.equal(f.state.snapshot().attempts[0].allObservedSourcesStable,false);
+  const sibling=f.transfer.copy(moved,'sibling.bin');
+  assert.equal(sibling.stable,true);assert.deepEqual(fs.readFileSync(path.join(f.dir,'sibling.bin')),bytes);
+  assert.equal(sibling.sha256,require('crypto').createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(f.state.snapshot().attempts[0].allObservedSourcesStable,false);
 });
 function recover(mode='normal',bounded=true){
   const p=fixture(),source=path.join(p,'source'),cause=path.join(p,'cause');fs.writeFileSync(source,Buffer.alloc(65539,70));fs.writeFileSync(cause,Buffer.alloc(32771,67));

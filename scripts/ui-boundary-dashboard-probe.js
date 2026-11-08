@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -20,8 +20,8 @@ const cases=[
  {id:'normal-dashboard',expected:'allowed',subtype:null,text:null},
  {id:'technical-product-copy',expected:'allowed',subtype:null,text:'React OpenAI Claude Node.js · model: reviewer · status: running'},
  {id:'comment-explanation',expected:'allowed',subtype:null,text:'Learn about TODO: comments'},
- // An intentionally allowed quotation still matches the syntax scanner. This
- // records its false positive; it does not install a global copy allowlist.
+  
+  
  {id:'allowed-debug-quotation',expected:'allowed',subtype:null,text:'DEBUG: example of a diagnostic line'},
  {id:'spec-in-copy',expected:'leakage',subtype:TAXONOMY.specification,text:'화면 명세: 왼쪽에는 작업 목록을 배치한다.'},
  {id:'implementation-in-copy',expected:'leakage',subtype:TAXONOMY.implementation_instruction,text:'다음 단계에서 useEffect를 사용해 데이터를 연결하세요.'},
@@ -55,7 +55,7 @@ const input=(maxSurfaces=2048)=>JSON.stringify({schema:browserApi.INPUT_SCHEMA,p
   const deps={VERSION:version,_roadmapData:()=>({tasks:[{id:'T-0001',status:'in-progress',request:'React 프로젝트 작업',updated:'2000-01-01'}],milestones:[]}),
    _loadToggles:()=>({}),_toggleRegistry:{'evidence-gate':{desc:'작업 증거 확인',affects:'task',defaultOff:true}}};
   const state=dashboard.snapshot(temp,deps);
-  // Make only the synthetic fixture's environmental metadata reproducible.
+   
   state.root='/fixture/leerness';state.generatedAt='2000-01-01T00:00:00.000Z';
   const html=dashboard.renderHtml(state);
   const fixtureDigest=hash(JSON.stringify(['leerness.dashboard-ui-trials/v1',POLICY_VERSION,SCANNER_VERSION,
@@ -121,8 +121,8 @@ const input=(maxSurfaces=2048)=>JSON.stringify({schema:browserApi.INPUT_SCHEMA,p
    catch{throw new Error('dashboard_cli_failed');}
    assert.equal(live.readOnly,true);await page.setContent(dashboard.renderHtml(live));
    const r=await scan();assert.equal(r.status,'observed');assert.equal(r.omissions.surfaceLimit,0);
-   // Real project text has no independent ground truth in this test. Do not
-   // silently add it as a true negative to the labelled fixture corpus.
+    
+    
    console.log(JSON.stringify({actualDashboard:{...safeSummary(r),labels:'unadjudicated',includedInQualityRates:false}}));
   });
   console.log(`ui-boundary dashboard: ${passed}/${total} passed`);if(passed!==total)process.exitCode=1;

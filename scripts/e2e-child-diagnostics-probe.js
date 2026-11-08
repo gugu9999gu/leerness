@@ -1,7 +1,7 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Observation integration only: original E2E predicates, real temp files, no heavyweight CLI.
+ 
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const cp = require('node:child_process'), vm = require('node:vm');
@@ -10,9 +10,9 @@ const { createHash } = require('node:crypto');
 const root = path.resolve(__dirname, '..'), CLI = path.join(root, 'bin', 'leerness.js');
 const e2e = path.join(__dirname, 'e2e.js'), helper = path.join(__dirname, 'e2e-child-diagnostics.js');
 const source = fs.readFileSync(e2e, 'utf8').replace(/\r\n/g, '\n');
-// T-0342: e2e.js gives every call that runs selftest (selftest itself and doctor) one limit, SELFTEST_SPAWN_MS. The
-//   extracted blocks run in a VM context, so the constant is read from the source (exactly one definition) and
-//   passed in; the doctor call's budget is expected to be that value.
+ 
+ 
+ 
 const _spawnDefs = [...source.matchAll(/^const SELFTEST_SPAWN_MS = (\d+);$/gm)];
 assert.equal(_spawnDefs.length, 1, 'SELFTEST_SPAWN_MS definition missing or repeated in e2e.js');
 const SELFTEST_SPAWN_MS = Number(_spawnDefs[0][1]);
@@ -35,7 +35,7 @@ const unique = marker => {
 const extract = (start, end, precedingCounter = false) => {
   let a = unique(start); const b = unique(end);
   if (precedingCounter) {
-    // T-0359: a case opens with its shard guard, and the counter is the guard's first line.
+     
     const guard = source.lastIndexOf("if (e2eShard.take('", a);
     assert(guard >= 0 && /^if \(e2eShard\.take\('[^'\\\n]+'\)\) \{\n  total\+\+;\n\s*$/.test(source.slice(guard, a)), 'handoff counter boundary drift');
     a = guard;
@@ -85,7 +85,7 @@ try {
   };
   const childDiagnostics = /\bchildDiagnostics\b/.test(source) ? require(helper).childDiagnostics : undefined;
   if (/\bchildDiagnostics\b/.test(source)) assert.equal(typeof childDiagnostics, 'function');
-  const healthyReport = { version: 'diagnostic-fixture', mcpTools: 98, healthy: true, ok: true, selftest: { pass: 1, total: 1, ok: true, failed: [] } };
+  const healthyReport = { version: 'diagnostic-fixture', mcpTools: 98, healthy: null, ok: true, selftest: { status: 'not_run', pass: 0, total: 0, ok: null, failed: [] } };
   const unhealthyReport = { ...healthyReport, healthy: false, ok: false, selftest: { pass: 0, total: 7, ok: false, failed: ['diagnostic-doctor-owned-failure', ...Array.from({ length: 6 }, (_, i) => 'failure-' + i + '-' + 'x'.repeat(150))] } };
   const capture = (code, timeout) => {
     const started = performance.now();
@@ -101,7 +101,7 @@ try {
   const ignored = { ...success, stdout: null, stderr: null };
   const execute = (name, failingResult) => {
     const lines = [], calls = [];
-    const context = { fs, path, os: { ...os, tmpdir: () => arena }, process: { execPath: process.execPath, env: { ...process.env } }, CLI, SELFTEST_SPAWN_MS, performance, childDiagnostics, total: 0, failed: 0,
+    const context = { fs, path, os: { ...os, tmpdir: () => arena }, process: { execPath: process.execPath, env: { ...process.env } }, CLI, SELFTEST_SPAWN_MS, performance, childDiagnostics, childExitMatches: require(helper).childExitMatches, total: 0, failed: 0,
       e2eShard: { take: () => true },
       console: { log: (...args) => lines.push(args.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')) },
       cp: { spawnSync: (executable, args, options) => {
@@ -141,6 +141,56 @@ try {
   for (const name of ['surface', 'json']) check(name + ' actual unhealthy selftest remains failure with bounded names', () => {
     diagnostics(execute(name, unhealthy), unhealthy, name === 'surface' ? SELFTEST_SPAWN_MS : 990000, unhealthyReport);
   });
+
+  const migrationKeys = ['B(1.9.41)', 'B(1.9.41) #2', 'B(1.9.41) #3', 'B(1.9.41) #4'];
+  const migrationBlocks = migrationKeys.map(key => {
+    const marker = `if (e2eShard.take('${key}')) {`;
+    const start = unique(marker), end = source.indexOf('\n}', start);
+    assert(end > start, 'migration case boundary missing');
+    return source.slice(start, end + 2);
+  });
+  const migrationRun = (index, command, receipt) => {
+    const lines = [], calls = [];
+    const context = { fs: { ...fs,
+      existsSync: file => String(file).endsWith('migration-report.md') || fs.existsSync(file),
+      readFileSync: (file, ...args) => String(file).endsWith('migration-report.md')
+        ? '## 🤖 AI must re-read\nPrevious: 1.9.30\n' : fs.readFileSync(file, ...args),
+    }, path, os: { ...os, tmpdir: () => arena }, process: { execPath: process.execPath }, CLI,
+    performance, childDiagnostics, childExitMatches: require(helper).childExitMatches,
+    total: 0, failed: 0, e2eShard: { take: key => key === migrationKeys[index] },
+    console: { log: (...args) => lines.push(args.join(' ')) },
+    cp: { spawnSync: (file, args, options) => {
+      assert.equal(file, process.execPath); assert.equal(args[0], CLI);
+      calls.push({ command: args[1], timeout: options.timeout });
+      const stdout = args[1] === 'whats-new' ? JSON.stringify({ from: '1.9.33',
+        versions: Array.from({ length: 5 }, () => ({ newCommands: ['fixture'] })) })
+        : args[1] === 'migrate' ? 'AI must re-read 1.9.36 → 1.36.306 신규 명령'
+          : 'AI must re-read';
+      return { status: 0, signal: null, stdout, stderr: '', ...(args[1] === command ? receipt : {}) };
+    } } };
+    vm.runInNewContext(migrationBlocks[index], context, { filename: migrationKeys[index], timeout: 5000 });
+    assert.equal(context.total, 1);
+    return { lines, calls, failed: context.failed };
+  };
+  for (let index = 0; index < migrationKeys.length; index++) check(migrationKeys[index] + ' healthy receipt', () => {
+    assert.equal(migrationRun(index).failed, 0);
+  });
+  const rejected = [
+    ['nonzero with complete output', { status: 7 }],
+    ['missing status with complete output', { status: null }],
+    ['zero with spawn error', { error: { code: 'EIO', message: 'controlled spawn failure' } }],
+    ['zero with signal', { signal: 'SIGTERM' }],
+    ['native timeout receipt with complete fixture output', { status: timed.status, signal: timed.signal, error: timed.error }],
+  ];
+  for (const [index, command] of [[0, 'whats-new'], [1, 'migrate'], [2, 'migrate'], [3, 'migrate'], [3, 'handoff']]) {
+    for (const [label, receipt] of rejected) check(`${migrationKeys[index]} ${command}: ${label}`, () => {
+      const result = migrationRun(index, command, receipt);
+      assert.equal(result.failed, 1, 'complete output or retained report must not hide failed child');
+      if (index === 3 && command === 'migrate') assert.deepEqual(result.calls.map(call => call.command), ['migrate'], 'failed setup must not run handoff');
+      assert(objects(result.lines).some(value => value.timeoutMs === (command === 'whats-new' ? 20000 : command === 'handoff' ? 15000 : 60000)), 'bounded child diagnostics absent');
+    });
+  }
+
 } catch (e) { failures.push(e.stack || String(e)); }
 finally {
   check('input source SHA256 and mtime preserved', () => assert.deepEqual(files.map(snapshot), before));

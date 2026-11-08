@@ -1,4 +1,4 @@
-# 1.9.43: npm publish 시 명시적 제외 (package.json files 화이트리스트와 함께 이중 안전)
+
 _reports/
 *.private.md
 *.private.json

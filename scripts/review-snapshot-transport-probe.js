@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -286,10 +286,10 @@ let root;
       const pkgText = fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8');
       assert.ok(!/^(?:<<<<<<<|=======|>>>>>>>)/m.test(pkgText));
       const pkg = JSON.parse(pkgText);
-      // Validation only: this reads each script's command text and runs none of them. Iterating over the
-      // script names here made the orphan-guard detector (lib/pure-utils.js) read this live probe as a
-      // runner that executes every script, which marked every guard in this repository as live, including
-      // the dormant one the e2e self-check plants (T-0314). The values carry everything this check needs.
+       
+       
+       
+       
       for (const value of Object.values(pkg.scripts)) {
         for (const match of value.matchAll(/node\s+(\.\/[\w./-]+\.js)/g)) {
           assert.ok(fs.existsSync(path.resolve(__dirname, '..', match[1])), value + ': ' + match[1]);

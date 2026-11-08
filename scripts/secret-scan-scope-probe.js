@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0306: the secret scan follows Git's view of the repository. A nested repository or worktree is a
-// separate repository (Git never lists its files here), .git/info/exclude ignores like .gitignore,
-// and multi-segment skip entries such as .leerness/archive apply. An unignored file in the
-// repository itself is the control that must still be reported as committed.
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const crypto = require('crypto');
@@ -22,7 +22,7 @@ const env = {
   LEERNESS_NO_STALE_CHECK: '1', LEERNESS_INTERNAL: '1',
   GIT_CONFIG_NOSYSTEM: '1',
 };
-// Built at runtime so this source never contains a scanner match.
+ 
 const token = () => 'gh' + 'p_' + crypto.randomBytes(18).toString('hex');
 
 function exec(program, args, cwd) {
@@ -80,7 +80,7 @@ try {
   }
   console.log('PASS: .leerness/archive and .leerness-backup are skipped');
 
-  // A real linked worktree reads info/exclude from the common Git directory.
+   
   git(root, 'add', '-A');
   git(root, 'commit', '-q', '-m', 'fixture');
   const linked = path.join(base, 'linked');
@@ -94,7 +94,7 @@ try {
     `linked worktree must use the common info/exclude: ${w.all.slice(0, 600)}`);
   console.log('PASS: a linked worktree root uses the common .git/info/exclude');
 
-  // Encoding diagnostics share the nested-repository boundary.
+   
   write(path.join(root, 'src', 'bad.txt'), Buffer.from([0x6f, 0x6b, 0x20, 0xff, 0xfe, 0x0a]));
   write(path.join(root, 'vendor', 'lib', 'bad.txt'), Buffer.from([0x6f, 0x6b, 0x20, 0xff, 0xfe, 0x0a]));
   const enc = exec(process.execPath, [cli, 'encoding', 'check', root, '--json'], root);

@@ -1,5 +1,23 @@
 # State scopes and migration design
 
+## 2026-11-07 owner scope decision: Worktree-first; T-0344 dropped
+
+For parallel **code editing**, allocate a distinct Git worktree and task branch to each
+implementer. A branch without a separate worktree does not isolate local file paths.
+The Orchestrator alone merges accepted work and updates canonical shared project views;
+Agents must not jointly edit the same mutable Markdown state file. Private runtime state
+remains outside Git, with per-session ownership; immutable records are integrated after
+review. This is the selected direction, not a claim that all planned state migration is live.
+
+The standalone T-0344 POSIX publication-gap structural rewrite is **dropped by owner
+choice**, not solved. Worktree isolation does not protect concurrent readers/writers in
+one worktree or shared common-control storage. Preserve existing file locks, CAS, path
+containment checks and source-preserving recovery; serialize/fail closed for shared writes.
+A reproduced impactful bug can justify a small scoped fix and regression test later.
+Existing proposed M-0015/M-0016/M-0017/M-0018 contracts remain planned until separately
+implemented and verified; prior passages below are historical design, not automatic
+acceptance of a new multiwriter store or a requirement to resurrect T-0344.
+
 2026-09-14 additive retention: [UI review runs](ui-review-run-api.md) preserve
 actual file/ledger observations in create-only Git refs fenced against the current
 review control revision. A separate read-only check verifies the exact record and
@@ -139,7 +157,9 @@ interface; a database backend is a future evidence-driven option, not an MVP dep
    lock ordering, bounded critical sections, stale-owner recovery and byte/row limits;
    verify concurrent acquisition and crash recovery with real processes.
    Existing lock ownership must not be stolen solely because a PID looks absent or a TTL
-   expires. A new task-claim lease and a local write mutex have different recovery contracts.
+   expires. The one exception is the local state lock, reclaimed only after the dead-owner
+   conditions in state-store-locking.md hold. A new task-claim lease and a local write mutex
+   have different recovery contracts.
 10. Visibility is not authority: provider observations can be unknown or stale. A role or
     policy revision change requires revalidation; cross-worktree policy divergence cannot
     be resolved by taking whichever branch updated control most recently.

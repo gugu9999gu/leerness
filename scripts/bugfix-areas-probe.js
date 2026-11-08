@@ -1,24 +1,24 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0330: past fixes at completion. `bugfix receipt --areas` declares the files or folders a fix is about;
-// verify-claim then lists the bugfix receipts whose declared areas hold a file the task's evidence names: finished
-// ones (their task is done, also in retained history) as past fixes with the root cause and the probe to re-run,
-// the others apart as unfinished. It is advice: verify-claim's ok, reasons and exit stay as they were, and the probes
-// are shown, not run. Areas are declared, never inferred (inferred hotspots were rejected in P-0005), so without a
-// declared area nothing is printed. Every test works on its own copy of an initialized seed project.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process'), crypto = require('crypto');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const filter = process.argv.includes('--match') ? process.argv[process.argv.indexOf('--match') + 1] : '';
-// A filter must name something: a missing value or one that selects no test is a failure, not "0/0 passed".
-// Checked before any temporary folder exists, so this exit leaves nothing behind.
+ 
+ 
 if (process.argv.includes('--match') && !filter) { console.error('--match needs a test name substring'); process.exit(1); }
 const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bugfix-areas-'));
 const env = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1',
   LEERNESS_NO_AUTOCHCP: '1', LEERNESS_HOOK: '', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_SKILL_HISTORY: '1' };
 for (const key of ['LEERNESS_LANG', 'LEERNESS_OLLAMA_BASE_URL', 'LEERNESS_ENFORCE_POLICY']) delete env[key];
 for (const key of ['HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'TMPDIR']) { env[key] = path.join(arena, 'env-' + key.toLowerCase()); fs.mkdirSync(env[key]); }
-// Normal CLI settings: what a user's shell runs (usage bookkeeping on).
+ 
 const normalEnv = { ...env }; delete normalEnv.LEERNESS_INTERNAL;
 let passed = 0, failed = 0;
 const test =(name, fn) => { if (filter && !name.includes(filter)) return; try { fn(); passed++; console.log('PASS ' + name); } catch (e) { failed++; console.error('FAIL ' + name + ': ' + (e && e.stack || e)); } };
@@ -53,17 +53,17 @@ const addTask = (dir, title) => { const r = runIn(dir, ['task', 'add', title, '-
 const startFix = (dir, id) => { const r = runIn(dir, ['bugfix', 'start', id, '--repro', REPRO, '--expect-bad', 'BADSIG', '--path', dir, '--json']); assert.strictEqual(json(r, 'bugfix start').ok, true, 'bugfix start ' + show(r)); return r; };
 const receipt = (dir, id, ...flags) => runIn(dir, ['bugfix', 'receipt', id, ...flags, '--path', dir]);
 const okReceipt = (dir, id, ...flags) => { const r = receipt(dir, id, ...flags, '--json'); assert.strictEqual(json(r, 'receipt').ok, true, show(r)); return json(r, 'receipt'); };
-// A fix with a receipt; areas only when given.
+ 
 const fix = (dir, title, rootCause, areas) => { const id = addTask(dir, title); startFix(dir, id); okReceipt(dir, id, '--root-cause', rootCause, '--siblings-na', 'one site', ...(areas ? ['--areas', areas] : [])); return id; };
 const setStatus = (dir, id, status, evidence) => { const r = runIn(dir, ['task', 'update', id, '--status', status, ...(evidence ? ['--evidence', evidence] : []), '--path', dir]); assert.strictEqual(r.status, 0, 'task update ' + show(r)); };
 const claimJson = (dir, id) => { const r = runIn(dir, ['verify-claim', id, '--path', dir, '--json']); return { r, j: json(r, 'verify-claim ' + id) }; };
 const claimText = (dir, id) => runIn(dir, ['verify-claim', id, '--path', dir]);
 const verdict = (dir, id) => { const { r, j } = claimJson(dir, id); return { exit: r.status, ok: j.ok, reasons: j.reasons, verdict: j.verdict, textExit: claimText(dir, id).status }; };
-// The lines of an advice block, from its header to its last indented line (empty when there is no block).
+ 
 const block = (out, header) => { const ls = String(out || '').split(/\r?\n/); const i = ls.findIndex(l => l.includes(header)); if (i < 0) return []; const e = ls.findIndex((l, k) => k > i && !/^ {5}/.test(l)); return ls.slice(i, e < 0 ? ls.length : e); };
 const KO_PAST = '📚 지난 수정에서 배운 것', EN_PAST = '📚 Learned from past fixes', KO_OPEN = '🔧 done 이 확인되지 않은 bugfix', EN_OPEN = '🔧 Bugfixes not known to be done';
-// Made through the product, then only the status cell of that row edited: older trackers and `--force` updates can
-// hold words `task update` no longer writes.
+ 
+ 
 const setStatusCell = (dir, id, from, to) => {
   const tracker = path.join(dir, '.leerness', 'progress-tracker.md');
   const md = fs.readFileSync(tracker, 'utf8');
@@ -96,7 +96,7 @@ test('receipt --areas stores each area once, normalized, echoes it, and bugfix l
   assert.deepStrictEqual(okReceipt(P, D, '--root-cause', 'folder level cause', '--siblings-na', 'one caller', '--areas=src').areas, ['src'], '--areas=value form');
   const list = json(runIn(P, ['bugfix', 'list', '--path', P, '--json']), 'list');
   assert.deepStrictEqual(list.receipts.map(x => [x.id, x.areas]).sort(), [[A, ['src/orders.js', 'src/sync']], [D, ['src']]]);
-  // The Korean list line keeps its earlier bytes, with the areas column appended.
+   
   const text = runIn(P, ['bugfix', 'list', '--path', P]).stdout.split(/\r?\n/);
   assert.ok(text.includes(`  ${A}  probe=${REPRO.slice(0, 50)}  근본원인=기록됨  형제범위=기록됨  영역=src/orders.js,src/sync`), text.join('\n'));
   assert.ok(text.includes(`  ${D}  probe=${REPRO.slice(0, 50)}  근본원인=기록됨  형제범위=기록됨  영역=src`), text.join('\n'));
@@ -117,7 +117,7 @@ test('blank or unusable areas are refused and the receipt is left as it was, oth
 });
 
 test('whitespace around an area, tabs and line breaks included, is trimmed before the checks', () => {
-  // Control characters inside a path are refused (above); around it they are input whitespace, as for other values.
+   
   const P = fresh();
   const T = addTask(P, 'trim area'); startFix(P, T);
   assert.deepStrictEqual(okReceipt(P, T, '--areas', TAB + 'src/orders.js' + String.fromCharCode(10) + ', ' + TAB + 'lib' + TAB).areas, ['src/orders.js', 'lib']);
@@ -150,19 +150,19 @@ test('verify-claim shows finished fixes as past fixes and unfinished ones apart,
   const D = fix(P, 'second fix in src', 'folder level cause', 'src');
   const O = fix(P, 'open fix in sync', 'open cause', 'src/sync');
   setStatus(P, A, 'done', 'fixed src/orders.js'); setStatus(P, D, 'done', 'fixed src/orders.js'); setStatus(P, O, 'in-progress');
-  setStatusCell(P, D, 'done', 'verified');   // an older row; done too
+  setStatusCell(P, D, 'done', 'verified');    
   const B = addTask(P, 'later sync change'); setStatus(P, B, 'in-progress', 'changed src/sync/a.js and src/syncer.js and lib/other.js');
   const { j } = claimJson(P, B);
   assert.strictEqual(j.pastFixes.advisory, true);
   assert.deepStrictEqual(j.pastFixes.fixes.map(f => [f.id, f.files, f.taskStatus, f.status, f.rootCause, f.repro]), [
     [O, ['src/sync/a.js'], 'open', 'in-progress', 'open cause', REPRO],
     [D, ['src/sync/a.js', 'src/syncer.js'], 'done', 'verified', 'folder level cause', REPRO],
-    [A, ['src/sync/a.js'], 'done', 'done', 'status map missing', REPRO],   // src/syncer.js is not inside src/sync
+    [A, ['src/sync/a.js'], 'done', 'done', 'status map missing', REPRO],    
   ]);
   const out = claimText(P, B).stdout;
   const past = block(out, KO_PAST).join('\n'), open = block(out, KO_OPEN).join('\n');
   assert.ok(past.includes('권고, 게이트 아님') && past.includes('exit 0'), past);
-  // Done is a tracker status, not proof that the probe passes: the line says so (round 2) and claims no fix.
+   
   assert.ok(past.includes('task 가 done — exit 0 인지 확인') && !past.includes('고쳐진'), past);
   for (const s of [A, D, 'status map missing', 'folder level cause', REPRO, 'src/sync/a.js']) assert.ok(past.includes(s), s + ' missing:\n' + past);
   assert.ok(past.indexOf(D) < past.indexOf(A), 'newest first:\n' + past);
@@ -190,7 +190,7 @@ test('a finished fix kept in retained history still counts, and a receipt whose 
 
 test('status words are read exactly: unverified, not-done, 미완료 and [미완료] are not done; completed, 완료 and [완료] are', () => {
   const P = fresh();
-  // T-0332: one predicate with verify-claim, which reads the older bracketed form too.
+   
   const rows = [['unverified', 'open'], ['not-done', 'open'], ['미완료', 'open'], ['[미완료]', 'open'], ['completed', 'done'], ['완료', 'done'], ['[완료]', 'done']].map(([word, expected], i) => {
     const id = fix(P, 'fix ' + i, 'cause ' + i, 'src/orders.js');
     setStatus(P, id, 'done', 'fixed src/orders.js');
@@ -214,7 +214,7 @@ test('a retained fix whose history cannot be read is shown as status unknown, no
   assert.ok(ap.ok && ap.operationId, JSON.stringify(ap));
   const B = addTask(P, 'later order change'); setStatus(P, B, 'in-progress', 'changed src/orders.js');
   assert.deepStrictEqual(claimJson(P, B).j.pastFixes.fixes.map(f => [f.id, f.taskStatus]), [[A, 'done']], 'control: readable history');
-  fs.appendFileSync(path.join(P, '.leerness', 'archive', 'history', ap.operationId, 'progress-before.md'), '\n');   // the retained source changed
+  fs.appendFileSync(path.join(P, '.leerness', 'archive', 'history', ap.operationId, 'progress-before.md'), '\n');    
   const { r, j } = claimJson(P, B);
   assert.strictEqual(r.status, 0, 'verify-claim of another task still runs');
   assert.deepStrictEqual(j.pastFixes.fixes.map(f => [f.id, f.taskStatus, f.statusNote, f.statusError]), [[A, 'unknown', 'history-unreadable', 'history_source_changed']]);
@@ -243,7 +243,7 @@ test('no advice for the task\'s own fix, for files outside every area, or withou
   const D = fix(P, 'second fix in src', 'folder level cause');
   setStatus(P, A, 'done', 'fixed src/orders.js'); setStatus(P, D, 'done', 'fixed src/orders.js');
   const C = addTask(P, 'docs only change'); setStatus(P, C, 'in-progress', 'changed docs/notes.md');
-  // Receipts without areas: silence.
+   
   assert.deepStrictEqual(claimJson(P, A).j.pastFixes, { advisory: true, readable: true, fixes: [], skipped: [] });
   assert.deepStrictEqual(block(claimText(P, A).stdout, KO_PAST), []);
   okReceipt(P, A, '--areas', 'src/orders.js'); okReceipt(P, D, '--areas', 'src');
@@ -259,7 +259,7 @@ test('a malformed area skips that receipt only: the store stays valid and the sk
   const D = fix(P, 'second fix in src', 'folder level cause', 'src');
   const B = addTask(P, 'later sync change'); setStatus(P, B, 'in-progress', 'changed src/sync/a.js');
   const list = JSON.parse(storeBytes(P));
-  list.find(e => e.id === D).areas = 'src';   // hand-edited into a string
+  list.find(e => e.id === D).areas = 'src';    
   fs.writeFileSync(storeFile(P), JSON.stringify(list, null, 2) + '\n');
   assert.strictEqual(json(runIn(P, ['bugfix', 'list', '--path', P, '--json']), 'list').invalid, false, 'an advisory field must not invalidate the store (the done gate reads it)');
   assert.ok(runIn(P, ['bugfix', 'list', '--path', P]).stdout.includes('영역=(형식 오류)'));

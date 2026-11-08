@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -253,7 +253,7 @@ test('CLI is side-effect-free even with process/filesystem write tripwires', () 
   assert.deepEqual(snapshot(current), before);
 });
 
-// Transport closure: exercise the remaining stream and real stdio RPC paths.
+ 
 test('raw parser bounds total values even when each array is within its limit', () => {
   const raw = JSON.stringify(Array.from({ length: 10 }, () => Array(1000).fill(0)));
   assert.ok(Buffer.byteLength(raw) < domain.MAX_BYTES);
@@ -323,8 +323,8 @@ test('actual MCP invalid outer arguments remain failures without leaking values'
 test('actual MCP drains multiple pipe-sized replies and an unterminated final request', () => {
   const before = snapshot(empty);
   const messages = Array.from({ length: 100 }, (_, i) => call(i + 1, { inputJson: text }));
-  // Deliberately omit the final newline; EOF must process the last request and
-  // flush every queued response, not only the first pipe-buffer-sized prefix.
+   
+   
   const result = command(empty, ['mcp', 'serve', '--profile', 'full'], messages.map(m => JSON.stringify(m)).join('\n'));
   assert.equal(result.status, 0, result.stderr);
   assert.ok(Buffer.byteLength(result.stdout) > 65536);

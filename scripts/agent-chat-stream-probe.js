@@ -9,8 +9,8 @@ const { createHash } = require('crypto');
 const { EventEmitter } = require('events');
 const { PassThrough } = require('stream');
 const { MAX_OUTPUT_BYTES } = require('../lib/process-output');
-// Bound the entire probe, including leaked timers. All spawned programs are Node
-// byte fixtures, never provider CLIs, models or credential-bearing commands.
+ 
+ 
 if (!process.argv.includes('--worker')) {
   const r = cp.spawnSync(process.execPath, [__filename, '--worker'], { encoding: 'utf8', timeout: 45000 });
   process.stdout.write(r.stdout || '');process.stderr.write(r.stderr || '');

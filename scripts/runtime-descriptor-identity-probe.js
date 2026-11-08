@@ -1,7 +1,7 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Real files with narrow stat/failure seams. No runtime authority is mocked.
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -140,8 +140,8 @@ if(process.platform==='win32') {
   });
   test('parent replacement before confirmation is refused and retained original stays intact', () => {
     const f=fixture(),dir=path.dirname(f.file),retained=path.join(f.root,'retained-descriptor'),original=fs.readFileSync(f.file);
-    // Windows cannot rename a directory containing an open file. Preserve that
-    // file outside the directory first, then perform the actual parent swap.
+     
+     
     const {report}=observed(f,{open:i=>{if(i===2){fs.renameSync(f.file,retained);fs.renameSync(dir,dir+'.retained');fs.mkdirSync(dir);fs.writeFileSync(f.file,descriptor());}}});
     blocked(report);assert.deepStrictEqual(fs.readFileSync(retained),original);
   });

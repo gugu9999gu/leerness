@@ -1,10 +1,10 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0319: saved API skills (.leerness/api-skills/*.md) are matched against the in-progress task by handoff,
-// handoff --json, health --json and session close --json. All four read row.title and row.notes, which progress
-// rows do not have, so nothing ever matched. They now share one task-text helper (request and next action), and
-// the matcher ignores common words and bare URL parts, which had matched every saved skill (and so hid the audit
-// warning for an API task without a relevant skill). Korean tokens match without their trailing particle.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
@@ -30,19 +30,59 @@ const skill = (dir, id, name, direction, url, body) => {
   const d = path.join(dir, '.leerness', 'api-skills'); fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(d, id + '.md'), `---\nid: ${id}\nname: ${name}\ndirection: "${direction}"\ncaptured_at: 2026-09-30\nurls:\n  - ${url}\n---\n${body}\n`);
 };
-// Two saved skills whose bodies share only common words with an unrelated task.
+ 
 const stripe = dir => skill(dir, 'stripe-webhooks', 'Stripe webhooks', 'verify stripe payment webhook signatures',
   'https://stripe.com/docs/webhooks', 'The Stripe API sends signed events to the endpoint and the client verifies them with the API.');
 const slack = dir => skill(dir, 'slack-chat', 'Slack chat', 'post chat messages to a channel',
   'https://api.slack.com/methods/chat.postMessage', 'The API posts a message and the client reads the response from the API.');
 const surfaces = dir => ({
-  handoff: must(run(dir, ['handoff', dir, '--no-record', '--no-drift-check']), 'handoff'),
-  handoffJson: json(run(dir, ['handoff', dir, '--no-record', '--json']), 'handoff --json').apiSkills,
+  handoff: must(run(dir, ['handoff', dir, '--no-record', '--inspect', '--no-drift-check']), 'handoff --inspect'),
+  handoffJson: json(run(dir, ['handoff', dir, '--no-record', '--inspect', '--json']), 'handoff --inspect --json').apiSkills,
   health: json(run(dir, ['health', dir, '--json']), 'health --json').apiSkills,
   close: json(run(dir, ['session', 'close', dir, '--json']), 'session close --json').apiSkills,
 });
 
-test('handoff, handoff --json, health --json and session close --json match the in-progress task', () => {
+test('API skill terminal fields reject control characters without changing stored or JSON text', () => {
+  const dir = project('en', 'Integrate the Stripe payment webhook');
+  const id = 'stripe\u001b[2J-webhooks', name = 'Stripe\u0007 webhooks\u0085 한글 e\u0301';
+  const direction = 'verify stripe\u001b[2J signatures', url = 'https://stripe.com/\u0007webhooks';
+  const stored = path.join(dir, '.leerness', 'api-skills', 'stripe-webhooks.md');
+  skill(dir, 'stripe-webhooks', name, direction, url, 'Stripe webhook signature.');
+  fs.writeFileSync(stored, fs.readFileSync(stored, 'utf8').replace('id: stripe-webhooks', 'id: ' + id));
+  const before = fs.readFileSync(stored);
+  const controls = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029]/;
+  for (const args of [
+    ['api-skill', 'list', '--path', dir],
+    ['api-skill', 'match', 'stripe\u001b[2J', '--path', dir],
+    ['handoff', dir, '--no-record', '--inspect', '--no-drift-check'],
+  ]) {
+    const result = must(run(dir, args), args.slice(0, 2).join(' '));
+    assert.ok(result.includes('Stripe'), 'the relevant skill was not displayed');
+    assert.ok(!controls.test(result), 'raw terminal controls in ' + args.slice(0, 2).join(' '));
+    assert.ok(result.includes('한글 e\u0301'), 'valid Unicode was lost');
+  }
+  const listed = json(run(dir, ['api-skill', 'list', '--path', dir, '--json']), 'raw list').skills[0];
+  assert.strictEqual(listed.name, name);
+  assert.strictEqual(listed.id, id);
+  assert.strictEqual(listed.urls[0], url);
+  const matched = json(run(dir, ['api-skill', 'match', 'stripe', '--path', dir, '--json']), 'raw match').matches[0];
+  assert.strictEqual(matched.name, name);
+  assert.strictEqual(matched.id, id);
+  assert.ok(fs.readFileSync(stored).equals(before), 'display sanitization changed the source');
+});
+
+test('API skill malformed filename fallback is safe on terminal output', () => {
+  const dir = project('en', 'Read docs');
+  const folder = path.join(dir, '.leerness', 'api-skills');fs.mkdirSync(folder, { recursive: true });
+  const id = 'fallback\u0085-name';
+  fs.writeFileSync(path.join(folder, id + '.md'), 'No frontmatter.\n');
+  const shown = must(run(dir, ['api-skill', 'list', '--path', dir]), 'fallback');
+  assert.ok(shown.includes('fallback'));
+  assert.ok(!shown.includes('\u0085'));
+  assert.strictEqual(json(run(dir, ['api-skill', 'list', '--path', dir, '--json']), 'fallback JSON').skills[0].id, id);
+});
+
+test('handoff --inspect, handoff --inspect --json, health --json and session close --json match the in-progress task; a default read leaves API skills out', () => {
   const dir = project('en', 'Integrate the Stripe payment webhook');
   stripe(dir); slack(dir);
   const s = surfaces(dir);
@@ -54,14 +94,18 @@ test('handoff, handoff --json, health --json and session close --json match the 
     assert.strictEqual(s[name].matched, 1, name + ' ' + JSON.stringify(s[name]));
     assert.deepStrictEqual(s[name].matchedIds, ['stripe-webhooks'], name);
   }
-  // The next action counts too: here only it names the API.
+  const plain = json(run(dir, ['handoff', dir, '--no-record', '--json']), 'default handoff --json');
+  assert.strictEqual(plain.inspection.status, 'not_inspected');
+  assert.strictEqual(plain.apiSkills, undefined, 'a default read reported API skills');
+  assert.ok(!must(run(dir, ['handoff', dir, '--no-record']), 'default handoff').includes('stripe-webhooks'), 'a default read listed API skills');
+   
   const next = project('en', 'Build the checkout flow', 'verify the stripe webhook signature');
   stripe(next); slack(next);
-  assert.deepStrictEqual(json(run(next, ['handoff', next, '--no-record', '--json']), 'next action').apiSkills.matchedIds, ['stripe-webhooks']);
+  assert.deepStrictEqual(json(run(next, ['handoff', next, '--no-record', '--inspect', '--json']), 'next action').apiSkills.matchedIds, ['stripe-webhooks']);
 });
 
 test('common words, URL parts and the placeholder next action do not make every saved skill match', () => {
-  // The task keeps the default next action ("write the next action"); a saved skill that says "write" must not match.
+   
   const dir = project('en', 'Fix the login page layout for the https site');
   stripe(dir); slack(dir);
   skill(dir, 'notes', 'Notes', 'store notes', 'https://example.com/notes', 'Write notes to the server.');
@@ -71,7 +115,7 @@ test('common words, URL parts and the placeholder next action do not make every 
 });
 
 test('Korean task text matches a skill without its trailing particles', () => {
-  // Only the particle-stripped forms (결제를 → 결제, 웹훅으로 → 웹훅) occur in the skill; nothing else overlaps.
+   
   const dir = project('ko', '결제를 웹훅으로 붙인다');
   skill(dir, 'pay-hook', '결제 웹훅', '결제 웹훅 연동', 'https://example.com/pay', '결제가 끝나면 웹훅을 보낸다.');
   skill(dir, 'chat', '채팅', '채팅 메시지 전송', 'https://example.com/chat', '메시지를 보낸다.');
@@ -80,7 +124,7 @@ test('Korean task text matches a skill without its trailing particles', () => {
   assert.deepStrictEqual(s.handoffJson.matchedIds, ['pay-hook']);
   const other = project('ko', '로그인 화면 정리');
   skill(other, 'pay-hook', '결제 웹훅', '결제 웹훅 연동', 'https://example.com/pay', '결제가 끝나면 웹훅을 보낸다.');
-  assert.strictEqual(json(run(other, ['handoff', other, '--no-record', '--json']), 'ko other').apiSkills.matched, 0);
+  assert.strictEqual(json(run(other, ['handoff', other, '--no-record', '--inspect', '--json']), 'ko other').apiSkills.matched, 0);
 });
 
 test('an explicit api-skill match query keeps working, including one made only of common words', () => {
@@ -89,7 +133,7 @@ test('an explicit api-skill match query keeps working, including one made only o
   const ids = query => json(run(dir, ['api-skill', 'match', query, '--path', dir, '--json']), 'match ' + query).matches.map(m => m.id).sort();
   assert.deepStrictEqual(ids('stripe'), ['stripe-webhooks']);
   assert.deepStrictEqual(ids('slack messages'), ['slack-chat']);
-  // A query made only of common words still searches with them, as before.
+   
   assert.deepStrictEqual(ids('api'), ['slack-chat', 'stripe-webhooks']);
 });
 
@@ -103,10 +147,10 @@ test('audit warns about an API task without a relevant saved skill', () => {
 });
 
 test('documentation words and URL paths neither match unrelated skills nor hide the audit warning', () => {
-  // Cross-model review 2026-09-30: "read" matched "reads" in the Slack body and "docs" the Stripe URL path.
+   
   const dir = project('en', 'Read GitHub API docs');
   stripe(dir); slack(dir);
-  const hj = () => json(run(dir, ['handoff', dir, '--no-record', '--json']), 'handoff --json').apiSkills;
+  const hj = () => json(run(dir, ['handoff', dir, '--no-record', '--inspect', '--json']), 'handoff --inspect --json').apiSkills;
   assert.strictEqual(hj().matched, 0, JSON.stringify(hj()));
   assert.deepStrictEqual(json(run(dir, ['api-skill', 'match', 'Read GitHub API docs', '--path', dir, '--json']), 'match').matches, []);
   assert.ok(json(run(dir, ['audit', dir, '--json']), 'audit').findings.some(f => f.kind === 'api_skill_missing'), 'unrelated skills hid the warning');
@@ -115,29 +159,29 @@ test('documentation words and URL paths neither match unrelated skills nor hide 
 });
 
 test('Korean documentation words, URL paths in a body and one shared body word do not match; two body words do', () => {
-  // Cross-model review round 2: "GitHub API 문서 읽기" matched skills whose bodies say "API 문서", and a body URL path
+   
   // (https://stripe.com/methods) matched "methods". A task needs the skill's name, direction or host, or two body words.
   const ko = project('ko', 'GitHub API 문서 읽기');
   skill(ko, 'stripe-ko', 'Stripe 결제', '결제 웹훅 검증', 'https://stripe.com/docs', 'Stripe API 문서에 따라 서명을 검증한다.');
   skill(ko, 'slack-ko', 'Slack 채팅', '채널 메시지 전송', 'https://api.slack.com', 'Slack API 문서의 예제를 따른다.');
-  assert.strictEqual(json(run(ko, ['handoff', ko, '--no-record', '--json']), 'ko handoff').apiSkills.matched, 0);
+  assert.strictEqual(json(run(ko, ['handoff', ko, '--no-record', '--inspect', '--json']), 'ko handoff').apiSkills.matched, 0);
   assert.ok(json(run(ko, ['audit', ko, '--json']), 'ko audit').findings.some(f => f.kind === 'api_skill_missing'), 'Korean documentation words hid the warning');
   const en = project('en', 'Read GitHub API methods');
   skill(en, 'stripe-body-url', 'Stripe charges', 'create charges', 'https://stripe.com/docs', 'See https://stripe.com/methods for every call.');
-  assert.strictEqual(json(run(en, ['handoff', en, '--no-record', '--json']), 'en handoff').apiSkills.matched, 0);
+  assert.strictEqual(json(run(en, ['handoff', en, '--no-record', '--inspect', '--json']), 'en handoff').apiSkills.matched, 0);
   const two = project('en', 'Handle invoice retries for billing');
   skill(two, 'payments', 'Payments', 'take card payments', 'https://example.com/pay', 'Each invoice can fail; billing retries it later.');
   skill(two, 'one-word', 'Mailer', 'send mail', 'https://example.com/mail', 'Billing mail goes out nightly.');
-  assert.deepStrictEqual(json(run(two, ['handoff', two, '--no-record', '--json']), 'two-word handoff').apiSkills.matchedIds, ['payments']);
+  assert.deepStrictEqual(json(run(two, ['handoff', two, '--no-record', '--inspect', '--json']), 'two-word handoff').apiSkills.matchedIds, ['payments']);
 });
 
 test('an uncertain skill match is reported without a warning, so a strict audit does not fail on it', () => {
-  // Cross-model review round 3: "Integrate OAuth API" and a skill named Authentication whose body mentions OAuth share
-  // one word. The two-word rule left the task without a match, the audit warned, and --strict made that a failure.
+   
+   
   const dir = project('en', 'Integrate OAuth API');
   const base = json(run(dir, ['audit', dir, '--json']), 'audit without a skill');
   assert.ok(base.findings.some(f => f.kind === 'api_skill_missing'), 'control: no warning without any skill');
-  // The threshold is the project's own warning count, so the API warning alone decides whether --strict fails.
+   
   const strict = label => { const r = run(dir, ['audit', dir, '--json', '--strict', '--threshold', String(base.warnings)]); return { r, a: json(r, label) }; };
   const before = strict('strict audit without a skill');
   assert.notStrictEqual(before.r.status, 0, 'control: strict audit passed with the API warning');
@@ -148,19 +192,19 @@ test('an uncertain skill match is reported without a warning, so a strict audit 
   assert.ok(weak && weak.severity === 'info' && weak.weakMatchIds.includes('auth'), JSON.stringify(a.findings));
   assert.strictEqual(a.warnings, base.warnings - 1, 'only the API warning went away');
   assert.strictEqual(r.status, 0, 'strict audit failed on an uncertain match\n' + r.stdout + r.stderr);
-  // handoff lists relevant skills only; one shared word is not enough there.
-  assert.strictEqual(json(run(dir, ['handoff', dir, '--no-record', '--json']), 'handoff').apiSkills.matched, 0);
+   
+  assert.strictEqual(json(run(dir, ['handoff', dir, '--no-record', '--inspect', '--json']), 'handoff').apiSkills.matched, 0);
 });
 
 test('a word repeated in the task counts once toward the two body words', () => {
-  // Review round 3: "methods methods" counted as two different body words and matched an unrelated skill.
+   
   const dir = project('en', 'Read GitHub API methods methods');
   skill(dir, 'stripe-methods', 'Stripe charges', 'create charges', 'https://stripe.com', 'Every call lists its methods.');
-  assert.strictEqual(json(run(dir, ['handoff', dir, '--no-record', '--json']), 'handoff --json').apiSkills.matched, 0);
+  assert.strictEqual(json(run(dir, ['handoff', dir, '--no-record', '--inspect', '--json']), 'handoff --inspect --json').apiSkills.matched, 0);
 });
 
 test('the audit leaves out the placeholder next action', () => {
-  // Both tasks keep the default next action. A saved skill that merely says "write", or 다음 and 작성, is unrelated.
+   
   const kinds = dir => json(run(dir, ['audit', dir, '--json']), 'audit --json').findings.map(f => f.kind);
   const en = project('en', 'Add the Stripe API webhook endpoint');
   skill(en, 'notes', 'Notes', 'store notes', 'https://example.com/notes', 'Write notes to the server.');
@@ -171,7 +215,7 @@ test('the audit leaves out the placeholder next action', () => {
 });
 
 test('lazy detection flags a blocked task whose next action is a placeholder, and only then', () => {
-  // T-0319 moved this predicate into pure-utils to share it; it had no test before.
+   
   const dir = project('en', 'Ship the release');
   const flagged = () => json(run(dir, ['lazy', 'detect', dir, '--json']), 'lazy detect').findings.some(f => f.kind === 'blocker_no_next_action');
   const added = must(run(dir, ['task', 'add', 'Waiting for the vendor key', '--status', 'blocked', '--next', 'n/a', '--path', dir]), 'blocked task');
@@ -183,7 +227,7 @@ test('lazy detection flags a blocked task whose next action is a placeholder, an
   const { _isTrivialNextAction: trivial } = require('../lib/pure-utils');
   for (const v of ['', '  ', '없음', '-', '---', 'n/a', 'NA', 'none', 'TBD', 'todo', '...', '?', 'write the next action', '다음 액션 작성']) assert.ok(trivial(v), JSON.stringify(v));
   for (const v of ['verify the webhook', 'na-na rollout', 'ask the vendor']) assert.ok(!trivial(v), JSON.stringify(v));
-  // Only the whole default is a placeholder; a real next action that contains its words is kept (cross-model review).
+   
   for (const v of ['Implement the UI to write the next action for Stripe payments', '다음 액션 작성 화면에 결제 연동']) assert.ok(!trivial(v), JSON.stringify(v));
   const { _taskMatchText } = require('../lib/pure-utils');
   assert.strictEqual(_taskMatchText({ request: 'Fix the editor', nextAction: 'Implement the UI to write the next action for Stripe payments' }),

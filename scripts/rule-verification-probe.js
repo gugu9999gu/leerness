@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -137,7 +137,7 @@ try {
     assert.equal(r.count, 0); assert.equal(r.summary.compliance, 'unknown');
   });
 } finally {
-  // Only this test's mkdtemp directory; no project or shared runtime cleanup.
+   
   assert.ok(path.resolve(arena).startsWith(path.resolve(os.tmpdir()) + path.sep));
   fs.rmSync(arena, { recursive: true, force: true });
 }

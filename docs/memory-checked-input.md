@@ -23,7 +23,7 @@ JSON and generated Markdown are rendered before that publication check. The exis
 | `store_unreadable` | Source/parent observation, read or descriptor-close failure |
 | `store_changed` | Observed presence, identity, metadata or bytes no longer match the admitted input |
 
-`--force` retains explicit duplicate semantics but does not waive admission. Valid UTF-8 BOM, literal U+FFFD, Unicode and multiline canonical extension values remain accepted. Read-only memory loaders keep their prior behavior. Generic non-memory stores do not use this input reader. Plan restore is unchanged.
+`--force` retains explicit duplicate semantics but does not waive admission. Valid UTF-8 BOM, literal U+FFFD, Unicode and multiline canonical extension values remain accepted. Read-only memory loaders remain separate from mutation admission. Their current checked UTF-8 reads reject malformed encoding without replacement before JSON parsing or Markdown fallback. Existing read-only fallback for valid-UTF-8 JSON parsing/shape failures and canonical absence is unchanged; a successful read does not certify canonical JSON integrity. Generic non-memory stores do not use this input reader. Plan restore is unchanged.
 
 `migrate apply` retains its existing outer candidate-discovery behavior and dry-run/audit semantics. A selected actual backfill takes a fresh checked input inside the same canonical lock and passes it to the save helper. This is not validation of every store skipped by discovery, nor an atomic operation across decisions and lessons.
 

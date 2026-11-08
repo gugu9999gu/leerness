@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0145 multi-session regression: two first-time creators may both observe
-// "absent", but the create-only check inside the file lock must let exactly
-// one policy win and must never overwrite that winner.
+ 
+ 
+ 
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');

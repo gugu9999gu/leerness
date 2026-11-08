@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -84,7 +84,7 @@ test('fresh English authoring keeps Korean project language and reports the choi
   assert.match(text(f.agents), /Required behavior/);assert.match(text(f.agents), /otherwise Korean/);
   assert.match(text(f.file('language-policy.md')), /artifacts in English/);
   const s = json(call(f, ['status', '--json']));assert.strictEqual(s.language, 'ko');assert.strictEqual(s.authoringPolicy.language, 'en');
-  // Existing template localization is partial; do not assert that every file is English.
+   
   assert.match(text(f.file('language-policy.md')), /not proof.*complete template localization/);
 });
 test('omitted selection on reinstall retains the choice and unrelated metadata', () => {
@@ -93,7 +93,13 @@ test('omitted selection on reinstall retains the choice and unrelated metadata',
   assert.match(text(f.agents), /minimal mode/);assert.match(text(f.agents), /artifacts in English/);
 });
 test('existing Korean projects are never switched by an ordinary reinstall', () => {
-  const f = fixture();success(call(f, init()));assert.ok(!Object.hasOwn(manifest(f), 'authoringLanguage'));assert.match(text(f.agents), /매 세션 첫 행동/);
+  const f = fixture();success(call(f, init()));
+  assert.ok(!Object.hasOwn(manifest(f), 'authoringLanguage'));
+  assert.strictEqual(manifest(f).language, 'ko');
+  assert.strictEqual(text(f.file('LANGUAGE')).trim(), 'ko');
+  assert.strictEqual(policy.readPolicy(f.dir).language, 'ko');
+  assert.match(text(f.agents), /컨텍스트 읽기 범위/);
+  assert.ok(!text(f.agents).includes('## Context reading scope'));
 });
 test('ordinary fresh installation works before a workspace directory exists', () => {
   const dir = path.join(arena, (++sequence) + '-empty-project');fs.mkdirSync(dir);const f = { dir };
@@ -152,7 +158,7 @@ test('session close uses English placeholders but retains Korean source evidence
   const r = json(call(f, ['session', 'close', '--json', '--no-record', '--no-suggest']));assert.strictEqual(r.authoringPolicy.projectLanguage, 'ko');
   const h = text(f.file('session-handoff.md'));assert.ok(h.includes(sample));assert.match(h, /Agree the next priority/);assert.match(text(f.file('current-state.md')), /no planned tasks/);assert.ok(!h.includes('없음'));
 });
-// Exercise the CLI's actual injected brief without probing or invoking a model.
+ 
 const hook = path.join(arena, 'capture-brief.cjs');
 fs.writeFileSync(hook, `const agents=require(${JSON.stringify(path.resolve(__dirname, '../lib/agents'))});agents.agentsCmd=(root,sub,args,deps)=>{console.log(JSON.stringify({brief:deps.has('--raw')?'':(deps._harnessBrief?deps._harnessBrief():''),task:args[0]}));};`);
 test('delegation receives policy from the target project without changing the task', () => {

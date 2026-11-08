@@ -31,8 +31,8 @@ for(const s of ['decisions','lessons'])for(const kind of ['update','drop','resto
   const trace=JSON.parse(fs.readFileSync(traceFile));
   if(kind==='duplicate'){
     assert.equal(trace.calls,0);const after=snapshot(p);
-    // The canonical lock can change directory mtime during a duplicate no-op;
-    // persistent domain bytes and file metadata must still remain unchanged.
+     
+     
     for(const suffix of ['.json','.md','.archive.md']){const file='./.leerness/'+s+suffix;assert.deepEqual(after[file],before[file]);}
     return;
   }

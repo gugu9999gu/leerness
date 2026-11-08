@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 if (!process.argv.includes('--worker')) {
@@ -7,7 +7,7 @@ if (!process.argv.includes('--worker')) {
   try {
     const env = { ...process.env, REVIEW_FEEDBACK_PROBE: arena, LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_INTERNAL: '1' };
     for (const key of ['HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP']) { env[key] = path.join(arena, key.toLowerCase()); fs.mkdirSync(env[key]); }
-    // 600 s: the full run took 3 min 37 s on a loaded machine (2026-09-30); 240 s cut it off without a summary.
+     
     const r = cp.spawnSync(process.execPath, [__filename, '--worker', ...process.argv.slice(2)], { env, encoding: 'utf8', timeout: 600000, windowsHide: true });
     process.stdout.write(r.stdout || ''); process.stderr.write(r.stderr || '');
     if (r.error) console.error(r.error.message); process.exitCode = r.status === 0 && !r.error ? 0 : 1;
@@ -235,7 +235,7 @@ test('invalid UTF-8 is rejected before writing', () => {
   const r = cp.spawnSync(process.execPath, [cli, 'review-feedback', 'submit', '--stdin', '--path', root], { input: Buffer.from([0xff]), encoding: 'utf8', timeout: 30000 });
   assert.equal(r.status, 2); assert.ok(r.stdout.includes('invalid_utf8')); assert.deepEqual(bytes(root), before);
 });
-// Cross-model review 2026-09-30, round 3: every --file refusal exits 2 and leaves the history as it was.
+ 
 test('--file refuses a missing file, a directory, an oversized file, a byte-order mark and invalid UTF-8 without writing; the exact limit is read', () => {
   const MAX = require('../lib/review-checkpoint').MAX_BYTES;
   const root = fixture(), before = bytes(root), dir = path.join(arena, 'file-inputs-' + (++n)); fs.mkdirSync(dir);
@@ -261,13 +261,13 @@ test('--file refuses a missing file, a directory, an oversized file, a byte-orde
   assert.equal(r.status, 1, r.stdout + r.stderr); assert.equal(JSON.parse(r.stdout).result.status, 'FAIL'); assert.notDeepEqual(bytes(root), before);
 });
 test('--file reads through one descriptor and stops at the limit, whatever size the file reported', () => {
-  // Round 3: a stat of the path followed by a full read of it read a file that grew or was replaced after the check
-  // in full. Here every size check sees 2 bytes while the file holds 1 MiB; the reader must stop at the limit.
+   
+   
   const T = require('../lib/review-checkpoint-transport'), MAX = require('../lib/review-checkpoint').MAX_BYTES;
   const file = path.join(arena, 'grown-' + (++n) + '.json'); fs.writeFileSync(file, '{' + ' '.repeat(1 << 20) + '}');
   const orig = { statSync: fs.statSync, fstatSync: fs.fstatSync, openSync: fs.openSync, readSync: fs.readSync, readFileSync: fs.readFileSync };
   const small = st => Object.assign(Object.create(Object.getPrototypeOf(st)), st, { size: 2 });
-  // readFileSync may itself read through fs.readSync, so the two counts are kept apart and the larger one is used.
+   
   let fd = -1, viaRead = 0, viaFile = 0, error = null;
   try {
     fs.statSync = function (p, ...rest) { const st = orig.statSync.call(this, p, ...rest); return p === file ? small(st) : st; };
@@ -292,10 +292,10 @@ test('corrupted or truncated history cannot restart or be treated as pass', () =
   const root = fixture(); fs.appendFileSync(L.executionLedgerPath(root), '{invalid}\n');
   reject(() => F.show(root, 'review-1'), 'feedback_history_unavailable'); reject(() => F.start(root, contract()), 'feedback_history_unavailable');
 });
-// T-0314 (owner decision, 2026-09-29): Leerness serves several agents, so AGENTS.md holds the one full copy
-// of the protocol in standard and minimal mode, and CLAUDE.md imports it with `@AGENTS.md` (Claude Code loads
-// the imported file at launch) instead of repeating it; the copies in CLAUDE.md and the workflow had been
-// loaded three times per session start.
+ 
+ 
+ 
+ 
 test('generated instructions carry the protocol once, in AGENTS.md, in both languages', () => {
   const { coreFiles } = require('../bin/leerness');
   const rf = require('../lib/review-feedback-guidance');
@@ -378,9 +378,9 @@ test('existing MCP record tool binds the structured feedback round', () => {
   assert.ok(message && message.result && !message.result.isError, JSON.stringify(message));
   const body = JSON.parse(message.result.content[0].text); assert.equal(body.event.review.feedbackRoundId, 'round-1');
 });
-// T-0316: staged reviewers and the route to GO. Owner decisions (2026-09-30): stages review in order, only the
-// stage that gave NO GO re-reviews, and the same model may serve several stages but each stage reviews in its own
-// new session, never the session that recorded the implementation.
+ 
+ 
+ 
 const finalReviewer = { provider: 'codex', model: 'final-model' };
 function staged(finalBy = reviewer) { return { schema: C.CONTRACT_V2, reviewId: 'review-1', taskId: 'T-1', scope: '사용자 조회 요청만 검수',
   criteria: [{ id: 'user-id', outcome: '유효한 userId에서만 API를 호출한다.' }],
@@ -431,22 +431,22 @@ test('staged review runs stages in order and only the stage that gave NO GO re-r
   assert.deepEqual(bytes(root), before);
   s = F.submit(root, stagedRound({ stageId: 'first', roundId: 'r-1', session: 'rev-first', verdict: 'FAIL', findings: [issue()] }));
   assert.equal(s.status, 'FAIL'); assert.equal(s.decision, 'NO GO'); assert.equal(s.currentStageId, 'first'); assert.equal(s.issues[0].stageId, 'first');
-  // The stage that gave NO GO re-reviews the revision; its session may continue within the stage.
+   
   s = F.submit(root, stagedRound({ stageId: 'first', roundId: 'r-2', expectedRound: 1, attempt: 'impl-2', rev: 'b', session: 'rev-first', resolutions: [resolve()] }));
   assert.equal(s.status, 'open'); assert.equal(s.decision, 'NOT_REVIEWED'); assert.equal(s.currentStageId, 'final');
   assert.deepEqual(s.stages.map(x => x.status), ['PASS', 'open']); assert.match(s.nextAction, /previous stage passed/);
   reject(() => F.submit(root, stagedRound({ stageId: 'first', roundId: 'r-3', expectedRound: 2, attempt: 'impl-2', rev: 'b', session: 'rev-first', resolutions: [resolve()] })), 'feedback_stage_not_current');
-  // Round IDs are review-wide: the API sees another stage's round ID as a conflicting replay, and a direct ledger
-  // append (which bypasses the replay check) meets the staged duplicate-round rule.
+   
+   
   const reused = stagedRound({ stageId: 'final', roundId: 'r-2', attempt: 'impl-2', rev: 'b', session: 'rev-final' });
   reject(() => F.submit(root, reused), 'feedback_replay_conflict');
   reject(() => L.appendExecutionEvent(root, { event: C.SUBMIT, taskId: 'T-1', feedbackRound: reused }), 'feedback_duplicate_round');
   reject(() => F.submit(root, stagedRound({ stageId: 'final', roundId: 'f-1', attempt: 'impl-2', rev: 'b', session: 'rev-final', verdict: 'FAIL', findings: [issue()] })), 'feedback_issue_redefined');
-  // A later stage starts at its own round 0 and may raise its own blockers in that first round.
+   
   s = F.submit(root, stagedRound({ stageId: 'final', roundId: 'f-1', attempt: 'impl-2', rev: 'b', session: 'rev-final', verdict: 'FAIL', findings: [issue('F-1')] }));
   assert.equal(s.status, 'FAIL'); assert.equal(s.currentStageId, 'final'); assert.equal(s.issues.find(x => x.id === 'F-1').stageId, 'final');
   assert.equal(s.issues.find(x => x.id === 'I-1').status, 'resolved');
-  // NO GO from the final stage goes back to the final stage only.
+   
   reject(() => F.submit(root, stagedRound({ stageId: 'first', roundId: 'r-3', expectedRound: 2, attempt: 'impl-3', rev: 'c', session: 'rev-first', resolutions: [resolve()] })), 'feedback_stage_not_current');
   s = F.submit(root, stagedRound({ stageId: 'final', roundId: 'f-2', expectedRound: 1, attempt: 'impl-3', rev: 'c', session: 'rev-final', resolutions: [resolve('resolved', 'F-1')] }));
   assert.equal(s.status, 'PASS'); assert.equal(s.decision, 'GO'); assert.equal(s.currentStageId, null); assert.equal(s.approvalGranted, false);
@@ -465,10 +465,10 @@ test('each stage reviews in its own session, never one another stage or the impl
   reject(() => F.submit(root, first({ stageId: 'final', roundId: 'f-1', session: 'model-session-1' })), 'feedback_session_reused');
   reject(() => F.submit(root, first({ stageId: 'final', roundId: 'f-1', session: 'worker-session' })), 'feedback_session_not_independent');
   assert.deepEqual(bytes(root), before);
-  // The same model is accepted for the next stage in a new session.
+   
   const s = F.submit(root, first({ stageId: 'final', roundId: 'f-1', session: 'model-session-2' }));
   assert.equal(s.decision, 'GO'); assert.deepEqual(s.stages.map(x => x.sessions), [['model-session-1'], ['model-session-2']]);
-  // Stage reviewers stay frozen per stage.
+   
   const other = stagedFixture(staged(finalReviewer));
   F.submit(other, stagedRound({ contract: staged(finalReviewer), stageId: 'first', roundId: 'r-1', session: 'rev-1' }));
   reject(() => F.submit(other, stagedRound({ contract: staged(finalReviewer), stageId: 'final', roundId: 'f-1', session: 'rev-2', reviewer })), 'feedback_reviewer_mismatch');
@@ -507,19 +507,19 @@ test('the GO route lists each blocker check with its latest status, the reviews 
   const en = require('../lib/review-feedback-transport').summarize(s, 'en');
   for (const line of ['[GO_ROUTE] What GO needs', 'Stage 1/2: 1차 검수', 'round 2/3, 1 review(s) left', '[x] null-id', '[ ] valid-id: 정상 ID는 기존대로 요청 — failed: normal ID sends nothing',
     'Change the implementation for I-1.', 'Record the implementation attempt: leerness agents record completed',
-    'Request the review from codex/review-model (1차 검수, first): next round expectedRound=2, in a session not used by another stage.',
+    "Request the review from codex/review-model (1차 검수, first): next round expectedRound=2, continuing this stage's session rev-1 where available (otherwise a session not used by another stage or the implementation).",
     'leerness review-feedback show review-1 --json', 'leerness agents record reviewed', 'After this stage\'s GO: 최종 검수']) assert.ok(en.includes(line), line + '\n' + en);
   assert.ok(en.indexOf('[GO_ROUTE]') < en.indexOf('[TO_GO]'));
   const ko = require('../lib/review-feedback-transport').summarize(s, 'ko');
   for (const line of ['[GO_ROUTE] GO까지 남은 일', '2단계 중 1단계: 1차 검수', '라운드 2/3, 남은 검수 1회', '구현 시도를 기록합니다',
-    'codex/review-model에게 검수를 요청합니다(1차 검수, first): 다음 라운드 expectedRound=2, 다른 단계가 쓰지 않은 새 세션에서.']) assert.ok(ko.includes(line), line + '\n' + ko);
-  // The single-reviewer route has no stage and never asks for a new session.
+    'codex/review-model에게 검수를 요청합니다(1차 검수, first): 다음 라운드 expectedRound=2, 가능하면 이 단계가 쓴 세션 rev-1을 이어서(아니면 다른 단계·구현이 쓰지 않은 세션에서).']) assert.ok(ko.includes(line), line + '\n' + ko);
+   
   const v1 = F.submit(fixture(), round());
   assert.equal(v1.goRoute.stage, null); assert.deepEqual(v1.goRoute.budget, { roundsUsed: 1, maxRounds: 3, remaining: 2 });
   assert.equal(v1.goRoute.steps.find(x => x.code === 'request-review').newSession, false);
   assert.ok(!Object.hasOwn(v1.nextRoundTemplate, 'stageId')); assert.equal(v1.nextRoundTemplate.schema, C.ROUND);
 });
-// Every placeholder must block on its own: fill all but one and the round is still rejected.
+ 
 function placeholders(t, at = []) {
   if (Array.isArray(t)) return t.flatMap((x, i) => placeholders(x, [...at, i]));
   if (!t || typeof t !== 'object') return [];
@@ -546,7 +546,7 @@ test('the next-round skeleton is rejected until every placeholder is filled, the
     'resolutions.0.checks.0.evidence', 'criteriaResults.0.status', 'criteriaResults.0.evidence', 'regressionCheck.status', 'regressionCheck.evidence'];
   for (const k of cases) {
     const t = F.submit(k.root, k.first).nextRoundTemplate, before = bytes(k.root), paths = placeholders(t).map(p => p.join('.'));
-    // Everything the reviewer decides stays a placeholder; a valid default here would record an undecided review.
+     
     assert.deepEqual(paths, ['roundId', ...(k.name === 'staged' ? ['reviewerSession'] : []), ...decided], k.name);
     rejectAny(() => F.submit(k.root, t));
     for (const skip of paths) rejectAny(() => F.submit(k.root, fillTemplate(t, k.answers, skip)));
@@ -554,7 +554,7 @@ test('the next-round skeleton is rejected until every placeholder is filled, the
     const s = F.submit(k.root, fillTemplate(t, k.answers));
     assert.equal(k.name === 'staged' ? s.stages[0].status : s.status, 'PASS', k.name); assert.equal(s.issues[0].status, 'resolved');
   }
-  // A resolved issue can only stay resolved, so its checks come prefilled as passed; its evidence is still required.
+   
   const root = stagedFixture(), two = { ...issue('I-2'), acceptanceCriteria: [{ id: 'empty-id', outcome: '빈 문자열에서는 요청 0회' }] };
   F.submit(root, stagedRound({ stageId: 'first', roundId: 'r-1', session: 'rev-1', verdict: 'FAIL', findings: [issue(), two] }));
   const t = F.submit(root, stagedRound({ stageId: 'first', roundId: 'r-2', expectedRound: 1, attempt: 'impl-2', rev: 'b', session: 'rev-1', verdict: 'FAIL',
@@ -575,7 +575,7 @@ test('human GO route follows --language, then LEERNESS_LANG, then the project la
   assert.ok(show([], { LEERNESS_LANG: 'en' }).stdout.includes('[GO_ROUTE] What GO needs'), 'environment');
   fs.writeFileSync(path.join(root, '.leerness', 'manifest.json'), JSON.stringify({ language: 'en' }));
   assert.ok(show([]).stdout.includes('[GO_ROUTE] What GO needs'), 'project language');
-  // An editor-added byte-order mark must not turn the report Korean (cross-model review 2026-09-30).
+   
   fs.writeFileSync(path.join(root, '.leerness', 'manifest.json'), Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(JSON.stringify({ language: 'en' }))]));
   assert.ok(show([]).stdout.includes('[GO_ROUTE] What GO needs'), 'project language behind a byte-order mark');
   assert.ok(show([], { LEERNESS_LANG: 'ko' }).stdout.includes('[GO_ROUTE] GO까지 남은 일'), 'environment before project');
@@ -585,7 +585,7 @@ test('human GO route follows --language, then LEERNESS_LANG, then the project la
   }
   assert.ok(JSON.parse(show(['--json', '--language', 'en']).stdout).result.goRoute.steps.length > 0);
 });
-// The printed GO route: the commands a reviewer copies, with only their <placeholders> filled.
+ 
 const ROUTE_WORDS = {
   en: { record: 'agents record completed', submit: 'review-feedback submit', review: 'agents record reviewed',
     attempt: { 'what changed': 'guard the missing id', 'attempt id': 'impl-3', provider: 'claude', model: 'worker-model', 'changed files or test output': 'test:no-id' },
@@ -597,7 +597,7 @@ const ROUTE_WORDS = {
 const routeEnv = { ...process.env, LEERNESS_LANG: '' };
 const printed = (text, needle) => { const line = text.split('\n').find(l => l.includes(needle)); assert.ok(line, needle + '\n' + text); return line.slice(line.indexOf('leerness ')); };
 const fill = (cmd, values) => cmd.replace(/<([^<>]+)>/g, (m, key) => { assert.ok(key in values, 'unfilled ' + m + ' in ' + cmd); return values[key]; });
-// A project after a failing first round: its human report (with the printed route) and the filled second round.
+ 
 function routeProject(lang) {
   const root = fixture(); F.submit(root, round());
   const show = json => cp.spawnSync(process.execPath, [cli, 'review-feedback', 'show', 'review-1', '--path', root, '--language', lang, ...(json ? ['--json'] : [])],
@@ -610,9 +610,9 @@ function routeProject(lang) {
   return { root, text: show(false), roundFile, w: ROUTE_WORDS[lang] };
 }
 test('the printed GO route runs as printed in both languages: record the attempt, submit the round, record the review, reach GO', () => {
-  // Cross-model review 2026-09-30: round 1 found missing flags and no submit step; round 2 found the "< file"
-  // redirection PowerShell cannot run, and a test that removed it. The route now uses --file; each printed command is
-  // run with only its <placeholders> filled (a round file path with a space and Korean), and contains no shell operator.
+   
+   
+   
   const argv = cmd => (cmd.match(/"[^"]*"|\S+/g) || []).map(a => a.replace(/^"|"$/g, ''));
   for (const lang of ['en', 'ko']) {
     const { root, text, roundFile, w } = routeProject(lang);
@@ -627,9 +627,9 @@ test('the printed GO route runs as printed in both languages: record the attempt
     assert.equal(F.show(root, 'review-1').status, 'PASS', lang);
   }
 });
-// Round 3 asked for the route in an actual PowerShell rather than an argument split: the three printed commands, with
-// only their placeholders filled (the round file as a PowerShell literal), run as one script; `leerness` is a function
-// that runs this CLI, as the npm shim does.
+ 
+ 
+ 
 const POWERSHELL = (() => {
   for (const exe of ['pwsh', ...(process.platform === 'win32' ? ['powershell'] : [])]) {
     const r = cp.spawnSync(exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'exit 7'], { windowsHide: true, timeout: 60000, env: routeEnv });
@@ -678,7 +678,7 @@ test('a Korean human report localizes its prose but keeps markers, enum values a
   const doneRoot = fixture(); F.submit(doneRoot, round()); const done = F.submit(doneRoot, second()), doneKo = summarize(done, 'ko');
   assert.ok(doneKo.includes('- 남은 차단 지적이 없고, 선언된 대로 검수 기준을 통과했습니다.')); assert.ok(doneKo.includes('선언된 대로 검수 기준을 충족했습니다.'));
   noEnglish(doneKo, 'pass');
-  // JSON stays the English machine text.
+   
   assert.ok(stopped.nextAction.startsWith('Stop automatic revisions')); assert.ok(stopped.goRequirements.notice.startsWith('Resolve the referenced'));
   assert.ok(stopped.goRequirements.decisions[0].requiredAction.startsWith('Report the remaining blockers'));
   assert.ok(stopped.goRoute.decisions[0].requiredAction.startsWith('Report the remaining blockers'));
@@ -701,6 +701,144 @@ test('terminal review record binds the latest round of its own stage in a staged
   const last = record('review-final', 'f-1', 'impl-2', finalReviewer); assert.equal(last.status, 0, last.stdout + last.stderr);
   assert.equal(JSON.parse(last.stdout).event.review.feedbackRoundId, 'f-1');
 });
+function resumeDecision(c = contract(), overrides = {}) {
+  return { schema: C.RESUME_SCHEMA, reviewId: c.reviewId, taskId: c.taskId, contractDigest: C.digest(c), expectedRound: 1,
+    lastRoundId: 'round-1', stopReasons: ['verification-incomplete'], decisionId: 'owner-decision-1',
+    decisionSource: 'synthetic user instruction', evidence: ['synthetic:owner-decision'], ...overrides };
+}
+function resumeFirst(c = contract()) {
+  const r = round(c); r.verdict = 'NEEDS_DECISION'; r.criteriaResults[0].status = 'unverified';
+  r.criteriaResults[0].evidence = ['test:not-run']; return r;
+}
+test('resume CLI records a declared one-time decision and keeps NO GO and frozen state', () => {
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c)); const before = bytes(root);
+  assert.equal(F.show(root, c.reviewId).nextRoundTemplate, null);
+  const bad = resumeDecision(c); delete bad.decisionSource;
+  assert.equal(command(root, ['resume', '--stdin', '--json'], bad).status, 2); assert.deepEqual(bytes(root), before);
+  const run = command(root, ['resume', '--stdin', '--json'], resumeDecision(c));
+  assert.equal(run.status, 1, run.stderr + run.stdout); const result = JSON.parse(run.stdout);
+  assert.equal(result.ok, true); const s = result.result;
+  assert.equal(s.status, 'NEEDS_DECISION'); assert.equal(s.decision, 'NO GO'); assert.equal(s.approvalGranted, false);
+  assert.equal(s.roundCount, 1); assert.equal(s.goRoute.budget.remaining, 2); assert.equal(s.goRequirements.automaticRevisionAllowed, false);
+  assert.equal(s.contractDigest, C.digest(c)); assert.deepEqual(s.contract, c); assert.equal(s.issues[0].id, 'I-1');
+  assert.equal(s.nextRoundTemplate.expectedRound, 1); assert.equal(s.resumePermit.decisionId, 'owner-decision-1');
+  assert.equal(s.goRoute.steps.find(x => x.code === 'request-review').reuseAttempt, false);
+  assert.ok(s.trust.includes('owner decision and its source are not authenticated'));
+  for (const lang of ['ko', 'en']) {
+    const text = require('../lib/review-feedback-report').summarize(s, lang);
+    assert.ok(text.includes('NO GO')); assert.ok(text.includes('review-feedback submit')); assert.ok(!text.includes('[DECISION_REQUIRED]'));
+  }
+  const events = L.readExecutionEvents(root, 2000, { preserveAll: true }).events;
+  const recorded = events.filter(e => e.event === C.RESUME); assert.equal(recorded.length, 1);
+  assert.deepEqual(recorded[0].feedbackResume, resumeDecision(c)); assert.equal(recorded[0].executed, false);
+  const after = bytes(root); assert.equal(F.resume(root, resumeDecision(c)).roundCount, 1); assert.deepEqual(bytes(root), after);
+});
+test('resume checks frozen task, digest, previous round, budget, reason, v2, and identity provenance', () => {
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c)); const before = bytes(root);
+  for (const patch of [{ contractDigest: hash('f') }, { expectedRound: 2 }, { lastRoundId: 'wrong' }, { taskId: 'T-other' }]) {
+    reject(() => F.resume(root, resumeDecision(c, patch)), 'feedback_resume_stale'); assert.deepEqual(bytes(root), before);
+  }
+  reject(() => F.resume(root, resumeDecision(c, { stopReasons: ['disputed-issue'] })), 'feedback_resume_stale');
+  reject(() => F.resume(root, resumeDecision(c, { evidence: [] })), 'feedback_list_invalid');
+  const exhausted = { ...F.project(L.readExecutionEvents(root, 2000, { preserveAll: true }).events).states.get(c.reviewId), contract: { ...c, maxRounds: 1 } };
+  reject(() => C.authorizeResume(exhausted, resumeDecision(c)), 'feedback_budget_exhausted');
+  const unsupported = { ...exhausted, contract: c, stopReasons: ['verification-incomplete', 'disputed-issue'] };
+  reject(() => C.authorizeResume(unsupported, resumeDecision(c)), 'feedback_resume_stale');
+  const stagedState = C.initial(staged(finalReviewer)); reject(() => C.authorizeResume(stagedState, resumeDecision(c)), 'feedback_review_not_stopped');
+  assert.deepEqual(bytes(root), before);
+});
+test('resume requires the current stage binding in a staged ledger', () => {
+  const c = staged(finalReviewer), root = stagedFixture(c);
+  const r = stagedRound({ contract: c, stageId: 'first', roundId: 'round-1', session: 'review-session', verdict: 'NEEDS_DECISION' });
+  r.criteriaResults[0].status = 'unverified'; F.submit(root, r); const before = bytes(root);
+  reject(() => F.resume(root, resumeDecision(c)), 'feedback_resume_stale'); assert.deepEqual(bytes(root), before);
+});
+test('resume locked append cannot be bypassed and failed reviews do not consume the permit', () => {
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c)); const before = bytes(root);
+  reject(() => L.appendExecutionEvent(root, { event: C.RESUME, taskId: c.taskId, feedbackResume: resumeDecision(c, { expectedRound: 2 }) }), 'feedback_resume_stale');
+  reject(() => L.appendExecutionEvent(root, { event: 'execution.completed', feedbackResume: resumeDecision(c) }), 'feedback_event_mismatch');
+  reject(() => L.appendExecutionEvent(root, { event: C.RESUME, taskId: c.taskId, feedbackResume: resumeDecision(c), executed: true }), 'feedback_resume_execution_invalid');
+  assert.deepEqual(bytes(root), before);
+  F.resume(root, resumeDecision(c)); const permitted = bytes(root);
+  const invalid = second(c); invalid.reviewer = { ...reviewer, model: 'wrong-reviewer' };
+  reject(() => F.submit(root, invalid), 'feedback_reviewer_mismatch');
+  const noAttempt = second(c); noAttempt.implementationAttemptId = 'not-recorded';
+  reject(() => F.submit(root, noAttempt), 'feedback_implementation_missing');
+  assert.deepEqual(bytes(root), permitted); assert.equal(F.show(root, c.reviewId).resumePermit.decisionId, 'owner-decision-1');
+  const accepted = F.submit(root, second(c)); assert.equal(accepted.status, 'PASS'); assert.equal(accepted.roundCount, 2);
+  assert.equal(accepted.resumePermit, null); assert.equal(accepted.rounds[0].roundId, 'round-1');
+  assert.deepEqual(accepted.issues[0].acceptanceCriteria, issue().acceptanceCriteria); assert.equal(accepted.approvalGranted, false);
+  const done = bytes(root); assert.equal(F.resume(root, resumeDecision(c)).roundCount, 2); assert.deepEqual(bytes(root), done);
+});
+test('resume incomplete next review stops again and cannot reuse its decision', () => {
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c)); F.resume(root, resumeDecision(c));
+  const r = second(c); r.verdict = 'NEEDS_DECISION'; r.resolutions = [resolve('unresolved')];
+  r.resolutions[0].checks[0].status = 'unverified'; r.criteriaResults[0].status = 'unverified';
+  // The unresolved original blocker gives a second stop reason; a second permit must not erase it.
+  const s = F.submit(root, r); assert.equal(s.resumePermit, null); assert.equal(s.roundCount, 2);
+  assert.ok(s.stopReasons.includes('verification-incomplete')); assert.ok(s.stopReasons.includes('no-resolved-blocker'));
+  const before = bytes(root); reject(() => F.resume(root, resumeDecision(c, { expectedRound: 2, lastRoundId: 'round-2', decisionId: 'owner-2' })), 'feedback_resume_stale');
+  assert.deepEqual(bytes(root), before);
+});
+test('resume concurrent CLI decisions append only one permission', () => {
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c));
+  const coordinator = `const cp=require('child_process');const [cli,root,a,b]=process.argv.slice(1); Promise.all([a,b].map(input=>new Promise(resolve=>{const p=cp.spawn(process.execPath,[cli,'review-feedback','resume','--stdin','--json','--path',root],{windowsHide:true});let out='';p.stdout.on('data',x=>out+=x);p.on('close',code=>resolve({code,out}));p.stdin.end(input);}))).then(x=>console.log(JSON.stringify(x)));`;
+  const result = cp.spawnSync(process.execPath, ['-e', coordinator, cli, root, JSON.stringify(resumeDecision(c)), JSON.stringify(resumeDecision(c, { decisionId: 'other-decision' }))], { encoding: 'utf8', timeout: 45000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr); const outcomes = JSON.parse(result.stdout);
+  assert.deepEqual(outcomes.map(x => x.code).sort(), [1, 2]); assert.ok(outcomes.some(x => x.out.includes('feedback_resume_already_authorized')));
+  assert.equal(L.readExecutionEvents(root, 2000, { preserveAll: true }).events.filter(e => e.event === C.RESUME).length, 1);
+});
+test('resume concurrent reviews consume only one permission and one round', () => {
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c)); F.resume(root, resumeDecision(c));
+  const a = second(c), b = { ...second(c), roundId: 'competing-round' };
+  const coordinator = `const cp=require('child_process');const [cli,root,a,b]=process.argv.slice(1); Promise.all([a,b].map(input=>new Promise(resolve=>{const p=cp.spawn(process.execPath,[cli,'review-feedback','submit','--stdin','--json','--path',root],{windowsHide:true});let out='';p.stdout.on('data',x=>out+=x);p.on('close',code=>resolve({code,out}));p.stdin.end(input);}))).then(x=>console.log(JSON.stringify(x)));`;
+  const result = cp.spawnSync(process.execPath, ['-e', coordinator, cli, root, JSON.stringify(a), JSON.stringify(b)], { encoding: 'utf8', timeout: 45000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr); const outcomes = JSON.parse(result.stdout);
+  assert.deepEqual(outcomes.map(x => x.code).sort(), [0, 2]);
+  const state = F.show(root, c.reviewId); assert.equal(state.roundCount, 2); assert.equal(state.resumePermit, null);
+});
+test('resume upgraded MCP records the actual second round without granting release approval', () => {
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c)); F.resume(root, resumeDecision(c)); F.submit(root, second(c));
+  const requests = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'resume-probe', version: '1' } } },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'leerness_agents_record', arguments: {
+      path: root, event: 'reviewed', summary: 'Second review recorded', taskId: 'T-1', attemptId: 'mcp-review-2', targetAttemptId: 'impl-2',
+      provider: reviewer.provider, model: reviewer.model, evidence: 'review:round-2', feedbackRoundId: 'round-2' } } },
+  ];
+  const p = cp.spawnSync(process.execPath, [cli, 'mcp', 'serve', '--profile', 'full'], { cwd: root, encoding: 'utf8',
+    input: requests.map(x => JSON.stringify(x)).join('\n') + '\n', timeout: 45000, windowsHide: true });
+  assert.equal(p.status, 0, p.stderr + p.stdout);
+  const message = p.stdout.trim().split(/\r?\n/).map(x => JSON.parse(x)).find(x => x.id === 2);
+  assert.ok(message && message.result && !message.result.isError, JSON.stringify(message));
+  const body = JSON.parse(message.result.content[0].text); assert.equal(body.event.review.feedbackRoundId, 'round-2');
+  assert.equal(F.show(root, c.reviewId).approvalGranted, false);
+});
+if (process.env.LEERNESS_PREVIOUS_INSTALL) test('resume older installed reader compatibility is measured without production history', () => {
+  const installed = path.resolve(process.env.LEERNESS_PREVIOUS_INSTALL), oldCli = path.join(installed, 'bin', 'leerness.js');
+  const oldLib = path.join(installed, 'lib', 'role-fallback.js'); assert.ok(fs.existsSync(oldCli)); assert.ok(fs.existsSync(oldLib));
+  const c = contract(), root = fixture(c); F.submit(root, resumeFirst(c)); F.resume(root, resumeDecision(c));
+  const other = { ...contract(), reviewId: 'other-review', taskId: 'T-OTHER' }; F.start(root, other);
+  const runOld = args => cp.spawnSync(process.execPath, [oldCli, ...args], { encoding: 'utf8', timeout: 60000, windowsHide: true });
+  const beforeSubmit = runOld(['review-feedback', 'show', c.reviewId, '--path', root, '--json']);
+  assert.equal(beforeSubmit.status, 1, beforeSubmit.stdout + beforeSubmit.stderr);
+  const oldBefore = JSON.parse(beforeSubmit.stdout); assert.equal(oldBefore.ok, true);
+  assert.equal(oldBefore.result.status, 'NEEDS_DECISION'); assert.equal(oldBefore.result.nextRoundTemplate, null);
+  assert.equal(oldBefore.result.resumePermit, undefined);
+  F.submit(root, second(c)); const saved = bytes(root);
+  const afterSubmit = runOld(['review-feedback', 'show', c.reviewId, '--path', root, '--json']);
+  assert.equal(afterSubmit.status, 1, afterSubmit.stdout + afterSubmit.stderr);
+  assert.equal(JSON.parse(afterSubmit.stdout).result.status, 'NEEDS_DECISION');
+  const unrelated = runOld(['review-feedback', 'show', other.reviewId, '--path', root, '--json']);
+  assert.equal(unrelated.status, 0, unrelated.stdout + unrelated.stderr);
+  assert.equal(JSON.parse(unrelated.stdout).result.status, 'open');
+  const syncScript = 'const l=require(process.argv[1]);l.synchronizeExecutionLedger(process.argv[2]);console.log("sync-returned")';
+  const sync = cp.spawnSync(process.execPath, ['-e', syncScript, oldLib, root], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+  assert.equal(sync.status, 0, sync.stderr + sync.stdout); assert.ok(sync.stdout.includes('sync-returned')); assert.deepEqual(bytes(root), saved);
+  const handoff = runOld(['handoff', root, '--json']);
+  assert.equal(handoff.status, 0, handoff.stderr + handoff.stdout); assert.doesNotThrow(() => JSON.parse(handoff.stdout));
+  assert.deepEqual(bytes(root), saved); assert.equal(F.show(root, c.reviewId).roundCount, 2);
+  console.log('VERIFIED old-reader: retains stopped projection; unrelated review remains readable; no history rewrite');
+});
 test('reviewer guidance names staged sessions and the numbered route to GO in both languages', () => {
   const g = require('../lib/review-feedback-guidance');
   for (const term of ['first and a final reviewer', 'only the stage that gave NO GO re-reviews', 'new session (reviewerSession)', 'same model may serve several stages',
@@ -709,4 +847,8 @@ test('reviewer guidance names staged sessions and the numbered route to GO in bo
     assert.ok(g.projectGuidance('ko').includes(term), term);
   }
 });
+require('./review-feedback-resume-cases')({ test, C, F, L, contract, round, second, fixture, resumeFirst, resumeDecision,
+  bytes, reject, staged, stagedFixture, stagedRound, finalReviewer, cli, command, hash, resolve });
+require('./review-feedback-loop-cases')({ test, C, F, L, contract, round, second, fixture, issue, reject, staged, stagedFixture, stagedRound,
+  command, resolve });
 console.log(`${passed}/${passed + failed} passed`); process.exitCode = failed ? 1 : 0;

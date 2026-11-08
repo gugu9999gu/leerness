@@ -1,25 +1,27 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0337: the remaining fixed-language errors on the shared write path follow the project language. lib/memory-input.js
-// and lib/memory-output.js gave every project an English reason with Korean advice; lib/memory-input-bytes.js,
-// lib/memory-publication-read.js, the session handoff update (lib/context-current.js) and two state-lock errors were
-// English everywhere; the state-lock timeout, fail-open and release messages were Korean everywhere; and the ten notes
-// that say what a partly finished save left behind were English, appended to errors in either language. The modules ask
-// lib/error-language.js, where the CLI registers the language of its own text (--language, LEERNESS_LANG, then the
-// manifest of the project named by --path or a path argument); the notes use that rule directly. Codes are unchanged,
-// every existing text stays byte for byte in the language that had it, and a program that loads the modules without
-// the CLI keeps the text they had before. Module messages are checked whole, in every language state, by direct calls
-// in a child process (faults are injected there, never in this process); the command tests run the CLI against copies
-// of initialized seeds in folders with Hangul in their names, from the arena, never from the project.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js'), LIB = path.resolve(__dirname, '../lib');
 const observe = fn => { try { fn(); return null; } catch (e) { return { code: e && e.code, message: e && e.message }; } };
 const observeAsync = async fn => { try { await fn(); return null; } catch (e) { return { code: e && e.code, message: e && e.message }; } };
 
-// Every reason a module gives, as [code, English, Korean]. The call-shape test below requires the sources to name
-// exactly these pairs, so a reason added without its Korean text, or changed in one language only, fails here.
+ 
+ 
 const MEMORY_INPUT = {
+  prefixLimitInvalid: ['E_STORE_INVALID', 'prefix byte limit is invalid', '지정한 제한 읽기 한도가 올바르지 않습니다'],
+  publicationPending: ['E_STORE_CHANGED', 'may be in an active or interrupted save; publication state is not proof of absence', '저장 중이거나 저장이 중단된 흔적이 있어 파일이 없는 것으로 처리할 수 없습니다'],
   parentNotDirectory: ['E_STORE_INVALID', 'parent is not a regular directory', '읽으려는 파일의 상위 폴더가 일반 폴더가 아닙니다'],
   hardLinked: ['E_STORE_INVALID', 'is not a single-link regular file', '읽으려는 파일이 하드 링크가 하나뿐인 일반 파일이 아닙니다'],
   overLimit: ['E_STORE_LIMIT', 'exceeds diagnostic byte limit', '읽으려는 파일이 바이트 한도를 넘습니다'],
@@ -40,6 +42,8 @@ const MEMORY_INPUT = {
   changed: ['E_STORE_CHANGED', 'changed during operation', '작업하는 동안 파일이 바뀌었습니다'],
 };
 const MEMORY_OUTPUT = {
+  absenceUnconfirmed: ['E_OUTPUT_CHANGED', 'absence could not be confirmed', '파일이 없는 상태인지 확인할 수 없습니다'],
+  publicationPending: ['E_OUTPUT_CHANGED', 'may be in an active or interrupted save; cannot publish as a new file', '저장 중이거나 저장이 중단된 흔적이 있어 새 파일로 저장할 수 없습니다'],
   changed: ['E_OUTPUT_CHANGED', 'changed before publication', '저장하기 전에 파일이 바뀌었습니다'],
   parentResolution: ['E_OUTPUT_CHANGED', 'parent resolution is unreadable', '대상 파일의 상위 폴더 경로를 확인할 수 없습니다'],
   parentUnreadable: ['E_OUTPUT_CHANGED', 'parent is unreadable', '대상 파일의 상위 폴더를 읽을 수 없습니다'],
@@ -53,7 +57,7 @@ const MEMORY_OUTPUT = {
   createdByOther: ['E_OUTPUT_CHANGED', 'another writer created the target', '다른 작업이 대상 파일을 먼저 만들었습니다'],
   newTargetInvalid: ['E_OUTPUT_CHANGED', 'new target failed post-publication validation', '새로 만든 대상 파일이 저장 후 검증을 통과하지 못했습니다'],
   changedAfter: ['E_OUTPUT_CHANGED', 'target or parent changed after publication', '저장한 뒤 대상 파일이나 상위 폴더가 바뀌었습니다'],
-  // The next three are on the POSIX rename-away path only: the call-shape test covers them, the direct calls do not.
+   
   wonWindow: ['E_OUTPUT_CHANGED', 'another writer won the compare-and-publish window', '비교하고 저장하는 사이에 다른 작업이 먼저 썼습니다'],
   createdDuring: ['E_OUTPUT_CHANGED', 'another writer created the target during publication', '저장하는 동안 다른 작업이 대상 파일을 만들었습니다'],
   publishedInvalid: ['E_OUTPUT_CHANGED', 'published target failed validation', '저장한 대상 파일이 검증을 통과하지 못했습니다'],
@@ -70,7 +74,7 @@ const HANDOFF = {
 };
 const ADVICE = { input: ['preserve the original, check its state and retry', '원본을 보존하고 상태를 확인한 뒤 재시도하세요'],
   output: ['preserve the external change and retry', '외부 변경을 보존하고 다시 시도하세요'] };
-// The message each language state gives. 'unset' is a program without the CLI: the text from before T-0337.
+ 
 const inputText = (state, [, en, ko], file) => state === 'ko' ? `${ko}: ${file} — ${ADVICE.input[1]}`
   : `Memory input ${en}: ${file} — ${state === 'en' ? ADVICE.input[0] : ADVICE.input[1]}`;
 const outputText = (state, [, en, ko], file) => state === 'ko' ? `${ko}: ${file} — ${ADVICE.output[1]}`
@@ -82,21 +86,24 @@ const READ_TEXT = ['Memory publication read failed', '저장 대상 파일을 �
 const LOCK = {
   ownership: ['state lock ownership was lost before nested work', '중첩 작업을 시작하기 전에 상태 잠금 소유권을 잃었습니다'],
   busy: ['state lock is held by another async operation in this process', '같은 프로세스의 다른 비동기 작업이 상태 잠금을 잡고 있습니다'],
-  stopped: (file, why) => [`Lock acquisition failed — stopped to protect the data from concurrent writes: ${file} (${why})`,
-    `락 획득 실패 — 동시 쓰기로부터 데이터를 보호하기 위해 중단합니다: ${file} (${why})`],
+  stopped: (file, why, lockPath, action) => [`Lock acquisition failed — stopped to protect the data from concurrent writes: ${file} (${why})\n  Lock path: ${lockPath}\n  What to do: ${action[0]}`,
+    `락 획득 실패 — 동시 쓰기로부터 데이터를 보호하기 위해 중단합니다: ${file} (${why})\n  잠금 경로: ${lockPath}\n  조치: ${action[1]}`],
   warning: (file, why) => [`⚠ Lock acquisition failed — continuing without protection for a non-critical record only: ${file} (${why}).\n`,
     `⚠ 락 획득 실패 — 비핵심 기록만 보호 없이 진행합니다: ${file} (${why}).\n`],
   release: (file, reason) => [`Lock ownership could not be confirmed, so the result is not reported as a success: ${file} (${reason})`,
     `락 소유권을 확인하지 못해 작업 결과를 성공으로 확정하지 않습니다: ${file} (${reason})`],
 };
-// The release failure is also written to stderr as a warning.
+ 
+// These cases inject mkdir faults and leave no lock folder, so only the no-lock texts can appear.
+const LOCK_ACTION = { gone: ['The lock is gone now. Retry.', '지금은 잠금이 없습니다. 다시 실행하세요.'],
+  cause: ['Fix the cause shown above, then retry.', '위에 나온 원인을 해결한 뒤 다시 실행하세요.'] };
 const releaseWarning = (state, file, reason) => `⚠ ${LOCK.release(file, reason)[state === 'en' ? 0 : 1]}\n`;
-// Language states of the direct calls: nothing registered, the two languages, then three that count as nothing
-// registered: a resolver that throws, a value that is not a function and a resolver that answers another language.
+ 
+ 
 const STATES = [['unset', undefined], ['ko', () => 'ko'], ['en', () => 'en'], ['throws', () => { throw new Error('no language'); }], ['value', 'ko'], ['other', () => 'fr']];
 const pick = (state, [en, ko]) => state === 'ko' ? ko : en;
 
-// ---- direct calls, in a child process of this file ------------------------------------------------------------------
+ 
 const directAt = process.argv.indexOf('--direct');
 if (directAt >= 0) {
   const [mode, dir, outFile] = process.argv.slice(directAt + 1);
@@ -111,8 +118,21 @@ if (directAt >= 0) {
     if (mode === 'modules') {
       const input = require('../lib/memory-input'), bytes = require('../lib/memory-input-bytes'), read = require('../lib/memory-publication-read');
       const output = require('../lib/memory-output'), handoff = require('../lib/context-current'), io = require('../lib/io');
-      // Each case gives the file its message names and the call; it runs once in every language state.
+       
       const inputCases = {
+        prefixLimitInvalid: () => {
+          const original = Buffer.from('[]'), f = fresh('prefix.json', original);
+          return [f, () => { try { return input.captureCheckedFilePrefix(f, -1); } finally { assert.ok(fs.readFileSync(f).equals(original)); } }];
+        },
+        publicationPending: () => {
+          const original = Buffer.from('original input\n'), next = Buffer.from('planned replacement\n'), f = fresh('publishing.json', original);
+          const scratch = fs.mkdtempSync(path.join(dir, `.${path.basename(f)}.publish-cas-`));
+          fs.writeFileSync(path.join(scratch, 'next'), next); fs.renameSync(f, path.join(scratch, 'before'));
+          return [f, () => { try { return input.captureCheckedFileInput(f); } finally {
+            assert.ok(!fs.existsSync(f)); assert.deepStrictEqual(fs.readdirSync(scratch).sort(), ['before', 'next']);
+            assert.ok(fs.readFileSync(path.join(scratch, 'before')).equals(original) && fs.readFileSync(path.join(scratch, 'next')).equals(next));
+          } }];
+        },
         parentNotDirectory: () => { const f = path.join(fresh('parent.txt', 'x'), 'store.json'); return [f, () => input.captureCheckedFileInput(f)]; },
         hardLinked: () => { const f = fresh('linked.json', '[]'); fs.linkSync(f, f + '.2'); return [f, () => input.captureCheckedFileInput(f)]; },
         overLimit: () => { const f = fresh('big.json', '[1,2,3,4,5]'); return [f, () => input.captureCheckedFileInput(f, { maxBytes: 4 })]; },
@@ -131,10 +151,25 @@ if (directAt >= 0) {
         describedSnapshot: () => { const f = fresh('described.json'); return [f, () => input.describeCheckedFileInput({}, f)]; },
         changed: () => { const f = fresh('changed.json', '[1]'); return [f, () => { const snapshot = input.captureCheckedFileInput(f); fs.writeFileSync(f, '[1,2]'); input.assertCheckedFileCurrent(snapshot, f); }]; },
       };
-      // Windows only: a descriptor without a volume or file id cannot certify the file.
+       
       if (process.platform === 'win32') inputCases.identity = () => { const f = fresh('identity.json', '[]'); return [f, () => swap(fs, 'fstatSync', real => function (...args) { return statCopy(real.apply(fs, args), { ino: 0n }); }, () => input.captureCheckedFileInput(f))]; };
       const absent = name => fresh(name);
       const outputCases = {
+        absenceUnconfirmed: () => {
+          const f = absent('out-unconfirmed.txt'), names = fs.readdirSync(dir).sort();
+          return [f, () => { try { return swap(fs, 'readdirSync', real => function (p, ...rest) { if (p === dir) throw fault('EACCES'); return real.call(fs, p, ...rest); }, () => output.captureMemoryOutput(f)); } finally {
+            assert.ok(!fs.existsSync(f)); assert.deepStrictEqual(fs.readdirSync(dir).sort(), names);
+          } }];
+        },
+        publicationPending: () => {
+          const original = Buffer.from('original output\n'), next = Buffer.from('planned replacement\n'), f = fresh('out-publishing.txt', original);
+          const scratch = fs.mkdtempSync(path.join(dir, `.${path.basename(f)}.publish-cas-`));
+          fs.writeFileSync(path.join(scratch, 'next'), next); fs.renameSync(f, path.join(scratch, 'before'));
+          return [f, () => { try { return output.captureMemoryOutput(f); } finally {
+            assert.ok(!fs.existsSync(f)); assert.deepStrictEqual(fs.readdirSync(scratch).sort(), ['before', 'next']);
+            assert.ok(fs.readFileSync(path.join(scratch, 'before')).equals(original) && fs.readFileSync(path.join(scratch, 'next')).equals(next));
+          } }];
+        },
         changed: () => { const f = fresh('out-changed.txt', 'before\n'); return [f, () => { const token = output.captureMemoryOutput(f); fs.writeFileSync(f, 'after\n'); output.assertMemoryOutputCurrent(token, f); }]; },
         parentResolution: () => { const f = fresh('out-resolve.txt', 'x'); return [f, () => swap(fs.realpathSync, 'native', () => () => { throw fault('EACCES'); }, () => output.captureMemoryOutput(f))]; },
         parentUnreadable: () => { const f = fresh('out-parent.txt', 'x'); return [f, () => swap(fs, 'lstatSync', real => function (p, ...rest) { if (p === path.dirname(f)) throw fault('EACCES'); return real.call(fs, p, ...rest); }, () => output.captureMemoryOutput(f))]; },
@@ -149,7 +184,7 @@ if (directAt >= 0) {
         newTargetInvalid: () => { const f = absent('out-new.txt'); return [f, () => { const token = output.captureMemoryOutput(f); swap(io, 'detachCommittedHardLink', real => function (...args) { const r = real.apply(io, args); fs.writeFileSync(f, 'tampered\n'); return r; }, () => output.publishMemoryOutput(token, f, 'new\n')); }]; },
         preparedOverLimit: () => { const f = fresh('out-small.txt', 'ab'); return [f, () => output.publishMemoryOutput(output.captureMemoryOutput(f, { maxBytes: 4 }), f, '0123456789')]; },
       };
-      // Windows replaces an existing target in one step; a change right after that step is caught by the check after it.
+       
       if (process.platform === 'win32') outputCases.changedAfter = () => { const f = fresh('out-after.txt', 'before\n'); return [f, () => { const token = output.captureMemoryOutput(f); swap(io, 'writeBufferIfUnchanged', real => function (...args) { const r = real.apply(io, args); fs.writeFileSync(f, 'tampered\n'); return r; }, () => output.publishMemoryOutput(token, f, 'after\n')); }]; };
       const unavailableCases = {
         limitInvalid: () => { const f = absent('out-limit.txt'); return [f, () => output.captureMemoryOutput(f, { maxBytes: -1 })]; },
@@ -172,14 +207,14 @@ if (directAt >= 0) {
         if (resolve !== undefined) language.setErrorLanguage(resolve);
         out[label] = { answer: language.errorLanguage(), input: runAll(inputCases), output: runAll(outputCases), unavailable: runAll(unavailableCases), other: runAll(otherCases), handoff: runAll(handoffCases) };
       }
-      // A successful handoff update does not ask the resolver: the language is asked only for an error.
+       
       let asked = 0;
       language.setErrorLanguage(() => { asked++; return 'ko'; });
       handoff.updateHandoff('# Handoff\n', 'block\n', handoffFile);
       out.askedOnSuccess = asked;
     } else if (mode === 'lock') {
       const lock = require('../lib/state-lock');
-      // Also the code a failed release left on an error that was already being thrown (lockReleaseError).
+       
       const observeRelease = fn => { try { fn(); return null; } catch (e) { return { code: e && e.code, message: e && e.message, lockReleaseError: e && e.lockReleaseError || null }; } };
       const writes = [];
       const capture = fn => swap(process.stderr, 'write', () => chunk => { writes.push(String(chunk)); return true; }, fn);
@@ -194,10 +229,10 @@ if (directAt >= 0) {
           let ran = false;
           const error = capture(() => refuse(t + '.lock', code, () => observe(() => lock.withStateLock(t, () => { ran = true; }, { maxWaitMs: 30, ...opts }))));
           const diagnostics = lock.stateLockDiagnostics().filter(d => d.file === path.basename(t)).map(d => d.reason);
-          r[name] = { file: path.basename(t), error, ran, stderr: writes.join(''), diagnostics };
+          r[name] = { file: path.basename(t), ...(opts.failOpen ? {} : { lockPath: t + '.lock' }), error, ran, stderr: writes.join(''), diagnostics };
         }
         {
-          // A nested call after the lock's owner record disappeared; the outer release then cannot confirm ownership.
+           
           const t = target('ownership');
           writes.length = 0;
           const error = capture(() => observeRelease(() => lock.withStateLock(t, () => {
@@ -206,8 +241,8 @@ if (directAt >= 0) {
           })));
           r.ownership = { file: path.basename(t + '.lock'), error, stderr: writes.join('') };
         }
-        // Work that succeeded, then a release that fails: the release error is what the caller gets. The owner record
-        // gone gives E_LOCK_OWNERSHIP_LOST; another file left in the lock folder gives E_LOCK_RELEASE.
+         
+         
         for (const [name, spoil] of [['releaseLost', t => { for (const n of fs.readdirSync(t + '.lock')) fs.unlinkSync(path.join(t + '.lock', n)); }],
           ['releaseContaminated', t => fs.writeFileSync(path.join(t + '.lock', 'other-file.txt'), 'x')]]) {
           const t = target(name);
@@ -217,7 +252,7 @@ if (directAt >= 0) {
           r[name] = { file: path.basename(t + '.lock'), error, ran, stderr: writes.join('') };
         }
         {
-          // Another async operation of this process asks for a lock held by a pending one.
+           
           const t = target('busy');
           let release;
           const held = lock.withStateLock(t, () => new Promise(resolveHeld => { release = resolveHeld; }));
@@ -236,8 +271,8 @@ if (directAt >= 0) {
 }
 
 const filter = process.argv.includes('--match') ? process.argv[process.argv.indexOf('--match') + 1] : '';
-// A filter must name something: a missing value or one that selects no test is a failure, not "0/0 passed".
-// Checked before any temporary folder exists, so this exit leaves nothing behind.
+ 
+ 
 if (process.argv.includes('--match') && !filter) { console.error('--match needs a test name substring'); process.exit(1); }
 const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-write-path-language-'));
 const env = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1',
@@ -259,7 +294,7 @@ test('direct calls: every memory input, memory output, publication read and hand
   const got = direct('modules');
   for (const [state] of STATES) {
     const lang = state === 'ko' ? 'ko' : state === 'en' ? 'en' : 'unset';
-    // errorLanguage() itself: 'ko' or 'en' as registered, null for everything else (review round 1).
+     
     const want = { answer: lang === 'unset' ? null : lang, input: {}, output: {}, unavailable: {}, other: {}, handoff: {} };
     for (const [name, { file }] of Object.entries(got[state].input)) want.input[name] = { file, error: { code: MEMORY_INPUT[name][0], message: inputText(lang, MEMORY_INPUT[name], file) } };
     for (const [name, { file }] of Object.entries(got[state].output)) want.output[name] = { file, error: { code: MEMORY_OUTPUT[name][0], message: outputText(lang, MEMORY_OUTPUT[name], file) } };
@@ -275,7 +310,7 @@ test('direct calls: every memory input, memory output, publication read and hand
     for (const [name, { file }] of Object.entries(got[state].handoff)) want.handoff[name] = { file, error: { code: 'E_TEXT_FORMAT', message: `${pick(state, HANDOFF[name])}: ${file}` } };
     assert.deepStrictEqual(got[state], want, state);
   }
-  // The cases ran, and the platform-only ones on their platform: no reason dropped out of the table above.
+   
   const expectNames = (table, platformOnly, skipped = []) => Object.keys(table).filter(n => !skipped.includes(n) && (process.platform === 'win32' || !platformOnly.includes(n))).sort();
   assert.deepStrictEqual(Object.keys(got.ko.input).sort(), expectNames(MEMORY_INPUT, ['identity']));
   assert.deepStrictEqual(Object.keys(got.ko.output).sort(), expectNames(MEMORY_OUTPUT, ['changedAfter'], ['wonWindow', 'createdDuring', 'publishedInvalid']));
@@ -287,14 +322,15 @@ test('direct calls: state-lock timeout, fail-open, release, nested and busy mess
   for (const [state] of STATES) {
     const r = got[state], en = state === 'en';
     const why = { timeout: 'timeout', persisted: en ? 'EPERM persisted (30ms)' : 'EPERM 지속(30ms)', bail: 'ENOSPC' };
+    const action = { timeout: LOCK_ACTION.gone, persisted: LOCK_ACTION.cause, bail: LOCK_ACTION.cause };
     for (const name of ['timeout', 'persisted', 'bail']) {
-      assert.deepStrictEqual(r[name], { file: r[name].file, error: { code: 'E_LOCK_TIMEOUT', message: LOCK.stopped(r[name].file, why[name])[en ? 0 : 1] }, ran: false, stderr: '', diagnostics: [] }, `${state} ${name}`);
+      assert.deepStrictEqual(r[name], { file: r[name].file, lockPath: r[name].lockPath, error: { code: 'E_LOCK_TIMEOUT', message: LOCK.stopped(r[name].file, why[name], r[name].lockPath, action[name])[en ? 0 : 1] }, ran: false, stderr: '', diagnostics: [] }, `${state} ${name}`);
     }
-    // Fail-open goes on and warns; the recorded reason keeps its one form in every language.
+     
     assert.deepStrictEqual(r.failOpen, { file: r.failOpen.file, error: null, ran: true, stderr: LOCK.warning(r.failOpen.file, 'timeout')[en ? 0 : 1], diagnostics: ['timeout'] }, `${state} failOpen`);
     assert.deepStrictEqual(r.failOpenPersisted, { file: r.failOpenPersisted.file, error: null, ran: true,
       stderr: LOCK.warning(r.failOpenPersisted.file, en ? 'EPERM persisted (30ms)' : 'EPERM 지속(30ms)')[en ? 0 : 1], diagnostics: ['EPERM 지속(30ms)'] }, `${state} failOpenPersisted`);
-    // The nested call is refused in Korean only for ko (its text was English); the release message is English only for en.
+     
     assert.deepStrictEqual(r.ownership, { file: r.ownership.file, error: { code: 'E_LOCK_OWNERSHIP_LOST', message: pick(state, LOCK.ownership), lockReleaseError: 'E_LOCK_OWNERSHIP_LOST' },
       stderr: releaseWarning(state, r.ownership.file, 'ownership-lost') }, `${state} ownership`);
     for (const [name, code, reason] of [['releaseLost', 'E_LOCK_OWNERSHIP_LOST', 'ownership-lost'], ['releaseContaminated', 'E_LOCK_RELEASE', 'release-tombstone-contaminated']]) {
@@ -305,13 +341,13 @@ test('direct calls: state-lock timeout, fail-open, release, nested and busy mess
   }
 });
 
-// The arguments of each call to `name(` in a source, split at top-level commas. Strings, template literals (with
-// their ${} parts), comments and brackets are read as units; a definition (`function name(`) is not a call.
+ 
+ 
 function callArgs(source, name) {
   const skipString = (s, i, q) => { for (i++; i < s.length; i++) { if (s[i] === '\\') i++; else if (s[i] === q) return i; } return i; };
   const skipComment = (s, i) => s[i + 1] === '/' ? s.indexOf('\n', i) : s.indexOf('*/', i + 2) + 1;
   const skipTemplate = (s, i) => { for (i++; i < s.length; i++) { if (s[i] === '\\') i++; else if (s[i] === '`') return i; else if (s[i] === '$' && s[i + 1] === '{') i = scan(s, i + 2, null); } return i; };
-  // Reads from i to the bracket that closes the current level; collects top-level arguments when args is an array.
+   
   function scan(s, i, args) {
     let depth = 0, start = i;
     for (; i < s.length; i++) {
@@ -345,7 +381,7 @@ test('call shapes: every memory input and output reason in the sources has its K
   assert.ok(inputCalls.length >= 18 && inputCalls.every(a => a.length === 4), 'memory-input error() calls: ' + JSON.stringify(inputCalls));
   assert.deepStrictEqual(sorted([...new Set(pairs(inputCalls, 2).map(p => JSON.stringify(p)))].map(p => JSON.parse(p))), sorted(table(MEMORY_INPUT)));
   const changedCalls = callArgs(source('memory-output.js'), 'changed');
-  // A call without a reason gives the default one, which the direct test checks; every other call names both.
+   
   assert.ok(changedCalls.length >= 26 && changedCalls.every(a => a.length === 1 || a.length === 3), 'memory-output changed() calls: ' + JSON.stringify(changedCalls));
   assert.deepStrictEqual(sorted([...new Set(pairs(changedCalls, 1).map(p => JSON.stringify(p)))].map(p => JSON.parse(p))),
     sorted(table(MEMORY_OUTPUT).filter(([en]) => en !== 'changed before publication')));
@@ -357,7 +393,7 @@ test('call shapes: every memory input and output reason in the sources has its K
   }
 });
 
-// ---- the commands ----------------------------------------------------------------------------------------------------
+ 
 const seeds = {};
 const seed = lang => {
   if (seeds[lang]) return seeds[lang];
@@ -369,12 +405,12 @@ const seed = lang => {
   return (seeds[lang] = dir);
 };
 let copies = 0;
-// T-0343: the fixture folders have Korean names, and Node 22.23.3's fs.cpSync crashes on non-ASCII paths on Windows.
+ 
 const { copyTreeSync } = require('../lib/copy-tree');
 const fresh = lang => { const dir = path.join(arena, 'p' + (++copies) + ' 한글'); copyTreeSync(seed(lang), dir); return dir; };
 const ws = (P, name) => path.join(P, '.leerness', name);
-// A hook that changes one file just before a chosen publication of it through managed text (WPL_NTH, default the
-// first), or just before memory output publishes it, as another writer would.
+ 
+ 
 const hook = path.join(arena, 'write-hook.cjs');
 fs.writeFileSync(hook, String.raw`
 const fs=require('fs'),path=require('path');
@@ -398,7 +434,7 @@ const TEXT = {
   encoding: (lang, file) => lang === 'en' ? `Managed text has invalid UTF-8; no replacement was attempted: ${file}. Preserve the original and retry after checking it.`
     : `관리 문서에 UTF-8 로 읽을 수 없는 바이트가 있어 대체 문자로 바꾸지 않았습니다: ${file}. 원본을 보존하고 확인한 뒤 다시 시도하세요.`,
 };
-// The notes, English as they were; numbers are the steps a run completed (a pattern below).
+ 
 const NOTES = {
   generation: (f, n) => [` File generation stopped at ${f}; ${n} earlier file steps completed. Earlier changes and the backup were not rolled back.`,
     ` 파일 생성이 ${f} 에서 멈췄습니다. 앞선 파일 단계 ${n}개를 마쳤고, 앞서 바꾼 내용과 백업은 되돌리지 않았습니다.`],
@@ -425,11 +461,11 @@ const NOTES = {
 };
 const note = (lang, name, ...args) => NOTES[name](...args)[lang === 'en' ? 0 : 1];
 const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-// Expected error line with \d+ where a note reports how many steps were completed (marked by the N placeholder).
+ 
 const N = '\u0000N\u0000';
 const pattern = text => new RegExp('^' + escape(text).split(escape(N)).join('(\\d+)') + '$');
-// A refused command: exit 1, the error line last on stdout (init prints its progress before it), nothing on stderr,
-// and that line in the project language once its paths are left out. Returns the numbers the pattern captured.
+ 
+ 
 const refused = (label, lang, expected, r, ...dirs) => {
   const line = lastLine(r.stdout), match = pattern('✗ ' + expected).exec(line);
   assert.ok(r.status === 1 && match && r.stderr === '', `${label}: expected\n✗ ${expected}\n${show(r)}`);
@@ -440,21 +476,21 @@ const refused = (label, lang, expected, r, ...dirs) => {
 
 for (const lang of ['en', 'ko']) {
   test(`${lang}: memory input and output refusals reach the commands in the project language, with their codes`, () => {
-    // A tracker with a second hard link: task add refuses before writing (text, and --json with the error line on stderr).
+     
     const P = fresh(lang), tracker = ws(P, 'progress-tracker.md');
     fs.linkSync(tracker, path.join(P, 'tracker-link.md'));
     const linked = TEXT.input(lang, 'hardLinked', tracker);
     refused('task add (hard link)', lang, linked, run(['task', 'add', 'row', '--path', P]), P);
     const j = run(['task', 'add', 'row', '--path', P, '--json']);
     assert.deepStrictEqual([j.status, JSON.parse(j.stdout), j.stderr], [1, { ok: false, error: linked, code: 'error' }, '✗ ' + linked + '\n'], show(j));
-    // A decisions store with invalid JSON: decision add reports E_STORE_CORRUPT as store_corrupt.
+     
     const Q = fresh(lang), decisions = ws(Q, 'decisions.json');
     fs.writeFileSync(decisions, '[{"broken": ');
     const corrupt = TEXT.input(lang, 'invalidJson', decisions);
     refused('decision add (invalid JSON)', lang, corrupt, run(['decision', 'add', 'Use X', '--path', Q]), Q);
     const d = run(['decision', 'add', 'Use X', '--path', Q, '--json']);
     assert.deepStrictEqual([d.status, JSON.parse(d.stdout), d.stderr], [1, { ok: false, error: corrupt, code: 'store_corrupt' }, ''], show(d));
-    // Another writer changes the tracker between the checked read and its publication.
+     
     const R = fresh(lang), raced = ws(R, 'progress-tracker.md');
     refused('task add (output race)', lang, TEXT.output(lang, 'changed', raced), run(['task', 'add', 'row', '--path', R], { WPL_MODE: 'output', WPL_TARGET: raced }, { hook: true }), R);
   });
@@ -470,8 +506,8 @@ for (const lang of ['en', 'ko']) {
   });
 }
 
-// Each partly finished save: the cause in the project language, then the note in the same language. Every case runs
-// in both languages, and the step counts a note reports must agree between them.
+ 
+ 
 const partial = [
   ['plan remove: the archive was saved, the active plan was not', P => {
     succeed(['plan', 'add', 'Probe milestone', '--path', P]);
@@ -540,7 +576,7 @@ for (const [name, setup] of partial) {
 }
 
 test('the language follows --language, LEERNESS_LANG and the --path project, not the cwd', () => {
-  // The registration moved to lib/error-language.js; the same cases as T-0336, now with a memory input error.
+   
   const cases = [
     ['a Korean project, LEERNESS_LANG=en', 'ko', { LEERNESS_LANG: 'en' }, [], 'en'],
     ['an English project, LEERNESS_LANG=ko', 'en', { LEERNESS_LANG: 'ko' }, [], 'ko'],
@@ -552,7 +588,7 @@ test('the language follows --language, LEERNESS_LANG and the --path project, not
     const P = corrupt(projectLang);
     refused(label, want, TEXT.input(want, 'invalidJson', ws(P, 'decisions.json')), run(['decision', 'add', 'Use X', '--path', P, ...flags], extra), P);
   }
-  // Run inside a project of the other language: the target named by --path decides.
+   
   const en = corrupt('en'), ko = corrupt('ko');
   for (const [P, cwd, want] of [[en, ko, 'en'], [ko, en, 'ko']]) {
     refused(`--path ${want} from a ${want === 'en' ? 'Korean' : 'English'} project`, want, TEXT.input(want, 'invalidJson', ws(P, 'decisions.json')),

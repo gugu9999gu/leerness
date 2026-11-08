@@ -1,7 +1,7 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// Test-only meter adapted from the ML-04D experiment. Requires an owned fixture;
-// records path lengths at actual filesystem/replacement boundaries, not allocation.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
 const fs=require('fs'), path=require('path'), cp=require('child_process');
 const cfg=JSON.parse(process.env.LEERNESS_WRITE_BUDGET_METER);
 const root=fs.realpathSync(cfg.root), workspace=path.join(root,'.leerness');

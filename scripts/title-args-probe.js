@@ -1,31 +1,31 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0324 (follow-up of T-0321): titles and targets reach leerness intact through MCP and after `--`.
-// The MCP title and target tools put the text before their flags without "--", so the child CLI read a title
-// that begins with "-" as an option and dropped it (a markdown bullet as a task title answered empty_title).
-// On the CLI, the title parser (_parseAddTitle and the lesson/decision loops), the agents text parser
-// (lib/agents.js) and the positional-root finder (_taskPositionalPath) did not know where "--" was: after it, text
-// that begins with "-" or "--" was dropped or ended the title, and a path-like title ("/api/users 수정") was taken as
-// the project root. nonFlagArgs() now records where "--" was and these read it. Before "--" nothing changes, and
-// commands without a title still read a path after "--" as their project.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const U = require('../lib/pure-utils');
 const { _parseAgentPositional, _findAgentAction } = require('../lib/agents');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-title-args-'));
-// Removed on every exit, including a setup failure below: a failing init used to leave the arena behind.
+ 
 process.on('exit', () => { try { removeTree(arena, { recursive: true, force: true }); } catch {} });
 const env = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1',
   LEERNESS_NO_AUTOCHCP: '1', LEERNESS_HOOK: '', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_SKILL_HISTORY: '1' };
-// State runs are keyed by the calling session; keep this probe out of whatever session runs it.
+ 
 for (const key of ['LEERNESS_LANG', 'LEERNESS_ENFORCE_POLICY', 'LEERNESS_SESSION_ID', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID',
   'CLAUDE_CODE_CHILD_SESSION', 'CODEX_THREAD_ID']) delete env[key];
 for (const key of ['HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'TMPDIR']) { env[key] = path.join(arena, 'env-' + key.toLowerCase()); fs.mkdirSync(env[key]); }
 let passed = 0, failed = 0;
 const filter = process.argv.includes('--match') ? process.argv[process.argv.indexOf('--match') + 1] : '';
 const test = (name, fn) => { if (filter && !name.includes(filter)) return; try { fn(); passed++; console.log('PASS ' + name); } catch (e) { failed++; console.error('FAIL ' + name + ': ' + (e && e.stack || e)); } };
-// Checks every case before failing, so one run names all the cases that lose the text.
+ 
 const each = (items, fn) => {
   const misses = [];
   for (const item of items) { try { fn(item); } catch (e) { misses.push(String(e && e.message || e).split('\n')[0]); } }
@@ -49,36 +49,36 @@ const list = (cmd, key, root = P) => json(runIn(root, [...cmd, '--path', root, '
 let seq = 0;
 const unique = text => `${text} [${++seq}]`;
 const SHAPES = { dash: '- 로그인 버튼 고치기', ddash: '--force 옵션 추가', pathy: '/api/users 엔드포인트 수정' };
-// agents resolve/fallback need a configured role; `roles set` only writes the project's role file (no provider is called).
+ 
 let roleReady = false;
 const ensureRole = () => { if (roleReady) return; const r = run(['roles', 'set', 'coder', '--provider', 'claude', '--path', P, '--json']); assert.strictEqual(r.status, 0, 'roles set ' + show(r)); roleReady = true; };
 
 test('_parseAddTitle and _taskPositionalPath read tokens after -- as text and keep the old rules before it', () => {
   const at = (arr, n) => Object.defineProperty(arr, 'terminatorAt', { value: n });
-  // Without a terminator nothing changes (the selftest's own cases).
+   
   assert.strictEqual(U._parseAddTitle(['add', '제목', '/x/y'], 1), '제목');
   assert.strictEqual(U._parseAddTitle(['add', 'my', 'title', '--note', 'v'], 1), 'my title');
   assert.strictEqual(U._parseAddTitle(['add', '/only'], 1), '');
   assert.strictEqual(U._taskPositionalPath(['task', 'add', '제목', './proj'], 2), './proj');
-  // After --: text of any shape, and never a path.
+   
   for (const t of Object.values(SHAPES)) {
     assert.strictEqual(U._parseAddTitle(at(['task', 'add', t], 2), 2), t, t);
     assert.strictEqual(U._taskPositionalPath(at(['task', 'add', t], 2), 2), null, t);
   }
-  // Before -- the old rules still apply, and the text after -- follows.
+   
   assert.strictEqual(U._parseAddTitle(at(['task', 'add', '제목', '- 더'], 3), 2), '제목 - 더');
   assert.strictEqual(U._parseAddTitle(at(['task', 'add', './proj', '- 제목'], 3), 2), '- 제목');
   assert.strictEqual(U._taskPositionalPath(at(['task', 'add', './proj', '/api/x'], 3), 2), './proj');
-  // Only the commands that read text after -- skip it for the project path (the exact list, so a dropout or an
-  // addition shows); elsewhere a path after -- is still the project operand.
+   
+   
   for (const pair of ['task add', 'decision add', 'decision drop', 'lesson save', 'lesson drop', 'requests add', 'rule add', 'feature add'])
     assert.strictEqual(U._taskPositionalPath(at([...pair.split(' '), '/x'], 2), 2), null, pair);
   for (const pair of ['task list', 'task update', 'decision list', 'lesson list', 'requests list', 'requests drop', 'rule list', 'feature list', 'feature show'])
     assert.strictEqual(U._taskPositionalPath(at([...pair.split(' '), '/x'], 2), 2), '/x', pair);
-  // `requests -- add "…"`: a terminator before the title start still reads from the start.
+   
   assert.strictEqual(U._parseAddTitle(at(['requests', 'add', '- 요청'], 1), 2), '- 요청');
-  // lib/agents.js reads the same terminator: the summary after it is literal, the old flag rules apply before it,
-  // and the action is still found after it (the CLI has always accepted `agents record -- started …`).
+   
+   
   for (const t of Object.values(SHAPES)) assert.strictEqual(_parseAgentPositional(at(['started', t], 1), 1), t, 'agents ' + t);
   assert.strictEqual(_parseAgentPositional(['started', '- 요약'], 1), '');
   assert.strictEqual(_parseAgentPositional(at(['started', '요약', '--to', 'codex', '- 더'], 4), 1), '요약 - 더');
@@ -103,8 +103,8 @@ test('CLI titles after -- are stored verbatim when they begin with - or -- or lo
     const got = c.read(r, c.text);
     assert.strictEqual(got, c.text, `${c.label}: stored ${JSON.stringify(got)} instead of ${JSON.stringify(c.text)} — ${show(r)}`);
   });
-  // With no --path, each command that reads text after -- keeps a path-like text as text and works on the cwd
-  // project. The relative shape keeps a regression inside the arena ("/api/…" would resolve to the drive root).
+   
+   
   const REL = './초안 엔드포인트 정리';
   each([
     ['task add', ['task', 'add'], text => list(['task', 'list'], 'tasks').some(x => x.request === text)],
@@ -138,11 +138,11 @@ test('CLI state goals, handoff summaries, agent records and agent tasks after --
     assert.strictEqual(((json(ar, 'agents record').event || {}).result || {}).summary, e, 'agents record ' + show(ar));
     const rs = run(['agents', 'resolve', '--role', 'coder', '--path', P, '--json', '--', k]);
     assert.strictEqual(json(rs, 'agents resolve').task, k, 'agents resolve ' + show(rs));
-    // hold only records the pause; it prepares no command and calls no provider.
+     
     const fb = run(['agents', 'fallback', 'hold', '--role', 'coder', '--path', P, '--json', '--', f]);
     assert.strictEqual((json(fb, 'agents fallback').contract || {}).task, f, 'agents fallback ' + show(fb));
   });
-  // The event name may still follow `--`, as before.
+   
   const late = unique('요약');
   const lr = run(['agents', 'record', '--path', P, '--json', '--', 'started', late]);
   assert.strictEqual(((json(lr, 'agents record -- started').event || {}).result || {}).summary, late, 'agents record -- started ' + show(lr));
@@ -178,8 +178,8 @@ test('before -- nothing changes: a trailing path is still the project root, flag
 });
 
 test('after --, commands without a title still take a path operand as their project (no switch to the cwd project)', () => {
-  // The fixed title rule must not spread: `task list -- <dir>` read <dir> before this change, and the start-up
-  // bookkeeping (_runtimeProjectRoot) still reads it for `decision list`, so the handler has to agree.
+   
+   
   const R = project('fourth');
   const t = unique('다른 프로젝트 작업'), d = unique('다른 프로젝트 결정');
   assert.strictEqual(runIn(arena, ['task', 'add', t, '--path', R, '--json']).status, 0, 'task add in R');
@@ -191,10 +191,10 @@ test('after --, commands without a title still take a path operand as their proj
 });
 
 test('shell-guard and pc receive values after -- that begin with -', () => {
-  // With a command the output lints it (an issues list); without one it only reports the shell.
+   
   const sg = run(['shell-guard', '--path', P, '--json', '--', '-x && echo ok']);
   assert.ok(Array.isArray(json(sg, 'shell-guard').issues), 'shell-guard ' + show(sg));
-  // The coordinates and text parse; the default permission then refuses before anything moves or types.
+   
   const click = run(['pc', 'click', '--path', P, '--json', '--', '-100', '200']);
   assert.ok(/permissions\.mouse/.test(json(click, 'pc click').error || ''), 'pc click ' + show(click));
   const type = run(['pc', 'type', '--path', P, '--json', '--', '- 글자']);
@@ -244,7 +244,7 @@ test('MCP title and target tools deliver text that begins with - or -- and keep 
   const lessons = list(['lesson', 'list'], 'lessons'), features = list(['feature', 'list'], 'features'), previews = list(['preview', 'list'], 'previews');
   const plans = list(['plan', 'list'], 'milestones');
   const inner = x => { try { return JSON.parse(x.text.slice(x.text.indexOf('{'))); } catch { return {}; } };
-  // pc refuses by default (permissions), so those two errors are expected and left out of the report.
+   
   const failedCalls = [...adds, ...later].filter(x => x.isError !== false && x.name !== 'leerness_pc').map(x => `${x.name}: ${String(x.text).replace(/\s+/g, ' ').slice(0, 90)}`);
   try { each([
     ['task_add (-) keeps status and next action as flags', () => { const row = tasks.find(x => x.request === T.task) || {}; return row.status === 'in-progress' && row.nextAction === T.next; }],

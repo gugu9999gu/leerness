@@ -1,12 +1,12 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0365: on Windows, Node 23.x, 24.0.0-24.21.x, 25.x and 26.0.0-26.8.x end the process (0xC0000409) when a fs.rmSync
-//   that fails (a file or folder another process holds) has a path with a character outside the ANSI code page, and
-//   garble error.path otherwise. lib/safe-remove.js removeSync isolates such a removal there (a file or link is
-//   unlinked; a full folder is removed by fs.rmSync in a child process) and is fs.rmSync everywhere else. The cases that
-//   end a process run in a child; on a Windows Node without the bug they still run but cannot tell the fix apart, and
-//   say so.
+ 
+ 
+ 
+ 
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -17,12 +17,12 @@ const PKG = path.resolve(__dirname, '..');
 const CLI = path.join(PKG, 'bin', 'leerness.js');
 const SAFE = path.join(PKG, 'lib', 'safe-remove.js');
 const isWin = process.platform === 'win32';
-// The probe's own copy of the bounds (rmcrash/bounds-out.txt), so it does not trust the module it tests.
+ 
 const [major, minor] = process.versions.node.split('.').map(Number);
 const bugHere = isWin && (major === 23 || major === 25 || (major === 24 && minor < 22) || (major === 26 && minor < 9));
-const CRASH = 3221226505; // 0xC0000409
-const EMOJI = String.fromCodePoint(0x1f600); // in no ANSI code page
-const HAN = String.fromCharCode(0xd55c, 0xae00); // in code page 949: no crash, a garbled error
+const CRASH = 3221226505;  
+const EMOJI = String.fromCodePoint(0x1f600);  
+const HAN = String.fromCharCode(0xd55c, 0xae00);  
 const arena = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'leerness-safe-remove-'));
 const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const children = [];
@@ -33,15 +33,15 @@ function test(name, fn) {
 }
 const safe = () => require(SAFE);
 const fresh = name => { const d = path.join(arena, `${++seq}-${name}`); fs.mkdirSync(d, { recursive: true }); return d; };
-// A child whose working directory is the folder holds it on Windows until it exits.
+ 
 function hold(dir, ms) {
   const child = cp.spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { cwd: dir, stdio: 'ignore', windowsHide: true });
   children.push(child);
   sleep(300);
   return child;
 }
-// A file another process opened without delete sharing cannot be unlinked on Windows until that process closes it.
-//   Returns once the lock is in place (opening the file fails), not after a guessed delay.
+ 
+ 
 function lockFile(file, ms) {
   const exe = cp.spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0'], { stdio: 'ignore', windowsHide: true }).error ? 'powershell' : 'pwsh';
   const ps = `$f=[System.IO.File]::Open('${file.replace(/'/g, "''")}','Open','Read','None'); Start-Sleep -Milliseconds ${ms}; $f.Close()`;
@@ -86,7 +86,7 @@ try {
     assert.strictEqual(needsIsolation(Buffer.from('C:\\Jos' + e), '26.3.0', 'win32'), true, 'a Buffer path');
   });
 
-  // 1.36.305 review round 1: the pass-through case forced the mode, so a wrong default passed.
+   
   test('without the isolate option the choice is needsIsolation: an ASCII path is one fs.rmSync call; a non-ASCII one is isolated only with the bug', () => {
     const calls = [];
     const spy = { rmSync: () => calls.push('rmSync'), lstatSync: () => { calls.push('lstatSync'); return { isDirectory: () => false }; }, unlinkSync: () => calls.push('unlinkSync') };
@@ -110,10 +110,10 @@ try {
     assert.deepStrictEqual(calls, [['rmSync', 'y', undefined]]);
   });
 
-  // 1.36.305 review rounds 1 and 3: a JavaScript walk of the folder differed from fs.rmSync (a drive-relative path,
-  //   entries that vanish, retries that do not rescan). A full folder now goes to fs.rmSync itself. Round 4: the child
-  //   gets the absolute path the parent resolved, since Windows keeps each drive's current directory in environment
-  //   entries ('=D:') that a copied environment loses, so 'D:rel' could name another folder there.
+   
+   
+   
+   
   test('a full folder goes to the child as the absolute path this process resolved, with the four option values it uses', () => {
     const got = [];
     const fsImpl = { lstatSync: () => ({ isDirectory: () => true }), rmdirSync: () => { throw Object.assign(new Error('not empty'), { code: 'ENOTEMPTY' }); } };
@@ -128,8 +128,8 @@ try {
     }
   });
 
-  // 1.36.305 review round 4: fs.rmSync rejects bad options before it removes anything; the isolated removal unlinked a
-  //   file or removed an empty folder first.
+   
+   
   test('bad options are rejected before anything is removed, with the error fs.rmSync gives', () => {
     const { removeSync } = safe();
     for (const [name, opts] of [['recursive not a boolean', { recursive: 'yes' }], ['maxRetries out of range', { recursive: true, maxRetries: -1 }], ['retryDelay not a number', { force: true, retryDelay: 'x' }]]) {
@@ -146,9 +146,9 @@ try {
     }
   });
 
-  // 1.36.305 review round 4, second run: Node reads fs.rmSync's options as a copy of their own enumerable properties;
-  //   the isolated removal read inherited and non-enumerable ones too, and sent the object to the child as JSON (a BigInt
-  //   or a cycle threw, toJSON could change it). It now reads them as Node does and sends only the four it uses.
+   
+   
+   
   test('options are read as Node reads them: own enumerable properties only, and only those it uses go to the child', () => {
     const { removeSync } = safe();
     const inherited = Object.create({ recursive: true });
@@ -175,8 +175,8 @@ try {
     assert.strictEqual(outcome(() => fs.rmSync(path.join(arena, 'nope'), null)), outcome(() => removeSync(path.join(arena, 'nope'), null, { isolate: true })), 'null options');
   });
 
-  // 1.36.305 confirmation round: Node reads each option once (its copy); checking the options as given and then copying
-  //   them read a getter twice, so a getter that changes between reads got another outcome than fs.rmSync's.
+   
+   
   test('each option is read once, as by fs.rmSync (getters included)', () => {
     const { removeSync } = safe();
     for (const [name, make, build] of [
@@ -196,9 +196,9 @@ try {
     assert.strictEqual(outcome(() => removeSync(path.join(arena, 'nope'), arr, { isolate: true })), outcome(() => fs.rmSync(path.join(arena, 'nope'), arr)), 'an array as options');
   });
 
-  // 1.36.305 review round 4: the guard saw the path string where fs.rmSync's guard sees the URL it was given; a search
-  //   part ('?x') makes String(url) end in something other than '.lock', so --dry-run refuses fs.rmSync(url), while the
-  //   path the URL names ends in '.lock' and was exempt.
+   
+   
+   
   test('a write guard sees a URL target as it sees it for fs.rmSync', () => {
     const io = require(path.join(PKG, 'lib', 'io.js'));
     const { pathToFileURL } = require('url');
@@ -239,8 +239,8 @@ try {
     assert.strictEqual(fs.readFileSync(path.join(sandbox, 'sentinel.txt'), 'utf8'), 's');
   });
 
-  // 1.36.305 review round 2: an empty path resolved to the working directory, whose contents were removed; Node checks
-  //   the path as given (lstat ''), so fs.rmSync('') is ENOENT and removes nothing.
+   
+   
   test('an empty path removes nothing, as fs.rmSync (not the working directory)', () => {
     const { removeSync } = safe();
     const back = process.cwd();
@@ -257,10 +257,10 @@ try {
     } finally { process.chdir(back); }
   });
 
-  // 1.36.305 review rounds 2 and 3: a write guard (--dry-run, the runtime write boundary) checks the path each fs call
-  //   is given. fs.rmSync is one call on the target as given; the isolated removal's first change is on the target as
-  //   given, through the guarded fs, and the rest happens where no guard runs (fs.rmSync in the child), as inside
-  //   fs.rmSync.
+   
+   
+   
+   
   test('a write guard sees an isolated removal as it sees fs.rmSync: refused at the target, nothing inside removed', () => {
     const io = require(path.join(PKG, 'lib', 'io.js'));
     const t = path.join(fresh('dry-run'), 'skill');
@@ -284,10 +284,10 @@ try {
     io.setDryRunGuard(true);
     let controlCode = null;
     try {
-      // Where fs.rmSync is written in JavaScript (Node 22 and older, as on CI's Node 20 jobs) it removes the entries
-      //   through fs's own functions, which the guard wraps, so there it refuses inside. The removal is isolated only on
-      //   Node versions whose fs.rmSync is native and asks the guard once; the comparison applies where the control
-      //   shows that (1.36.305 CI: this case failed on Node 20 when it assumed it).
+       
+       
+       
+       
       try { fs.rmSync(control, { recursive: true, force: true }); } catch (e) { controlCode = e.code; }
       if (controlCode === null) safe().removeSync(isolated, { recursive: true, force: true }, { isolate: true });
     } finally { io.setDryRunGuard(false); }
@@ -300,8 +300,8 @@ try {
     assert.strictEqual(fs.existsSync(isolated), false, 'the isolated removal did not remove what fs.rmSync removes');
   });
 
-  // 1.36.305 review round 3: the guard saw the resolved path; for 'x.lock\' that is 'x.lock', which --dry-run exempts,
-  //   where fs.rmSync('x.lock\') is refused (the spelling given does not end in '.lock').
+   
+   
   test('a write guard sees the target spelled as given (a trailing separator)', () => {
     const io = require(path.join(PKG, 'lib', 'io.js'));
     const d = fresh('dry-run-tail');
@@ -378,7 +378,7 @@ try {
     assert.throws(() => removeSync(x, {}, { isolate: true }), e => e.code === 'ERR_FS_EISDIR' && e.path === x && /is a directory/.test(e.message));
   });
 
-  // (The options check calls fs.rmSync on a path that does not exist, through the copy captured at load, not fsImpl.)
+   
   test('in this process, an isolated removal never calls fs.rmSync on the target', () => {
     const d = fresh('no-rmsync'); fs.mkdirSync(path.join(d, 't', 'sub'), { recursive: true }); fs.writeFileSync(path.join(d, 't', 'sub', 'f'), 'f');
     fs.writeFileSync(path.join(d, 'file.txt'), 'f');
@@ -393,14 +393,14 @@ try {
     const t = path.join(d, 't'), sub = path.join(t, 'sub');
     fs.mkdirSync(sub, { recursive: true });
     if (isWin) {
-      // Whether fs.rmSync ends the child here depends on the whole path (this arena may sit below a temp directory
-      //   whose name the code page cannot hold); either way the error names the target as given.
+       
+       
       const child = hold(sub, 6000);
       try {
         assert.throws(() => safe().removeSync(t, { recursive: true, force: true }, { isolate: true }),
           e => ['EBUSY', 'EPERM'].includes(e.code) && e.path === t);
       } finally { child.kill(); }
-      // A held file as the target fails at unlink, with its path.
+       
       const locked = path.join(d, 'locked.txt');
       fs.writeFileSync(locked, 'x');
       const locker = lockFile(locked, 4000);
@@ -408,7 +408,7 @@ try {
         assert.throws(() => safe().removeSync(locked, { force: true }, { isolate: true }), e => ['EBUSY', 'EPERM'].includes(e.code) && e.path === locked);
       } finally { locker.kill(); }
       if (bugHere) {
-        // Outside the code page fs.rmSync ends its process: here only the child's.
+         
         const t3 = path.join(fresh('ended-' + EMOJI), 't'), sub3 = path.join(t3, 'sub');
         fs.mkdirSync(sub3, { recursive: true });
         const child3 = hold(sub3, 6000);
@@ -495,8 +495,8 @@ try {
       assert.notStrictEqual(r.status, CRASH, 'the process was ended (0xC0000409)');
       assert.strictEqual(r.status, 0, r.stdout + r.stderr);
       assert.ok(/CLEANED false/.test(r.stdout), r.stdout);
-      // fs.rmSync in the child may remove some entries before the held folder fails it; the credential file is emptied
-      //   first, so it is gone or empty.
+       
+       
       const npmrc = path.join(tmp, '.npmrc');
       assert.ok(!fs.existsSync(npmrc) || fs.readFileSync(npmrc, 'utf8') === '', 'the credential file is left with its contents');
     });
@@ -535,16 +535,16 @@ try {
     assert.strictEqual(JSON.parse(r.stdout).node.rmSyncPathBug, bugHere);
   });
 
-  // 1.36.305 review round 1: selftest drops LEERNESS_LANG while it runs (a user's setting must not change the cases) and
-  //   chose the advisory's language after that, so English mode printed it in Korean. The advisory is printed before
-  //   the cases run (about four minutes on Windows), so this reads it from the output file and ends the run.
+   
+   
+   
   test('selftest prints the advisory in the language chosen before it controls its environment', () => {
     if (!bugHere) { console.log(`  skipped: Node ${process.version} on ${process.platform} prints no advisory`); return; }
     for (const [lang, korean] of [['en', false], ['ko', true]]) {
       const dir = fresh('selftest-' + lang), outFile = path.join(dir, 'out.txt'), temp = path.join(dir, 'temp');
       fs.mkdirSync(temp);
       const fd = fs.openSync(outFile, 'w');
-      // The run is ended mid-case, so the folders its cases make go to a temp directory inside this probe's arena.
+       
       const env = { ...process.env, LEERNESS_LANG: lang, TEMP: temp, TMP: temp, TMPDIR: temp };
       const child = cp.spawn(process.execPath, [CLI, 'selftest'], { cwd: arena, env, stdio: ['ignore', fd, fd], windowsHide: true });
       children.push(child);

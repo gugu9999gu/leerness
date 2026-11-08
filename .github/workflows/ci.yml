@@ -1,13 +1,13 @@
 name: CI
 
-# Public release CI on GitHub-hosted runners.
-# Public CI result raises trust: the e2e badge in README reflects this workflow.
-#
-# T-0359: the long work runs in parallel shards. Until 1.36.300 one Windows gate job ran e2e.js (167-226 min) after
-# the command-surface leaves (43-52 min), so a release waited about five hours. Each sharded job below lists every
-# shard of every OS/Node configuration; scripts/ci-shard.js gives each shard the same assignment, so the shards of
-# one configuration run every e2e case and every npm-script leaf exactly once. scripts/ci-shard-probe.js checks
-# these lists (each configuration has shards 1..k, and the three gate jobs cover the same configurations).
+
+
+
+
+
+
+
+
 
 on:
   push:
@@ -24,8 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # DEP0190 becomes a runtime warning on Node 24. Keep the compatibility
-        # matrix and add one full Windows E2E (all of its shards) where the warning gate is live.
+        
+        
         include:
           - { os: windows-latest, node: 18, shard: 1, shards: 4 }
           - { os: windows-latest, node: 18, shard: 2, shards: 4 }
@@ -55,8 +55,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
-      # Each shard runs its cases plus the shared smoke preamble and the run-wide checks (runtime DEP0190 warnings,
-      # repository isolation, and that every case guard was reached exactly once).
+      
+      
       - name: e2e
         env:
           LEERNESS_OFFLINE: "1"
@@ -111,7 +111,7 @@ jobs:
         with:
           node-version: 20
           package-manager-cache: false
-      # Bounded quick feedback — full e2e runs in the `test` matrix above.
+      
       - name: E2E observation controls
         if: matrix.shard == 1
         run: npm run test:e2e-observation
@@ -141,7 +141,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
-      # No dependencies to install (zero runtime deps) — run the integrity gate directly.
+      
       - name: version
         run: node ./bin/leerness.js --version
       - name: selftest
@@ -159,16 +159,16 @@ jobs:
         run: node ./scripts/encoding-selftest-probe.js --real-controls
       - name: release runtime (shell-free npm)
         run: node ./scripts/release-runtime-probe.js
-      # 1.36.127 (T-0105): 이 중간 티어(42블록·66초)는 만들어 놓고 **아무도 부르지 않았다**.
-      #   우리 고아 가드 탐지기가 0건이라 한 것은 bin/leerness.js 안의 문자열에 가려졌기 때문이다.
-      #   사람이 기억해야만 도는 가드는 결국 안 돈다 — 여기와 npm test 양쪽에 배선한다.
+      
+      
+      
       - name: e2e-core
         env:
           LEERNESS_OFFLINE: "1"
         run: node ./scripts/e2e-core.js
-      # File-mutating commands share one compare-and-set boundary. Keep this
-      # probe explicit in the full OS/Node matrix so package-script refactors
-      # cannot silently orphan the data-integrity regression suite.
+      
+      
+      
       - name: mutation-integrity
         env:
           LEERNESS_OFFLINE: "1"
@@ -192,7 +192,7 @@ jobs:
         with:
           node-version: 20
           package-manager-cache: false
-      # 소스 checkout뿐 아니라 실제 pack/install 경로도 독립 검증한다.
+      
       - name: installed cleanroom
         env:
           LEERNESS_OFFLINE: "1"
