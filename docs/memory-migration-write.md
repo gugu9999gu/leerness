@@ -63,8 +63,38 @@ source, changed output bytes, and a canonical file without the matching creation
 record are refused. In particular, a crash or error between canonical publication
 and its ownership receipt requires manual recovery; identical canonical bytes
 alone never authorize adoption or withdrawal. Preserve the archive and recovery
-receipt and inspect both live files before manually resolving that case. A normal
-memory edit after apply will also prevent rollback if the expected outputs differ.
+receipt and inspect both live files before manually resolving that case. Apply and
+rollback mark their lock as kept for recovery: if the process is killed, the next
+writer is not allowed to reclaim it. `inspect` is read-only and does not release
+that lock. Stop all writers for this project, including writers on other computers,
+and establish that the recorded owner has ended. A timeout, old timestamp or PID
+alone is not proof. Preserve and compare the original owner record and lock
+identity; if their provenance or the active paths are uncertain, stop.
+
+For an explicitly approved recovery, verify the complete original bundle and
+the current active files. If canonical JSON exists, require its matching
+canonical ownership receipt. For an apply interrupted before canonical
+publication, canonical JSON may be absent; the active Markdown must still have
+the original prepared identity and bytes, and no canonical creation receipt
+exists yet. Retain the entire confirmed-ended lock
+directory by moving it to a unique, previously absent location on the same
+filesystem. Check the absolute source and destination, refuse links or existing
+destinations, and verify that the retained owner bytes and identity are unchanged.
+This is a manual operator action, not automatic takeover or permission to discard
+the lock. Keep the archive, lock record and recovery receipts as project data.
+Then use the same original project and operation ID with the existing explicit
+`apply` or `rollback` command. Missing required ownership evidence, changed live files or a
+concurrent winner must stop recovery; do not choose an authority from identical
+bytes, force adoption or overwrite later work. File observations and the manual
+move are not an atomic transaction, so keep all writers stopped throughout.
+Prepare does not touch active files and stays reclaimable.
+A normal memory edit after apply will also prevent rollback if the expected
+outputs differ. A kill can also leave a bundle or active file with a second name
+(a publish links before it removes its temporary name); `inspect` and the migration
+commands report codes only, so they do not name it. Any command that reads the file
+through the memory input reader (`decision add` and `lesson save`, for example) refuses it with a
+message that names the `.<name>.publish-<pid>-<24 hex>` file and says deleting that
+name is safe.
 
 ## Limits
 

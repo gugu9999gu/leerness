@@ -21,8 +21,8 @@ process.on('message', async ({ s, mode, gate, port, cert, key, recoveryPolicy, r
     if (phase && mode === 'after-' + phase) pause(mode);
     return result;
   };
-  // Bundle object creation calls the exported output helper. Its underlying
-  // lexical run() is not intercepted by assigning the exported G.run above.
+   
+   
   G.output = (...args) => {
     const bundle = args[1][0] === 'commit-tree' && String(args[2]) === 'leerness UI recovery bundle v1\n';
     if (bundle && mode === 'before-bundle') pause(mode);

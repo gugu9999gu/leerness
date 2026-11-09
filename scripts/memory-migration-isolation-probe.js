@@ -63,7 +63,7 @@ test('load and successful assessment without I/O, clock or canonical stringify',
   const sandbox = isolated();
   assert.equal(JSON.stringify(sandbox.api.assessLegacyMemoryMigration(good)), JSON.stringify(ordinary.assessLegacyMemoryMigration(good)));
   assert.equal(sandbox.counters.parsed, 1);
-  assert.equal(sandbox.counters.renderedOutputs, 1); // Positive control: trap is reached.
+  assert.equal(sandbox.counters.renderedOutputs, 1);  
 });
 test('output expansion is refused before whole projection allocation', () => {
   const sandbox = isolated({ forbidOutput: true });

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0095 regression probe: read/status commands must state what they actually
-// measured. A CLI version is not a project version, an invalid memory verb is
-// not an unknown top-level command, and a damaged preview store is not empty.
+ 
+ 
+ 
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -13,9 +13,9 @@ const cp = require('child_process');
 const { gitSpawn } = require('../lib/git');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
-// Fixtures deliberately cover both canonical and legacy workspace layouts.
-// A supported parent-shell override must not silently rewrite that fixture
-// contract (Windows environment keys are case-insensitive, so normalize).
+ 
+ 
+ 
 const fixtureGitConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-false-claim-git-config-'));
 function isolateFixtureGitConfig(baseEnv, dir, label = 'fixture') {
   const out = { ...baseEnv };
@@ -29,8 +29,8 @@ function isolateFixtureGitConfig(baseEnv, dir, label = 'fixture') {
   fs.writeFileSync(out.GIT_CONFIG_SYSTEM, '', 'utf8');
   return out;
 }
-// Product Git calls preserve persistent config by design. Fixtures instead use
-// empty temp configs so a caller's core.hooksPath cannot execute foreign hooks.
+ 
+ 
 const env = isolateFixtureGitConfig(process.env, fixtureGitConfigRoot);
 for (const key of Object.keys(env)) {
   if (key.toUpperCase() === 'LEERNESS_WORKSPACE_DIR' || key.toUpperCase() === 'LEERNESS_INTERNAL') delete env[key];
@@ -176,6 +176,11 @@ function aggregateHistoryUnavailable(body) {
     && body?.recentChangesError?.code === 'git_history_unavailable';
 }
 
+function gitDerivedFactsAbsent(body) {
+  return body?.inspection?.status === 'not_inspected'
+    && ['roundHistory', 'milestones', 'recentChanges', 'recentChangesState', 'recentChangesError'].every(key => !(key in body));
+}
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-false-claim-'));
 try {
   const stateDir = path.join(root, '.leerness');
@@ -295,15 +300,16 @@ try {
     for (const aggregate of [
       { label: 'health', args: ['health', '--json'], timeout: 180000 },
       { label: 'handoff', args: ['handoff', '--json', '--no-record', '--no-drift-check', '--no-headline'], timeout: 180000 },
+      { label: 'handoff --inspect', args: ['handoff', '--json', '--inspect', '--no-record', '--no-drift-check', '--no-headline'], timeout: 180000 },
       { label: 'session close', args: ['session', 'close', '--json'], timeout: 300000 },
     ]) {
       const before = treeDigest(root);
       result = run(root, aggregate.args, aggregate.timeout, true, { PATH: noGitPath });
       parsed = json(result);
-      // These aggregate commands have bookkeeping/writers. Without Git in a
-      // repository they cannot establish layout authority, unlike the pure
-      // history readers above. History-only faults below still exercise all
-      // original null/error aggregation assertions with working topology.
+       
+       
+       
+       
       check(`${aggregate.label} rejects unresolvable repository authority before writing`,
         result.status === 1 && parsed?.code === 'runtime_layout_incompatible'
           && parsed.error.includes('(git_missing)') && treeDigest(root) === before, result);
@@ -343,7 +349,7 @@ try {
 
       for (const aggregate of [
         { label: 'health', args: ['health', '--json'], timeout: 180000 },
-        { label: 'handoff', args: ['handoff', '--json', '--no-record', '--no-drift-check', '--no-headline'], timeout: 180000 },
+        { label: 'handoff', args: ['handoff', '--json', '--inspect', '--no-record', '--no-drift-check', '--no-headline'], timeout: 180000 },
         { label: 'session close', args: ['session', 'close', '--json'], timeout: 300000 },
       ]) {
         result = run(root, aggregate.args, aggregate.timeout, true, injectedEnv);
@@ -355,6 +361,11 @@ try {
             && parsed?.recentChangesError?.reason === expectedReason[scenario],
           result);
       }
+
+      result = run(root, ['handoff', '--json', '--no-record', '--no-drift-check', '--no-headline'], 180000, true, injectedEnv);
+      parsed = json(result);
+      check(`default handoff states no Git-derived fact for injected Git ${scenario} failure`,
+        result.status === 0 && gitDerivedFactsAbsent(parsed), result);
     }
   } finally {
     fs.rmSync(preloadDir, { recursive: true, force: true });
@@ -382,7 +393,7 @@ try {
       result);
     for (const aggregate of [
       { label: 'health', args: ['health', '--json'], timeout: 180000 },
-      { label: 'handoff', args: ['handoff', '--json', '--no-record', '--no-drift-check', '--no-headline'], timeout: 180000 },
+      { label: 'handoff', args: ['handoff', '--json', '--inspect', '--no-record', '--no-drift-check', '--no-headline'], timeout: 180000 },
       { label: 'session close', args: ['session', 'close', '--json'], timeout: 300000 },
     ]) {
       result = run(successfulAggregateRoot, aggregate.args, aggregate.timeout);
@@ -395,6 +406,10 @@ try {
           && parsed?.recentChangesError === null,
         result);
     }
+    result = run(successfulAggregateRoot, ['handoff', '--json', '--no-record', '--no-drift-check', '--no-headline'], 180000);
+    parsed = json(result);
+    check('default handoff states no Git-derived fact for a repository with measurable history',
+      result.status === 0 && gitDerivedFactsAbsent(parsed), result);
   } finally {
     fs.rmSync(successfulAggregateRoot, { recursive: true, force: true });
   }
@@ -411,6 +426,8 @@ try {
     ['preview', ['preview', 'list']],
     ['preview', ['preview', 'show', 'P-0001']],
     ['state', ['state', 'inspect']],
+    ['loop', ['loop', 'status']],
+    ['loop', ['loop']],
   ].every(([cmd, argv]) => _cliMutationClass(argv, cmd) === 'observation-only'));
   let readOnlyStatusesOk = true;
   for (const args of [
@@ -430,6 +447,7 @@ try {
     ['preview', '--json'],
     ['preview', 'list', '--json'],
     ['state', 'inspect', '--json'],
+    ['loop', 'status', '--json'],
   ]) {
     const readOnlyResult = run(root, args);
     if (readOnlyResult.status !== 0) readOnlyStatusesOk = false;
@@ -451,8 +469,9 @@ try {
       { args: ['status', '--json'], status: 0 },
       { args: ['auto-update', 'status', '--json'], status: 0 },
       { args: ['state', 'inspect', '--json'], status: 0 },
-      // These surfaces currently require the canonical workspace to render;
-      // on legacy input they may fail read-only, but must never migrate it.
+      { args: ['loop', 'status', '--json'], status: 0 },
+       
+       
       { args: ['dashboard', '--json'], status: 1 },
       { args: ['security-surface', '--json'], status: 0 },
       { args: ['preview', '--json'], status: 1 },
@@ -1042,8 +1061,8 @@ try {
       result);
   }
 
-  // Put both projects under a real `_apps` workspace so the same contract can
-  // be enforced through explicit --include and discovery-based --all-apps.
+   
+   
   const previewWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-preview-workspace-'));
   const previewConsumerRoot = path.join(previewWorkspaceRoot, '_apps', 'consumer');
   const previewConsumerPeerRoot = path.join(previewWorkspaceRoot, '_apps', 'peer');
@@ -1443,8 +1462,8 @@ try {
     fs.writeFileSync(linkedStore, JSON.stringify([{ id: 'P-0001', title: 'linked output', status: 'proposed', features: [], history: [] }]), 'utf8');
     const linkedStoreBefore = digest(linkedStore);
 
-    // A partial standalone store is rejected at admission. An initialized
-    // workspace must still reach the original domain-specific link guards.
+     
+     
     result = run(linkedOutputRoot, ['preview', 'mockup', 'P-0001', '--json']);
     parsed = json(result);
     check('standalone linked preview output is rejected before CLI bookkeeping',

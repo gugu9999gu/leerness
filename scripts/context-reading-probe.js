@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 if (!process.argv.includes('--worker')) {
@@ -7,9 +7,9 @@ if (!process.argv.includes('--worker')) {
   try {
     const env = { ...process.env, CONTEXT_READING_ROOT: arena };
     for (const key of ['HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP']) { env[key] = path.join(arena, key.toLowerCase());fs.mkdirSync(env[key]); }
-    // 3600 s and 300 s per call: on 2026-09-30 one `init` took 73-90 s on this machine while other sessions ran their
-    // suites (the same for the previous tree), and a 90 s call limit failed the upgrade test before it reached migrate.
-    // The limits catch a hang; they do not measure speed.
+     
+     
+     
     const r = cp.spawnSync(process.execPath, [__filename, '--worker', ...process.argv.slice(2)], { encoding: 'utf8', timeout: 3600000, windowsHide: true, env });
     process.stdout.write(r.stdout || '');process.stderr.write(r.stderr || '');if (r.error) process.stderr.write(r.error.message + '\n');process.exitCode = r.status === 0 && !r.error ? 0 : 1;
   } finally {
@@ -37,8 +37,8 @@ function call(f, args, hook) {
 }
 const capture = path.join(arena, 'capture-dispatch.cjs');
 fs.writeFileSync(capture, `const a=require(${JSON.stringify(path.resolve(__dirname, '../lib/agents'))});a.agentsCmd=(root,sub,args,deps)=>console.log(JSON.stringify({brief:deps._harnessBrief(),command:deps._dispatchCommand('codex',deps._harnessBrief()+'Inspect assigned files',false)}));`);
-// Exercise the real dispatcher while replacing only local provider discovery.
-// Preparing a command must not launch a coding agent or require credentials.
+ 
+ 
 const dispatch = path.join(arena, 'dispatch-offline.cjs');
 fs.writeFileSync(dispatch, `const a=require(${JSON.stringify(path.resolve(__dirname, '../lib/agents'))});const original=a.agentsCmd;a.agentsCmd=(root,sub,args,deps)=>original(root,sub,args,{...deps,_checkAgent:()=>({status:'ready',version:'fixture'}),_cliChat:()=>{throw Error('Unexpected provider call');}});`);
 for (const lang of ['en', 'ko']) test('repro generated entry scopes the old blanket reading list: ' + lang, () => {
@@ -84,8 +84,8 @@ for (const lang of ['en', 'ko']) for (const mode of ['minimal', 'standard', 'adv
     const files = core.coreFiles(arena, lang, [], { mode });
     assert.match(files['AGENTS.md'], /Missing\/stale|누락·오래된/);
     assert.strictEqual((files['AGENTS.md'].match(/## (?:Context reading scope|컨텍스트 읽기 범위)/g) || []).length, 1);
-    // T-0314 (owner decision, 2026-09-29): Leerness serves several agents, so AGENTS.md holds the one full copy of
-    // the reading paragraph and the reviewer protocol; the other agent entry files and the workflow point to it.
+     
+     
     const cr = require('../lib/context-reading-guidance'), rf = require('../lib/review-feedback-guidance');
     for (const name of ['CLAUDE.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md', '.leerness/session-workflow.md']) {
       assert.ok(files[name].includes(cr.pointer(lang)), name + ': reading pointer missing');
@@ -96,9 +96,9 @@ for (const lang of ['en', 'ko']) for (const mode of ['minimal', 'standard', 'adv
     for (const name of ['AGENTS.md', 'CLAUDE.md']) assert.ok(files[name].includes('verify-claim'), name);
     assert.ok(files['AGENTS.md'].includes('review-feedback start --stdin'));
     assert.match(files['AGENTS.md'], /NEEDS_DECISION/);
-    // Claude Code expands this line at launch and loads the shared file (docs: "Share one file with other coding tools").
+     
     assert.match(files['CLAUDE.md'], /^@AGENTS\.md$/m);
-    // Minimal follows the paragraph directly: no context-routing reference, which context budget would load.
+     
     if (mode === 'minimal') assert.ok(!files['AGENTS.md'].includes('context-routing.md'));
     else assert.ok(files['AGENTS.md'].includes('.leerness/context-routing.md'));
     const routing = files['.leerness/context-routing.md'];
@@ -110,10 +110,10 @@ for (const lang of ['en', 'ko']) for (const mode of ['minimal', 'standard', 'adv
     assert.match(files['.leerness/protected-files.md'], /explicit user approval/);
   });
 }
-// T-0314: a fresh project must fit its own context budget (the budget's stated basis). Guidance growth pushed
-// a standard English project with one task, decision and plan to 12,076/12,000 and a fresh English minimal
-// project to 4,148/1,200; only the 2.9-hour e2e noticed. `call` requires exit 0, which `context budget` gives
-// only within budget. English is the tighter case for both modes (length-based token estimate).
+ 
+ 
+ 
+ 
 test('fresh standard and minimal projects stay within their own context budget', () => {
   const project = (lang, extra) => {
     const dir = path.join(arena, (++sequence) + '-budget');fs.mkdirSync(dir);
@@ -182,9 +182,9 @@ for (const lang of ['en', 'ko']) test('actual init and legacy migration preserve
   call(f, ['task', 'add', 'Existing assigned work', '--status', 'in-progress', '--json']);
   const protectedNames = ['.leerness/rules.md', '.leerness/progress-tracker.md', '.leerness/session-handoff.md'];
   const before = protectedNames.map(n => state(f.file(n)));
-  // Simulate the exact old bootstrap section, not arbitrary user instructions.
+   
   const file = f.file('AGENTS.md');
-  fs.writeFileSync(file, text(file).replace(/\n## (?:Context reading scope|컨텍스트 읽기 범위)\n[\s\S]*?(?=\n## )/, '\n').replace('## Context index (session owner; relevant sections)', '## Mandatory read order (session start)'));
+  fs.writeFileSync(file, text(file).replace(/\n## (?:Context reading scope|컨텍스트 읽기 범위)\n[\s\S]*?(?=\n## )/, '\n').replace('## Context index (optional reference, not a mandatory full read)', '## Mandatory read order (session start)'));
   fs.writeFileSync(f.file('.leerness/HARNESS_VERSION'), '1.36.188\n');
   call(f, install('migrate'));
   for (const name of ['AGENTS.md', '.leerness/context-routing.md']) {
@@ -205,7 +205,7 @@ test('legacy Korean blanket reading instructions retire only with an exact origi
   const f = { dir, lang: 'ko', file: n => path.join(dir, n) };
   call(f, [...install('init'), '--language', 'ko']);
   const agentFile = f.file('AGENTS.md');
-  const currentLead = '## 매 세션 첫 행동\n주 세션 담당자는 .leerness/session-workflow.md부터 시작하고 위임 에이전트는 위 읽기 범위를 따른다.';
+  const currentLead = '## Session context (on demand)\n주 세션 담당자는 필요한 작업과 규칙만 확인하고 위임 에이전트는 배정된 범위를 사용한다. 매 메시지마다 초기 절차를 반복하지 않는다.';
   const oldLead = '## ⭐ 매 세션 첫 행동\n**반드시 `.leerness/session-workflow.md`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.';
   const oldOwnerLines = [
     '- 작업 시작 시 `leerness handoff .`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).',
@@ -213,13 +213,18 @@ test('legacy Korean blanket reading instructions retire only with an exact origi
     '- 매 세션 종료 시 `leerness session close .`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.',
   ];
   const newOwnerLines = [
-    '- 주 세션 담당자는 세션 시작 시 `leerness handoff .`로 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).',
-    '- 주 세션 담당자는 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.',
-    '- 주 세션 담당자는 세션 종료 시 `leerness session close .`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.',
+    '- 주 세션 담당자는 세션 시작 시 `leerness handoff .`가 필요한 경우에만 사용하고 기존 문맥을 재사용합니다.',
+    '- 주 세션 담당자는 의미 있는 변경 후 progress-tracker 등 실제 변경된 공유 상태만 갱신하며 모든 기록을 반복해서 쓰지 않습니다.',
+    '- 주 세션 담당자는 세션 종료 시 `leerness session close .`가 필요한 경우에만 사용합니다. 별도 사용자 규칙은 유지합니다.',
   ];
   const custom = 'CUSTOM-KEEP: 사용자 지침은 검수에도 적용한다.';
   let older = text(agentFile).replace(currentLead, oldLead)
-    .replace('## Context index (session owner; relevant sections)', '## Mandatory read order (session start)');
+    .replace('## Context index (optional reference, not a mandatory full read)', '## Mandatory read order (session start)');
+  older = older
+    .replace('1. .leerness/session-workflow.md (필요 시 관련 단계 참조)',
+      '1. **.leerness/session-workflow.md** (6단계 워크플로 — 최우선)')
+    .replace('11. .leerness/rules.md (해당 작업에 적용되는 사용자 규칙만 확인하고 준수)',
+      '11. **.leerness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)');
   for (let i = 0; i < oldOwnerLines.length; i++) older = older.replace(newOwnerLines[i], oldOwnerLines[i]);
   older = older.trimEnd() + '\n\n## Project-specific instruction\n' + custom + '\n';
   assert.ok(older.includes(oldLead));assert.ok(older.includes('## Mandatory read order (session start)'));
@@ -242,17 +247,17 @@ test('legacy Korean blanket reading instructions retire only with an exact origi
   assert.strictEqual(text(agentFile).split(custom).length, 2);
   assert.ok(!text(agentFile).includes('## Mandatory read order (session start)'));
 });
-// Cross-model review 2026-09-30: development builds up to 1.36.289 wrote the context-reading section and the reviewer
-// protocol into six managed files; after the pointer layout, migrate carried them into "Preserved previous content".
-// The fixture is what the real 1.36.289 CLI wrote (whole files), independent of the retirement catalogue.
+ 
+ 
+ 
 const LEGACY = require('./fixtures/legacy-guidance-1.36.289.json');
 const MANAGED = ['AGENTS.md', 'CLAUDE.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md', '.leerness/session-workflow.md', '.leerness/review-checklist.md'];
 const splitPreserved = s => { const at = s.indexOf('<!-- leerness:migration-preserved -->'); return at < 0 ? [s, ''] : [s.slice(0, at), s.slice(at)]; };
 const keptLines = tail => tail.split('\n').filter(l => l.trim() && !/^<!--|^## Preserved previous content|^> /.test(l));
 test('real 1.36.289 instruction files upgrade to the current layout; custom lines an earlier migration preserved stay', () => {
-  // The custom line sits where an earlier migration put it: below the preserved marker, written by the product's own
-  // merge (the "---" separator included). The head above it is the unedited 1.36.289 file, so its generated sections
-  // retire and only the custom line is preserved.
+   
+   
+   
   const { _managedMerge } = require('../lib/pure-utils');
   for (const [key, files] of Object.entries(LEGACY.files)) {
     const [lang, mode] = key.split('-');
@@ -276,10 +281,10 @@ test('real 1.36.289 instruction files upgrade to the current layout; custom line
   }
 });
 test('real 1.36.289 files with the user\'s own text in the managed part keep every old section, preserved with that text', () => {
-  // Cross-model review rounds 3 and 4: text around a section cannot prove it generated, so a head with any line of the
-  // user's keeps the old sections. Migrate carries them and the user's text into the preserved part, in order; the
-  // managed part is still the fresh layout. Nothing is lost. Both places users add text: directly after the last
-  // section, and under their own heading.
+   
+   
+   
+   
   const key = 'ko-standard', lang = 'ko', n = 'CLAUDE.md', old = LEGACY.files[key][n];
   const { RETIRED_SECTIONS } = require('../lib/retired-guidance-sections');
   const olds = RETIRED_SECTIONS.filter(s => old.includes(s)).sort((a, b) => old.indexOf(a) - old.indexOf(b));
@@ -296,7 +301,7 @@ test('real 1.36.289 files with the user\'s own text in the managed part keep eve
     const [head, tail] = splitPreserved(text(f.file(n)).replace(/\r\n/g, '\n'));
     assert.strictEqual(head.trimEnd().replace(/\n---$/, '').trimEnd(), text(path.join(fresh, n)).replace(/\r\n/g, '\n').trimEnd(), label + ': managed part differs from a fresh file');
     const kept = keptLines(tail), freshLines = new Set(text(path.join(fresh, n)).replace(/\r\n/g, '\n').split('\n').map(x => x.trim()));
-    // Nothing lost: every old line is in the managed part or preserved, and each section's paragraphs are preserved.
+     
     for (const s of olds) for (const l of s.split('\n').filter(x => x.trim())) assert.ok(kept.includes(l) || freshLines.has(l.trim()), label + ': lost: ' + l);
     for (const s of olds) for (const l of s.split('\n').slice(2).filter(x => x.trim())) assert.ok(kept.includes(l), label + ': section paragraph not preserved: ' + l.slice(0, 40));
     assert.strictEqual(kept[kept.length - 1], extra, label + ': the user\'s text is preserved last');
@@ -304,8 +309,8 @@ test('real 1.36.289 files with the user\'s own text in the managed part keep eve
   }
 });
 test('a copied template heading and import line above a copy of the old protocol keep that copy through migrate', () => {
-  // Review round 5: every line the user appended is template text or a retired section, yet the file is no layout any
-  // build wrote. Through the real migrate (backup-backed merge), the copied protocol must survive.
+   
+   
   const dir = path.join(arena, (++sequence) + '-round5-copy'); fs.mkdirSync(dir);
   const f = { dir, lang: 'en', file: n => path.join(dir, n) };
   call(f, [...install('init'), '--language', 'en']);
@@ -321,9 +326,9 @@ test('a copied template heading and import line above a copy of the old protocol
   for (const l of S.split('\n').filter(x => x.trim())) assert.ok(after.includes(l), 'the copied protocol lost: ' + l.slice(0, 60));
 });
 test('a head that is exactly a file an old build wrote is dropped; any other head is left as it is', () => {
-  // Cross-model review rounds 2 to 5: each rule that judged a section by its surroundings deleted something the user
-  // wrote or copied. Migrate now drops a head only when its fingerprint is one of the generated layouts, taken from
-  // every build that wrote a retired section (by a one-off script), and leaves any other head to the merge.
+   
+   
+   
   const G = require('../lib/context-reading-guidance');
   const { RETIRED_SECTIONS, GENERATED_LAYOUTS } = require('../lib/retired-guidance-sections');
   const { _managedMerge } = require('../lib/pure-utils');
@@ -334,16 +339,16 @@ test('a head that is exactly a file an old build wrote is dropped; any other hea
     for (const n of MANAGED) {
       const old = files[n], S = RETIRED_SECTIONS.filter(s => old.includes(s));
       if (!S.length) continue;
-      // The real 1.36.289 file is one of the layouts: alone, with CRLF line endings and trailing spaces, and above a
-      // preserved block written by the product's own merge (the "---" separator included).
+       
+       
       assert.ok(GENERATED_LAYOUTS.includes(G.generatedHeadFingerprint(old)), key + ' ' + n + ': not in the catalogue');
       assert.strictEqual(G.retireGeneratedGuidance(old), '', key + ' ' + n + ': the generated head stayed');
       assert.strictEqual(G.retireGeneratedGuidance(old.replace(/\n/g, ' \r\n')), '', key + ' ' + n + ': CRLF and trailing spaces');
       const withTail = _managedMerge(n, old, old.trimEnd() + '\n\nCUSTOM ' + n + '\n', '.leerness/archive', null, { lang });
       assert.strictEqual(G.retireGeneratedGuidance(withTail), withTail.slice(withTail.indexOf(TAG)), key + ' ' + n + ': the preserved tail');
-      // Any other head stays whole: a line of the user's at the top, around each section and at the end; the reviewer's
-      // copied heading with a copy of the section (round 5); a copy after a template line under the user's heading
-      // (round 4); fenced copies, one "closed" by a no-break space (round 4); a no-break space inside the section.
+       
+       
+       
       const heading = old.split('\n').find(l => /^# /.test(l)), first = old.split('\n').find(l => /^[A-Za-z@]/.test(l) && !/^#/.test(l)) || 'Follow AGENTS.md.';
       const variants = [
         old.replace('\n', '\nUser note.\n'),
@@ -366,15 +371,15 @@ test('a head that is exactly a file an old build wrote is dropped; any other hea
     }
   }
   assert.strictEqual(checked, 12, 'every fixture file with a retired section was checked');
-  // The reviewer's round-5 input on the current template: its lines are all template lines, but it is no layout.
+   
   const next = core.coreFiles(arena, 'en', [], { mode: 'standard' })['CLAUDE.md'];
   const r5 = next.trimEnd() + '\n\n## Natural-language standing rules\n\n@AGENTS.md\n\n' + RETIRED_SECTIONS[0] + '\n';
   assert.strictEqual(G.retireGeneratedGuidance(r5), r5, 'round 5: copied heading and import line');
-  // A file without the managed layout, and the current templates themselves, are no old layout either.
+   
   for (const t of Object.values(core.coreFiles(arena, 'ko', [], { mode: 'standard' }))) assert.strictEqual(G.retireGeneratedGuidance(t), t);
 });
 test('the canonical legacy helpers leave a file alone when it quotes the old text in a fence', () => {
-  // Review round 3 swept the sibling helpers: they replace exact old blocks and never looked at fences either.
+   
   const G = require('../lib/context-reading-guidance');
   const run = 'Follow AGENTS.md. Always run `leerness handoff .` at the start and `leerness session close .` before ending a session.';
   const first = '**⭐ 매 세션 첫 행동**: `.leerness/session-workflow.md`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 `leerness drift check --auto-fix`로 자동 회복.';
@@ -386,8 +391,8 @@ test('the canonical legacy helpers leave a file alone when it quotes the old tex
   assert.notStrictEqual(G.retireCanonicalLegacyAdapterReading('.cursor/rules/leerness.mdc', mdc), mdc, 'control: the exact old Cursor block retires');
   const mdcQuoted = mdc + '\n~~~\nRun: `leerness handoff .` at session start.\n~~~\n';
   assert.strictEqual(G.retireCanonicalLegacyAdapterReading('.cursor/rules/leerness.mdc', mdcQuoted), mdcQuoted, 'Cursor rules with a fenced quote');
-  // Review round 4: a closing fence may be followed by spaces and tabs only. A "closer" with a no-break space leaves the
-  // fence open, so the quote after it is still quoted; a closer with spaces and a tab does close it.
+   
+   
   const nbsp = String.fromCharCode(0xA0), quoteLine = 'Run: `leerness handoff .` at session start.';
   for (const fence of ['```', '~~~']) {
     const open = mdc + '\n' + fence + '\nexample\n' + fence + nbsp + '\n' + quoteLine + '\n' + fence + '\n';
@@ -432,7 +437,7 @@ test('legacy Claude session-wide instructions retire only with an exact original
   const oldRun = 'Follow AGENTS.md. Always run `leerness handoff .` at the start and `leerness session close .` before ending a session.';
   const oldFirst = '**⭐ 매 세션 첫 행동**: `.leerness/session-workflow.md`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 `leerness drift check --auto-fix`로 자동 회복.';
   const custom = 'CUSTOM-KEEP: 검수 범위는 기존 계약을 따른다.';
-  const original = text(file).replace('Follow AGENTS.md. The main session owner runs', 'Follow AGENTS.md. Always run')
+  const original = LEGACY.files['ko-standard']['CLAUDE.md'].replace('Follow AGENTS.md. The main session owner runs', 'Follow AGENTS.md. Always run')
     .replace('**매 세션 첫 행동**:', '**⭐ 매 세션 첫 행동**:').trimEnd() + '\n\n## Project-specific instruction\n' + custom + '\n';
   assert.ok(original.includes(oldRun));assert.ok(original.includes(oldFirst));
   fs.writeFileSync(file, original);fs.writeFileSync(f.file('.leerness/HARNESS_VERSION'), '1.36.188\n');
@@ -450,23 +455,27 @@ test('legacy Claude session-wide instructions retire only with an exact original
   const changed = original.replace('**완료 주장 전**', '사용자 조건\n\n**완료 주장 전**');
   assert.strictEqual(retire(changed), changed, 'edited legacy instruction must remain');
 });
-test('legacy Cursor and Copilot owner-wide instructions do not reappear after migration', () => {
+test('legacy Cursor and Copilot owner-wide generated instructions retire with proven ownership', () => {
   const dir = path.join(arena, (++sequence) + '-legacy-adapter-reading');fs.mkdirSync(dir);
   const f = { dir, lang: 'ko', file: n => path.join(dir, n) };
   call(f, [...install('init'), '--language', 'ko']);
   const cursorName = '.cursor/rules/leerness.mdc', copilotName = '.github/copilot-instructions.md';
   const oldCursor = 'Run: `leerness handoff .` at session start.\nRun: `leerness session close .` at session end.';
+  const ownerCursor = 'Main session owner: `leerness handoff .` at session start.\nMain session owner: `leerness session close .` at session end.';
   const oldCopilot = 'Before completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.';
   const custom = 'CUSTOM-KEEP: 사용자별 검수 조건';
   const originals = {
-    [cursorName]: text(f.file(cursorName)).replace(/Main session owner:/g, 'Run:').trimEnd() + '\n' + custom + '\n',
-    [copilotName]: text(f.file(copilotName)).replace('Before completion, the main session owner ensures', 'Before completion, ensure').trimEnd() + '\n' + custom + '\n'
+    [cursorName]: require('../lib/pure-utils')._managedMerge(cursorName, LEGACY.files['ko-standard'][cursorName], LEGACY.files['ko-standard'][cursorName].trimEnd() + '\n' + custom + '\n', '.leerness/archive', null, { lang: 'ko' }),
+    [copilotName]: LEGACY.files['ko-standard'][copilotName].replace('Before completion, the main session owner ensures', 'Before completion, ensure').trimEnd() + '\n' + custom + '\n'
   };
-  assert.ok(originals[cursorName].includes(oldCursor));assert.ok(originals[copilotName].includes(oldCopilot));
+  assert.ok(originals[cursorName].includes(ownerCursor));assert.ok(originals[copilotName].includes(oldCopilot));
+  assert.notStrictEqual(require('../lib/context-reading-guidance').retireGeneratedGuidance(originals[cursorName]), originals[cursorName]);
   for (const [name, value] of Object.entries(originals)) fs.writeFileSync(f.file(name), value);
   fs.writeFileSync(f.file('.leerness/HARNESS_VERSION'), '1.36.188\n');
   call(f, install('migrate'));
   assert.ok(!text(f.file(cursorName)).includes(oldCursor));
+  assert.ok(!text(f.file(cursorName)).includes(ownerCursor));
+  assert.match(text(f.file(cursorName)), /^---\ndescription: [^\n]+\nalwaysApply: false\n---\n/);
   assert.ok(!text(f.file(copilotName)).includes(oldCopilot));
   for (const name of [cursorName, copilotName]) {
     assert.strictEqual(text(f.file(name)).split(custom).length, 2);
@@ -474,8 +483,46 @@ test('legacy Cursor and Copilot owner-wide instructions do not reappear after mi
     assert.ok(archives.length);
     assert.strictEqual(text(f.file('.leerness/archive/' + archives[archives.length - 1] + '/files/' + name)), originals[name]);
   }
+  const current = Object.fromEntries([cursorName, copilotName].map(name => [name, fs.readFileSync(f.file(name))]));
+  call(f, install('migrate'));
+  for (const name of [cursorName, copilotName]) assert.deepStrictEqual(fs.readFileSync(f.file(name)), current[name]);
   const retire = require('../lib/context-reading-guidance').retireCanonicalLegacyAdapterReading;
-  assert.strictEqual(retire(cursorName, originals[cursorName].replace('Run: `leerness handoff .`', 'Run once: `leerness handoff .`')), originals[cursorName].replace('Run: `leerness handoff .`', 'Run once: `leerness handoff .`'));
   assert.strictEqual(retire(copilotName, originals[copilotName].replace('Before completion, ensure', 'Before completion, maybe')), originals[copilotName].replace('Before completion, ensure', 'Before completion, maybe'));
+});
+test('legacy Cursor and Copilot owner-wide edited Cursor policy remains byte exact', () => {
+  const dir = path.join(arena, (++sequence) + '-edited-adapter-policy');fs.mkdirSync(dir);
+  const f = { dir, lang: 'ko', file: n => path.join(dir, n) };
+  call(f, [...install('init'), '--language', 'ko']);
+  const cursorName = '.cursor/rules/leerness.mdc', copilotName = '.github/copilot-instructions.md';
+  const oldCursor = 'Run: `leerness handoff .` at session start.\nRun: `leerness session close .` at session end.';
+  const oldCopilot = 'Before completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.';
+  const custom = 'CUSTOM-KEEP: 사용자별 검수 조건';
+  const originals = {
+    [cursorName]: LEGACY.files['ko-standard'][cursorName].replace(/Main session owner:/g, 'Run:').trimEnd() + '\n' + custom + '\n',
+    [copilotName]: LEGACY.files['ko-standard'][copilotName].replace('Before completion, the main session owner ensures', 'Before completion, ensure').trimEnd() + '\n' + custom + '\n'
+  };
+  assert.ok(originals[cursorName].includes(oldCursor));assert.ok(originals[copilotName].includes(oldCopilot));
+  assert.strictEqual(require('../lib/context-reading-guidance').retireGeneratedGuidance(originals[cursorName]), originals[cursorName]);
+  for (const [name, value] of Object.entries(originals)) fs.writeFileSync(f.file(name), value);
+  fs.writeFileSync(f.file('.leerness/HARNESS_VERSION'), '1.36.188\n');
+  const protectedNames = ['.leerness/rules.md', '.leerness/progress-tracker.md', '.leerness/session-handoff.md'];
+  const before = protectedNames.map(name => state(f.file(name)));
+  call(f, install('migrate'));
+  assert.deepStrictEqual(fs.readFileSync(f.file(cursorName)), Buffer.from(originals[cursorName]));
+  assert.ok(text(f.file(cursorName)).includes(oldCursor));
+  assert.ok(!text(f.file(copilotName)).includes(oldCopilot));
+  for (const name of [cursorName, copilotName]) {
+    assert.strictEqual(text(f.file(name)).split(custom).length, 2);
+    const archives = fs.readdirSync(f.file('.leerness/archive')).filter(n => n.startsWith('leerness-')).sort();
+    assert.ok(archives.length);
+    assert.deepStrictEqual(fs.readFileSync(f.file('.leerness/archive/' + archives[archives.length - 1] + '/files/' + name)), Buffer.from(originals[name]));
+  }
+  assert.deepStrictEqual(protectedNames.map(name => state(f.file(name))), before);
+  const current = Object.fromEntries([cursorName, copilotName].map(name => [name, fs.readFileSync(f.file(name))]));
+  call(f, install('migrate'));
+  for (const name of [cursorName, copilotName]) assert.deepStrictEqual(fs.readFileSync(f.file(name)), current[name]);
+  assert.deepStrictEqual(protectedNames.map(name => state(f.file(name))), before);
+  const edited = originals[cursorName].replace('Run: `leerness handoff .`', 'Run once: `leerness handoff .`');
+  assert.strictEqual(require('../lib/context-reading-guidance').retireCanonicalLegacyAdapterReading(cursorName, edited), edited);
 });
 console.log(`Tests: ${passed}/${passed + failed} passed`);process.exitCode = failed ? 1 : 0;

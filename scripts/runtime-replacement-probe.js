@@ -1,8 +1,8 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Final Windows mutation boundary: prepared files are allowed before the
-// descriptor changes, but the replacement attempt and retry must then stop.
+ 
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -29,8 +29,8 @@ function fixture(name) {
   return root;
 }
 function changeLayout(root) {
-  // Use an actual other process: Node 18's captured writeFileSync still calls
-  // the parent's guarded public writeSync after creating an empty descriptor.
+   
+   
   const descriptor = JSON.stringify({
     schema: 'leerness.runtime-layout/v1', schemaVersion: 1, scope: 'project-local',
     generation: 1, layout: 'legacy', requiredWriterProtocol: 2,
@@ -87,11 +87,11 @@ try {
       assert.strictEqual(fs.readFileSync(target, 'utf8'), 'planned');
       assert.strictEqual(fs.readFileSync(result.backupFile, 'utf8'), 'original');
     });
-    // T-0343: a cmdlet in this command cost 21.5-52 s per launch on a GitHub Windows runner when the environment had no
-    // PSModulePath (Windows PowerShell analyzed every module on the machine path to find New-Object). This machine
-    // does not show that cost, so the command is checked for command invocations and run once without those variables.
-    // PowerShell's own parser counts CommandAst nodes: cmdlets, aliases (echo, %), functions and programs, and not
-    // text inside string literals. The parse itself is a .NET call and invokes no command.
+     
+     
+     
+     
+     
     const commandInvocations = text => {
       const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
       const parse = "$e = $null; $a = [System.Management.Automation.Language.Parser]::ParseInput($env:T0343_COMMAND, [ref]$null, [ref]$e); "
@@ -132,8 +132,8 @@ try {
         const delayed = args.slice();
         const index = delayed.indexOf('-Command');
         assert(index >= 0 && typeof delayed[index + 1] === 'string');
-        // Delay only this fixture's actual child, then execute the exact
-        // product command. This models delay, not the unobserved CI phase.
+         
+         
         delayed[index + 1] = 'Start-Sleep -Milliseconds 16000; ' + delayed[index + 1];
         const started = process.hrtime.bigint();
         const result = original.spawn.call(this, command, delayed, options);
@@ -165,15 +165,15 @@ try {
         attempts++;
         paths = { source: options.env.LEERNESS_REPLACE_FROM, backup: options.env.LEERNESS_REPLACE_BACKUP };
         if (phase === 'partial-progress') {
-          // Model an interrupted ReplaceFile step: the original has moved,
-          // while the planned source has not yet become the live target.
+           
+           
           fs.renameSync(target, paths.backup);
         } else if (phase === 'committed') {
           const result = original.spawn.call(this, command, args, options);
           assert(!result.error && result.status === 0, 'the real replacement must complete before the reported timeout');
         }
-        // Timeout does not prove whether replacement ran. In the committed
-        // case this transport result deliberately withholds a real success.
+         
+         
         return { status: null, signal: 'SIGTERM', stdout: '', stderr: '',
           error: Object.assign(new Error('controlled replacement timeout'), { code: 'ETIMEDOUT' }) };
       };

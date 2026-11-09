@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -42,8 +42,14 @@ function inject(p){if(!fired&&p===target){fired=true;write(p,winner);}}
 // Deterministic discovery avoids starting installed toolchains. The CLI and storage remain real.
 const portable=require(path.join(base,'portable-process')),npm=require(path.join(base,'npm-process'));
 const spawn=portable.spawnPortableSync,spawnNpm=npm.spawnNpmSync;
-portable.spawnPortableSync=(cmd,args,...a)=>args&&['--version','-version','version'].includes(args[0])?{status:1,stdout:'',stderr:''}:spawn(cmd,args,...a);
+// detect-lock: the first portable probe on the main thread holds that lane for 300 ms, so worker lanes are running
+// while the main lane is busy; npm must still be probed on the main thread inside the lock.
+let heldMain=false;
+portable.spawnPortableSync=(cmd,args,...a)=>{if(!(args&&['--version','-version','version'].includes(args[0])))return spawn(cmd,args,...a);
+if(mode==='detect-lock'&&!heldMain&&require('worker_threads').isMainThread){heldMain=true;Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,300);}
+return {status:null,error:{code:'ENOENT'},stdout:'',stderr:''};};
 npm.spawnNpmSync=(args,...a)=>{if(!args||args[0]!=='--version')return spawnNpm(args,...a);
+if(process.env.ENV_SNAPSHOT_FIRED)fs.appendFileSync(process.env.ENV_SNAPSHOT_FIRED,JSON.stringify({mode,main:require('worker_threads').isMainThread,lock:locks.isStateLockHeld(target)})+String.fromCharCode(10));
 if(mode==='detect-conflict')inject(target);if(mode==='detect-lock')require('assert').ok(locks.isStateLockHeld(target));
 if(mode==='detect-delay')Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,150);
 return {status:0,stdout:'10.0.0\n',stderr:''};};
@@ -113,7 +119,12 @@ for (const previous of [
   { scriptDependencies: [{ command: 'gone', usedBy: 'test', foundInPath: true, note: sample }] }
 ]) test('absent annotated entry is preserved: ' + Object.keys(previous)[0], () => { const f = fixture(JSON.stringify(previous)), r = JSON.parse(unchanged(f).stdout);assert.strictEqual(r.phase, 'candidate');assert.match(r.error, /move its notes/); });
 test('own prototype-named metadata remains data', () => { const f = fixture('{"__proto__":{"note":"retained"},"os":{"__proto__":{"note":"nested"}}}');success(call(f));assert.deepStrictEqual(data(f.file).__proto__, { note: 'retained' });assert.deepStrictEqual(data(f.file).os.__proto__, { note: 'nested' });assert.strictEqual({}.note, undefined); });
-test('the canonical lock covers capture and actual discovery', () => { success(call(fixture(), { mode: 'lock-check' }));success(call(fixture(), { mode: 'detect-lock' })); });
+test('the canonical lock covers capture and actual discovery', () => { success(call(fixture(), { mode: 'lock-check' }));const f = fixture(), fired = path.join(f.dir, '..', 'fired-' + path.basename(f.dir) + '.jsonl');success(call(f, { mode: 'detect-lock', env: { ENV_SNAPSHOT_FIRED: fired } }));
+  // Control: the npm stub really ran, on the main thread, inside the lock (a probe moved to a worker or skipped would pass vacuously).
+  assert.deepStrictEqual(fs.readFileSync(fired, 'utf8').trim().split(String.fromCharCode(10)).map(JSON.parse), [{ mode: 'detect-lock', main: true, lock: true }]);
+  // Negative control: without the lock (--no-write) the same stub records lock:false and fails, so the assertion can tell the two apart.
+  const free = fixture(), unlocked = path.join(free.dir, '..', 'fired-' + path.basename(free.dir) + '.jsonl');failure(call(free, { mode: 'detect-lock', args: ['--no-write', '--json'], env: { ENV_SNAPSHOT_FIRED: unlocked } }));
+  assert.deepStrictEqual(fs.readFileSync(unlocked, 'utf8').trim().split(String.fromCharCode(10)).map(JSON.parse), [{ mode: 'detect-lock', main: true, lock: false }]); });
 test('latest source present before capture supplies preserved metadata', () => { const f = fixture();success(call(f, { mode: 'before-capture' }));assert.strictEqual(data(f.file).competing, sample); });
 test('source changes during discovery are retained', () => { const f = fixture();failure(call(f, { mode: 'detect-conflict' }));assert.strictEqual(text(f.file), winner); });
 test('a source removed after capture is not recreated', () => { const f = fixture();failure(call(f, { mode: 'remove-after' }));assert.strictEqual(fs.existsSync(f.file), false); });
@@ -132,13 +143,14 @@ test('read-only explicit detection retains a malformed snapshot', () => { const 
 for (const args of [[], ['--writeback', '--json'], ['--writeback', '--compact'], ['--writeback', '--quiet'], ['--writeback', '--pulse'], ['--writeback', '--no-env-detect']]) test('handoff gate leaves environment bytes unchanged: ' + JSON.stringify(args), () => { const f = fixture(), before = snapshot(f.file);success(call(f, { handoff: true, args }));assert.deepStrictEqual(snapshot(f.file), before); });
 for (const env of [{ LEERNESS_HOOK: '1' }, { LEERNESS_NO_ENV_DETECT: '1' }]) test('handoff environment gate remains: ' + Object.keys(env)[0], () => { const f = fixture(), before = snapshot(f.file);success(call(f, { handoff: true, env }));assert.deepStrictEqual(snapshot(f.file), before); });
 test('concurrent CLI saves compare the previous committed snapshot', () => {
-  const f = fixture(null), config = invocation(f, { mode: 'detect-delay' });
+  const f = fixture(null), fired = path.join(f.dir, '..', 'fired-delay-' + path.basename(f.dir) + '.jsonl'), config = invocation(f, { mode: 'detect-delay', env: { ENV_SNAPSHOT_FIRED: fired } });
   const runner = String.raw`const cp=require('child_process'),cfg=JSON.parse(process.argv[1]);
   Promise.all([1,2].map(()=>new Promise((resolve,reject)=>{const c=cp.spawn(process.execPath,cfg.args,cfg.options);let out='',err='';c.stdout.on('data',d=>out+=d);c.stderr.on('data',d=>err+=d);c.on('error',reject);c.on('close',status=>resolve({status,stdout:out,stderr:err}));}))).then(r=>console.log(JSON.stringify(r))).catch(e=>{console.error(e);process.exitCode=1;});`;
   const r = cp.spawnSync(process.execPath, ['-e', runner, JSON.stringify(config)], { encoding: 'utf8', timeout: 60000, windowsHide: true });assert.ifError(r.error);success(r);
   const outputs = JSON.parse(r.stdout).map(result => JSON.parse(success(result).stdout));
   assert.deepStrictEqual(outputs.map(value => value.diff.firstCapture).sort(), [false, true]);
   const saved = data(f.file);assert.strictEqual(saved.capturedAt, outputs.map(value => value.snapshot.capturedAt).sort().at(-1));
+  assert.deepStrictEqual(fs.readFileSync(fired, 'utf8').trim().split(String.fromCharCode(10)).map(JSON.parse), [1, 2].map(() => ({ mode: 'detect-delay', main: true, lock: true })));
 });
 
 console.log('Environment snapshot text: ' + passed + '/' + (passed + failed) + ' passed');

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0359: CI runs e2e.js cases and npm-script leaves in parallel shards (scripts/ci-shard.js). A shard that drops a
-//   unit fails nothing — the unit silently stops running — so this probe checks the parts that decide what runs:
-//   the assignment is a deterministic partition, every leaf of the real sharded scripts parses and lands in exactly
-//   one shard, the e2e guard parser and runtime helper catch unguarded, repeated, unreached and unknown cases, and
-//   the workflow lists every shard of every configuration. Each detector is also run on a broken input.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -18,7 +18,7 @@ const check = (name, fn) => {
   try { fn(); results.push({ name, ok: true }); console.log(`PASS ${name}`); }
   catch (e) { results.push({ name, ok: false }); console.log(`FAIL ${name}: ${e && e.message}`); }
 };
-// Deterministic pseudo-random weights (no Math.random: a failure must reproduce).
+ 
 const prng = seed => () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
 const workflowText = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
 const scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts;
@@ -50,7 +50,7 @@ try {
       const sum = units.reduce((s, u) => s + u.weight, 0), max = Math.max(...units.map(u => u.weight));
       assert(Math.max(...load) <= sum / k + max + 1e-9, 'greedy bound exceeded');
     }
-    // Equal weights: source order, round robin from shard 1 (ties to the earlier unit and the lower shard).
+     
     const even = cs.assign(Array.from({ length: 7 }, (_, i) => ({ key: `e${i}`, weight: 5 })), 3).shardOf;
     assert.deepStrictEqual(even, [1, 2, 3, 1, 2, 3, 1]);
     for (const w of [NaN, -1, Infinity, '3', null]) assert.throws(() => cs.assign([{ key: 'x', weight: w }], 2), /bad weight/);
@@ -80,18 +80,25 @@ try {
       ['node a.js', 'node b.js', 'node d.js selftest', 'node ./c.js --x=1']);
     assert.throws(() => cs.npmLeaves(fixture, 'loop1'), /cycle: loop1 -> loop2 -> loop1$/);
     assert.throws(() => cs.npmLeaves(fixture, 'missing'), /not found/);
-    // `npm run X` also runs preX and postX; the runner refuses a script with one, at any depth.
+    assert.deepStrictEqual(cs.npmLeaves({ s: 'node --test ./a.js' }, 's'), [{ text: 'node --test ./a.js', file: './a.js', args: [], testRunner: true, from: 's' }]);
+
     for (const [hooks, hook] of [[{ preinner: 'node pre.js' }, 'preinner'], [{ postdeeper: 'node post.js' }, 'postdeeper'],
       [{ preall: 'node pre.js' }, 'preall'], [{ postall: 'node post.js' }, 'postall']]) {
       assert.throws(() => cs.npmLeaves({ ...fixture, ...hooks }, 'all'), new RegExp(`lifecycle script ${hook}`), `hook ${hook} not refused`);
     }
     for (const step of ['echo hi', 'node a.js | tee x', 'cross-env A=1 node a.js', 'node "a b.js"', 'npm run all -- --y',
-      'node --inspect a.js', 'node', 'node a.js; node b.js', 'node a.js > out', 'A=1 node a.js', 'node $FILE', 'npm test']) {
+      'node --inspect a.js', 'node', 'node a.js; node b.js', 'node a.js > out', 'A=1 node a.js', 'node $FILE', 'npm test',
+      'node --test', 'node --test ./a.js ./b.js', 'node --test --watch', 'node --test --watch ./a.js', 'node --test ./a.js --x', 'node --test=1 ./a.js',
+      'node -e 1', 'node -', 'node --test -', 'node --test -v', 'node --test -a.js', 'node --test .', 'node --test ./scripts']) {
       assert.throws(() => cs.npmLeaves({ s: step }, 's'), /unsupported step|cycle/, `accepted: ${step}`);
+    }
+    // These characters would make a file argument a glob, which can match nothing and exit 0 on Node 21+.
+    for (const c of '*?[]{}()!,%$;&|<>"\'`\\') {
+      for (const step of [`node ./a${c}.js`, `node --test ./a${c}.js`]) assert.throws(() => cs.npmLeaves({ s: step }, 's'), /unsupported step/, `accepted: ${step}`);
     }
   });
 
-  // The sharded scripts are the ones the workflow names in its ci-shard.js run lines.
+   
   const jobs = cs.workflowJobs(workflowText);
   const sharded = [];
   for (const job of Object.values(jobs)) {
@@ -137,9 +144,30 @@ try {
     assert.deepStrictEqual(s1.results.map(r => r.key), ['node ./a.js', 'node ./d.js']);
   });
 
+  check('runNpm runs node --test leaves, and a failing one fails, in a folder with glob characters', () => {
+    const dir = path.join(arena, 'npm[x]+(y)');
+    fs.mkdirSync(dir);
+    const marker = name => path.join(arena, `${name}.ran`);
+    for (const [name, body] of [['ok', ''], ['bad', "throw new Error('expected failure');"]]) {
+      fs.writeFileSync(path.join(dir, `${name}.js`), `require('node:test')('${name}', () => { require('fs').writeFileSync(${JSON.stringify(marker(name))}, String(process.env.NODE_TEST_CONTEXT)); ${body} });\n`);
+    }
+    const cp = require('child_process'), realSpawn = cp.spawnSync, argv = [];
+    cp.spawnSync = (file, args, options) => { argv.push(args); return realSpawn(file, args, options); };
+    let r;
+    try {
+      r = cs.runNpm('suite', { index: 1, count: 1 }, { root: dir, scripts: { suite: 'node --test ./ok.js && node --test ./bad.js' }, weights: { e2e: {}, npm: {} },
+        stdio: 'ignore', env: { ...process.env, GITHUB_ACTIONS: '', NODE_TEST_CONTEXT: 'child-v8' }, log: () => {} });
+    } finally { cp.spawnSync = realSpawn; }
+    // The argument check catches an absolute path on Node 18 and 20 too, where the glob reading does not apply.
+    assert.deepStrictEqual(argv, [['--test', './ok.js'], ['--test', './bad.js']]);
+    assert.strictEqual(r.ran, 2);
+    assert.deepStrictEqual(r.failed, ['node --test ./bad.js']);
+    for (const name of ['ok', 'bad']) assert.match(fs.readFileSync(marker(name), 'utf8'), /^child/, `${name} did not run under the test runner`);
+  });
+
   check('runNpm keeps LEERNESS_CI_SHARD_TIMES to itself: leaves do not see it, the runner still writes its times', () => {
-    // 1.36.303: the full run's times file was overwritten mid-run by this probe's own runNpm, which inherited the
-    //   variable from the outer runner through the leaf environment.
+     
+     
     const dir = path.join(arena, 'times-env');
     fs.mkdirSync(dir);
     const seen = path.join(dir, 'seen.txt'), times = path.join(dir, 'times.json');
@@ -152,8 +180,8 @@ try {
     assert.strictEqual(env.LEERNESS_CI_SHARD_TIMES, times, 'the caller\'s environment object was changed');
   });
 
-  check('runNpm removes the temp folders a passing leaf and its tracked child recorded, and keeps a failing or killed leaf\'s (T-0357)', () => {
-    // The leaf only records (scripts/temp-cleanup.js trackTemp); the runner, which sees the exit status, removes.
+  check('runNpm retains passing, failing and killed leaf folders and their runner records (T-0356/T-0357)', () => {
+     
     const dir = path.join(arena, 'temp-record');
     const leafTemp = path.join(dir, 'temp');
     fs.mkdirSync(leafTemp, { recursive: true });
@@ -180,24 +208,32 @@ try {
     const res = n => JSON.parse(fs.readFileSync(path.join(dir, `${n}.out`), 'utf8'));
     const pass = res('pass'), fail = res('fail');
     assert.ok(pass.d && pass.c && fail.d && fail.c, JSON.stringify({ pass, fail }));
-    assert.strictEqual(fs.existsSync(pass.d), false, 'the passing leaf\'s folder was kept');
-    assert.strictEqual(fs.existsSync(pass.c), false, 'the passing leaf\'s tracked child\'s folder was kept');
+    assert.strictEqual(fs.existsSync(pass.d), true, 'the passing leaf\'s folder was removed');
+    assert.strictEqual(fs.existsSync(pass.c), true, 'the passing leaf\'s tracked child\'s folder was removed');
     assert.strictEqual(fs.existsSync(fail.d), true, 'the failing leaf\'s folder was removed');
     assert.strictEqual(fs.existsSync(fail.c), true, 'the failing leaf\'s child\'s folder was removed');
     const killedMade = fs.readdirSync(leafTemp).filter(n => n.startsWith('leerness-leaf-killed-'));
     assert.strictEqual(killedMade.length, 1, 'the killed leaf\'s folder was removed');
     assert.ok(pass.rec && fail.rec && pass.rec !== fail.rec && pass.rec !== env.LEERNESS_TEMP_RECORD, 'each leaf gets its own record directory from the runner');
-    assert.strictEqual(fs.existsSync(pass.rec) || fs.existsSync(fail.rec), false, 'a record directory was left');
-    assert.deepStrictEqual(recordRoots(), rootsBefore, 'the runner left its record root');
-    assert.ok(lines.some(l => /^ci-shard: temp folders: 2 removed after passing leaves/.test(l)), lines.join('\n'));
+    assert.strictEqual(fs.existsSync(pass.rec) && fs.existsSync(fail.rec), true, 'a record directory was removed');
+    const retainedRoots = recordRoots().filter(n => !rootsBefore.includes(n));
+    assert.strictEqual(retainedRoots.length, 1, 'runner records must be retained');
+    assert.ok(lines.some(l => /^ci-shard: temp folders: 0 removed after passing leaves, 2 left/.test(l)), lines.join('\n'));
+    assert.ok(lines.some(l => /automatic cleanup disabled; runner records retained/.test(l)), lines.join('\n'));
+    for (const name of retainedRoots) {
+      const p = path.resolve(os.tmpdir(), name);
+      assert.strictEqual(path.dirname(p), path.resolve(os.tmpdir()));
+      assert.ok(path.basename(p).startsWith('leerness-temp-record-'));
+      fs.rmSync(p, { recursive: true, force: true });
+    }
     assert.strictEqual(env.LEERNESS_TEMP_RECORD, path.join(dir, 'outer-record'), 'the caller\'s environment object was changed');
   });
 
-  // 1.36.304 review round 3: the record root was removed recursively without checking that it was still the folder the
-  //   runner made. A wrapper of fs.mkdtempSync (or fs.mkdirSync, for a leaf's directory) installed before the runner
-  //   can put an existing folder there; the runner now checks each directory right after making it (its own identity,
-  //   empty), records nothing into one that fails, removes only the leaf directories it checked, and the root only when
-  //   it is empty.
+   
+   
+   
+   
+   
   check('runNpm removes no folder that a wrapper swapped in for its record root or a leaf\'s record directory (T-0357)', () => {
     const dir = path.join(arena, 'temp-record-swap');
     const leafTemp = path.join(dir, 'temp');
@@ -223,8 +259,8 @@ try {
       assert.ok(swappedAt, `${target}: the wrapper did not run`);
       assert.strictEqual(fs.readFileSync(path.join(swappedAt, 'keep.txt'), 'utf8'), 'keep', `${target}: the folder swapped in was removed`);
       assert.ok(lines.some(l => /^ci-shard: temp folders: .*1 leaves not recorded/.test(l)), `${target}: the leaf was given a directory that failed the check\n${lines.join('\n')}`);
-      // What the runner rightly leaves is this test's own, in the temp directory: for the root, the folder swapped in and
-      //   the root moved aside; for a leaf's directory, the root that holds them (1.36.304 full run: they were left).
+       
+       
       const own = target === 'root' ? [swappedAt, swappedAt + '-aside'] : [path.dirname(swappedAt)];
       for (const p of own) {
         assert.ok(path.resolve(path.dirname(p)) === path.resolve(os.tmpdir()) && path.basename(p).startsWith('leerness-temp-record-'), `${target}: not the runner's folder: ${p}`);
@@ -233,7 +269,7 @@ try {
     }
   });
 
-  check('runNpm removes its record root only when it is empty: a folder a leaf moved into it is left (T-0357)', () => {
+  check('runNpm retains its record root and an unrelated folder moved into it (T-0356/T-0357)', () => {
     const dir = path.join(arena, 'temp-record-into-root');
     const leafTemp = path.join(dir, 'temp');
     fs.mkdirSync(leafTemp, { recursive: true });
@@ -259,23 +295,23 @@ try {
     assert(real.keys.length >= 400, `only ${real.keys.length} cases found`);
     const bad = [
       CREATE(['fx']),                                             // 1
-      'if (setupNeeded) {', '  total++;', '}',                    // 2-4: preamble, above the marker: allowed
-      START,                                                      // 5
-      "if (e2eShard.take('a')) {", '  total++;', '}',             // 6-8
-      '{ // accidentally unguarded case', '}',                    // 9-10: a block opened with a comment
-      "if (e2eShard.take('a')) {", '}',                           // 11-12: repeated key
-      'if (e2eShard.take("b")) {', '}',                           // 13-14: another guard form
-      "// if (e2eShard.take('in a comment')) {",                  // 15
-      '  {', '  }',                                               // 16-17: an indented block between cases
-      'if (flag) {', '}',                                         // 18-19: a control-flow block
-      '(() => {', '})();',                                        // 20-21: an immediately invoked function
-      'total++;',                                                 // 22: a counter outside a case
-      'run("smoke", []);',                                        // 23: allowed between cases
-      '  const x = `', '{', '`;',                                 // 24-26: a column-0 "{" in a template literal
-      'setImmediate(() => {', '  total++; // e2e-shard: run-wide check', '  if (ok) {', '  }', // 27-30: run-wide: allowed
-      '  total++;',                                               // 31: a run-wide counter without its mark
-      '}); // end of the run',                                    // 32: the closer, with a comment
-      'run("late", []);',                                         // 33: code after the run-wide section
+      'if (setupNeeded) {', '  total++;', '}',                     
+      START,                                                       
+      "if (e2eShard.take('a')) {", '  total++;', '}',              
+      '{ // accidentally unguarded case', '}',                     
+      "if (e2eShard.take('a')) {", '}',                            
+      'if (e2eShard.take("b")) {', '}',                            
+      "// if (e2eShard.take('in a comment')) {",                   
+      '  {', '  }',                                                
+      'if (flag) {', '}',                                          
+      '(() => {', '})();',                                         
+      'total++;',                                                  
+      'run("smoke", []);',                                         
+      '  const x = `', '{', '`;',                                  
+      'setImmediate(() => {', '  total++; // e2e-shard: run-wide check', '  if (ok) {', '  }',  
+      '  total++;',                                                
+      '}); // end of the run',                                     
+      'run("late", []);',                                          
     ].join('\n');
     const r = cs.e2eCases(bad);
     assert.deepStrictEqual(r.keys, ['a']);
@@ -283,16 +319,16 @@ try {
       /line 9: a block outside a case/, /key "a" repeats/, /line 13: e2eShard\.take outside the guard form/,
       /line 16: a block outside a case/, /line 18: a control-flow block outside a case/,
       /line 20: an immediately invoked function outside a case/, /line 22: a case counter outside a case/,
-      // The parser reads lines, not JavaScript: a column-0 "{" inside a template literal is reported (a false alarm
-      //   that fails loudly, never a dropped case).
+       
+       
       /line 25: a block outside a case/, /line 31: a case counter in the run-wide section without/,
       /line 33: code after the run-wide section/,
     ];
     assert.strictEqual(r.problems.length, expected.length, r.problems.join(' | '));
     for (const re of expected) assert(r.problems.some(p => re.test(p)), `missing ${re}: ${r.problems.join(' | ')}`);
-    // The reviewers' cases on the real file. Round 1: one guard replaced by a block opened with a comment. Round 2:
-    //   the first guard replaced by `if (false) {`; the preamble then ended at the next guard and the case vanished.
-    //   Other wrappers too: whatever wraps a case, its counter is outside a guard.
+     
+     
+     
     const first = "if (e2eShard.take('update --check (offline): 조회 실패를')) {", middle = "if (e2eShard.take('B(1.9.29)')) {";
     for (const [anchor, wrap] of [[middle, '{ // accidentally unguarded case'], [first, 'if (false) {'],
       [first, 'function never() {'], [middle, 'skip: {'], [middle, 'class Never { static {']]) {
@@ -301,7 +337,7 @@ try {
       assert.strictEqual(broken.keys.length, real.keys.length - 1);
       assert(broken.problems.some(p => /outside a case/.test(p)), `${wrap}: ${broken.problems.join(' | ')}`);
     }
-    // Round 3: a comment on the run-wide closer left the section open, and a case appended after it was exempt.
+     
     const closer = e2eSource.lastIndexOf('\n});');
     assert(closer > 0 && /^\s*$/.test(e2eSource.slice(closer + 4)), 'run-wide closer not at the end of e2e.js');
     const appended = e2eSource.slice(0, closer) + '\n}); // end\nif (false) {\n  total++;\n}\n';
@@ -321,8 +357,8 @@ try {
     const src = [
       CREATE(['fx', 'helper']), START,
       "if (e2eShard.take('s1')) {", '  helper(1);', '}',
-      // Not mentions: a longer name, a property, a `$` prefix. A mention inside a string does count (s3b below):
-      //   grouping a case too many is only slower, grouping one too few can break it.
+       
+       
       "if (e2eShard.take('free1')) {", '  const fxy = 1; obj.fx = 2; const $fx = 3;', '}',
       "if (e2eShard.take('s3b')) {", '  const label = "fx-name";', '}',
       "if (e2eShard.take('s2')) {", '  const t = `', '}', '`; use(fx);', '}',
@@ -333,7 +369,7 @@ try {
     const parsed = cs.e2eCases(src);
     assert.deepStrictEqual(parsed.problems, []);
     assert.deepStrictEqual([...parsed.usesShared], ['s1', 's3b', 's2', 's3']);
-    // Equal weights would spread the shared cases over the shards if they were placed one by one.
+     
     const w = { e2e: { s1: 10, free1: 10, s3b: 10, s2: 10, free2: 10, s3: 10, free3: 10 }, npm: {} };
     for (let k = 1; k <= 6; k++) {
       const { cases, load } = cs.planE2e(src, k, w);
@@ -341,8 +377,8 @@ try {
       assert.strictEqual(shards.size, 1, `${k} shards: shared cases split over ${[...shards]}`);
       assert.strictEqual(load.reduce((a, b) => a + b, 0), 70);
     }
-    // On the real file: the B(1.9.8) rule cases leave rules in the shared project for the next ones, and the
-    //   session-close case reads them (Linux, shard 1/2 of the first version: three of them failed apart).
+     
+     
     const real = cs.e2eCases(e2eSource);
     assert(real.shared.includes('tmp') && real.shared.includes('run'), `shared names ${real.shared}`);
     for (const k of ['B(1.9.8)', 'B(1.9.8) #2', 'B(1.9.8) #3', 'pass']) assert(real.usesShared.has(k), `${k} not grouped`);
@@ -402,7 +438,7 @@ try {
   });
 
   check('readme sync counts a case whose counter sits inside its shard guard', () => {
-    // The README e2e badge estimate counts column-0 `total++;` and `run(` lines; guarded cases moved the counter.
+     
     const dir = path.join(arena, 'badge');
     fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"b","version":"1.2.3"}\n');

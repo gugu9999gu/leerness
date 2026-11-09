@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0136: default handoff is a tracked-workspace read boundary while ignored,
-// per-session presence records retain concurrent agent identity and freshness.
+ 
+ 
 
 const fs = require('fs');
 const os = require('os');
@@ -64,7 +64,7 @@ function addresslessEnv() {
 
 function spawnHandoff(sessionId) {
   return new Promise(resolve => {
-    const child = cp.spawn(process.execPath, [CLI, 'handoff', root, '--quiet', '--no-drift-check'], {
+    const child = cp.spawn(process.execPath, [CLI, 'handoff', root, '--record', '--quiet', '--no-drift-check'], {
       cwd: root,
       env: handoffEnv(sessionId),
       stdio: ['ignore', 'pipe', 'pipe']
@@ -107,11 +107,14 @@ async function waitForJson(file, timeoutMs = 10000) {
   git(['add', '-A']);
   git(['commit', '-m', 'fixture']);
 
-  must('default handoff', run(process.execPath, [CLI, 'handoff', root, '--no-drift-check']));
+  must('default handoff read', run(process.execPath, [CLI, 'handoff', root]));
+  assert('default handoff does not create a freshness receipt',
+    !fs.existsSync(path.join(root, '.leerness', 'cache', 'handoffs', 'probe-session-0001.json')));
+  must('explicit recorded handoff', run(process.execPath, [CLI, 'handoff', root, '--record', '--no-drift-check']));
   const initialStatus = git(['status', '--porcelain=v1', '--untracked-files=all']).trim();
-  assert('default handoff leaves tracked workspace clean', initialStatus === '', initialStatus);
+  assert('explicit recorded handoff leaves tracked workspace clean', initialStatus === '', initialStatus);
   for (const file of ['environment.json', 'last-handoff.json', 'tech-profile.json']) {
-    assert(`default handoff does not create .leerness/${file}`,
+    assert(`explicit recorded handoff does not create .leerness/${file}`,
       !fs.existsSync(path.join(root, '.leerness', file)), file);
   }
   const sessionDir = path.join(root, '.leerness', 'cache', 'sessions');
@@ -122,7 +125,7 @@ async function waitForJson(file, timeoutMs = 10000) {
     firstRecord);
   const addressedChildId = 'addressed-child-0001';
   must('child handoff with inherited explicit id', run(process.execPath,
-    [CLI, 'handoff', root, '--quiet', '--no-drift-check'],
+    [CLI, 'handoff', root, '--record', '--quiet', '--no-drift-check'],
     { env: { ...handoffEnv(addressedChildId), CLAUDE_CODE_CHILD_SESSION: '1' } }));
   assert('child does not merge inherited explicit id into parent presence',
     !fs.existsSync(path.join(sessionDir, `${addressedChildId}.json`)), addressedChildId);
@@ -139,7 +142,7 @@ async function waitForJson(file, timeoutMs = 10000) {
     assert(`${label}: git hook blocks before this session handoff`, blocked.status !== 0,
       { status: blocked.status, stdout: blocked.stdout, stderr: blocked.stderr });
     must(`${label}: handoff`, run(process.execPath,
-      [CLI, 'handoff', root, '--quiet', '--no-drift-check'], { env: handoffRunEnv }));
+      [CLI, 'handoff', root, '--record', '--quiet', '--no-drift-check'], { env: handoffRunEnv }));
     assert(`${label}: handoff writes the expected normalized marker`,
       fs.existsSync(path.join(freshnessDir, `${expectedKey}.json`)), expectedKey);
     const after = must(`${label}: enforce check after handoff`, run(process.execPath,
@@ -156,15 +159,15 @@ async function waitForJson(file, timeoutMs = 10000) {
     firstFreshness);
 
   const noAddress = addresslessEnv();
-  must('addressless default handoff', run(process.execPath,
-    [CLI, 'handoff', root, '--quiet', '--no-drift-check'], { env: noAddress }));
+  must('addressless explicit recorded handoff', run(process.execPath,
+    [CLI, 'handoff', root, '--record', '--quiet', '--no-drift-check'], { env: noAddress }));
   const anonymousMarker = path.join(freshnessDir, 'unaddressed.json');
   assert('addressless handoff records ignored enforcement freshness', fs.existsSync(anonymousMarker), anonymousMarker);
   const afterAddressless = git(['status', '--porcelain=v1', '--untracked-files=all']).trim();
   assert('addressless handoff keeps tracked workspace clean', afterAddressless === '', afterAddressless);
 
-  // 설치 probe가 marker를 실제로 쓰고 lock을 쥔 바로 그 순간에 실제 handoff를 겹친다. 종료 뒤만 보면
-  // 고정 키 회귀나 lock 제거가 cleanup에 가려질 수 있으므로, preload 계측이 rename 직전 상태를 알려 준다.
+   
+   
   const syntheticMarker = path.join(freshnessDir, 'leerness-enforce-probe.json');
   const syntheticBefore = JSON.stringify({ schemaVersion: 1, sessionKey: 'leerness-enforce-probe', last: '2001-01-01T00:00:00.000Z', history: [] }, null, 2) + '\n';
   fs.writeFileSync(syntheticMarker, syntheticBefore, 'utf8');
@@ -223,14 +226,14 @@ async function waitForJson(file, timeoutMs = 10000) {
   assert('git hook accepts a real addressless handoff', addresslessCommit.status === 0,
     { status: addresslessCommit.status, stdout: addresslessCommit.stdout, stderr: addresslessCommit.stderr });
 
-  // 구버전 global 파일이 방금 갱신됐어도 주소가 있는 세션은 자기 marker 없이는 통과하면 안 된다.
+   
   const legacyPath = path.join(root, '.leerness', 'last-handoff.json');
   const legacyNow = new Date().toISOString();
   fs.writeFileSync(legacyPath, JSON.stringify({ last: legacyNow, history: [legacyNow] }, null, 2) + '\n', 'utf8');
   proveAddressedEnforcement('legacy-isolation', handoffEnv('legacy-isolation-session'), 'legacy-isolation-session');
 
-  // 내부 anonymous 슬롯명은 사용자 주소로 쓸 수 없다. 대소문자 변형도 예약어로 거부하고
-  // 다음 유효 source를 선택해야 하며, 이미 신선한 anonymous marker를 빌려서는 안 된다.
+   
+   
   const reservedFallbackId = 'reserved-fallback-0001';
   const reservedFallbackEnv = {
     ...noAddress,
@@ -247,8 +250,8 @@ async function waitForJson(file, timeoutMs = 10000) {
   };
   proveAddressedEnforcement('reserved-probe-prefix', reservedProbeFallbackEnv, reservedProbeFallbackId);
 
-  // 잘못된 명시 주소가 있어도 JS와 shell hook 모두 다음 유효 source(CODEX_THREAD_ID)를 선택해야 한다.
-  // fallback 세션에는 아직 marker가 없지만 다른 세션 marker는 여러 개 있으므로, wildcard 오수용도 함께 검증된다.
+   
+   
   const fallbackId = 'fallback-session-0002';
   const malformedFallbackEnv = {
     ...noAddress,
@@ -265,7 +268,7 @@ async function waitForJson(file, timeoutMs = 10000) {
   assert('invalid explicit key cannot make git hook wildcard-match another session', fallbackCommitBefore.status !== 0,
     { status: fallbackCommitBefore.status, stdout: fallbackCommitBefore.stdout, stderr: fallbackCommitBefore.stderr });
   must('fallback-address handoff', run(process.execPath,
-    [CLI, 'handoff', root, '--quiet', '--no-drift-check'], { env: malformedFallbackEnv }));
+    [CLI, 'handoff', root, '--record', '--quiet', '--no-drift-check'], { env: malformedFallbackEnv }));
   assert('handoff records the valid fallback session key',
     fs.existsSync(path.join(freshnessDir, `${fallbackId}.json`)), fallbackId);
   const fallbackCheckAfter = must('fallback-address enforce check', run(process.execPath,
@@ -276,7 +279,7 @@ async function waitForJson(file, timeoutMs = 10000) {
   assert('git hook accepts the same valid fallback after its own handoff', fallbackCommitAfter.status === 0,
     { status: fallbackCommitAfter.status, stdout: fallbackCommitAfter.stdout, stderr: fallbackCommitAfter.stderr });
 
-  // JS와 shell이 같은 case-fold 규칙 및 KEY_RE 경계(8/64자)를 실제 check+commit 양쪽에서 사용한다.
+   
   const caseBeforeEnv = handoffEnv('CaseFoldSession01');
   const caseAfterEnv = handoffEnv('CASEFOLDSESSION01');
   proveAddressedEnforcement('case-fold', caseBeforeEnv, 'casefoldsession01', caseBeforeEnv, caseAfterEnv);
@@ -284,12 +287,12 @@ async function waitForJson(file, timeoutMs = 10000) {
   const maxKey = 'B'.repeat(64);
   proveAddressedEnforcement('key-boundary-64', handoffEnv(maxKey), maxKey.toLowerCase());
 
-  // 추론 주소는 child 세션에서 억제된다. 후보 세션 marker가 신선해도 anonymous marker/legacy가
-  // 없거나 오래됐으면 차단하고, child가 직접 handoff해 anonymous marker를 만든 뒤에만 통과한다.
+   
+   
   const childCandidate = 'child-candidate-0001';
   const childParentEnv = { ...noAddress, CODEX_THREAD_ID: childCandidate };
   must('seed child candidate marker', run(process.execPath,
-    [CLI, 'handoff', root, '--quiet', '--no-drift-check'], { env: childParentEnv }));
+    [CLI, 'handoff', root, '--record', '--quiet', '--no-drift-check'], { env: childParentEnv }));
   if (fs.existsSync(anonymousMarker)) fs.unlinkSync(anonymousMarker);
   const legacyOld = new Date(Date.now() - 72 * 3600000);
   fs.utimesSync(legacyPath, legacyOld, legacyOld);
@@ -304,7 +307,7 @@ async function waitForJson(file, timeoutMs = 10000) {
   assert('child suppression: git hook does not borrow inferred parent marker or stale legacy', childCommitBefore.status !== 0,
     { status: childCommitBefore.status, stdout: childCommitBefore.stdout, stderr: childCommitBefore.stderr });
   must('child addressless handoff', run(process.execPath,
-    [CLI, 'handoff', root, '--quiet', '--no-drift-check'], { env: childEnv }));
+    [CLI, 'handoff', root, '--record', '--quiet', '--no-drift-check'], { env: childEnv }));
   assert('child suppression: handoff uses anonymous marker', fs.existsSync(anonymousMarker), anonymousMarker);
   const childAfter = must('child enforce check after anonymous handoff', run(process.execPath,
     [CLI, 'enforce', 'check', '--path', root, '--json'], { env: childEnv }));
@@ -351,11 +354,11 @@ async function waitForJson(file, timeoutMs = 10000) {
   git(['add', '.leerness/HARNESS_VERSION']);
   git(['commit', '-m', 'version skew fixture']);
   const skewText = must('version skew text handoff', run(process.execPath,
-    [CLI, 'handoff', root, '--compact', '--no-drift-check'], { env: handoffEnv('version-skew-text') }));
+    [CLI, 'handoff', root, '--record', '--compact', '--no-drift-check'], { env: handoffEnv('version-skew-text') }));
   assert('human handoff warns when CLI is older than project harness',
     /버전 불일치/.test(skewText.stdout) && /9\.9\.9/.test(skewText.stdout), skewText.stdout);
   const skewJsonRun = must('version skew json handoff', run(process.execPath,
-    [CLI, 'handoff', root, '--json', '--no-drift-check'], { env: handoffEnv('version-skew-json') }));
+    [CLI, 'handoff', root, '--record', '--json', '--no-drift-check'], { env: handoffEnv('version-skew-json') }));
   const skewJson = JSON.parse(skewJsonRun.stdout);
   assert('JSON handoff exposes machine-readable version skew',
     skewJson.versionSkew && skewJson.versionSkew.kind === 'cli-older'
@@ -393,10 +396,19 @@ async function waitForJson(file, timeoutMs = 10000) {
   const afterSecondAdapter = fs.readFileSync(hooksPath, 'utf8');
   assert('cursor adapter hook merge is idempotent', beforeSecondAdapter === afterSecondAdapter, starts);
 
-  // T-0305: a past-due wakeup and next-action suggestions for the current task are shown by the
-  // default handoff but recorded only by --writeback. The --writeback run is the control that this
-  // fixture really reaches both writers.
+   
+   
+   
   const focusEnv = handoffEnv('focus-state-0001');
+  const inspectionEnv = { ...focusEnv };
+  if (process.platform === 'win32') {
+    const gitLaunch = require('../lib/portable-process').resolvePortableLaunch('git', { env: focusEnv, cwd: root });
+    if (gitLaunch.kind !== 'native' || !path.isAbsolute(gitLaunch.file)) throw new Error('Expected native Git for inspection fixture');
+    for (const key of Object.keys(inspectionEnv)) {
+      if (key.toLowerCase() === 'path') delete inspectionEnv[key];
+    }
+    inspectionEnv.PATH = [path.dirname(process.execPath), path.dirname(gitLaunch.file)].join(path.delimiter);
+  }
   const wakeupsPath = path.join(root, '.leerness', 'active-wakeups.json');
   const queuePath = path.join(root, '.leerness', 'next-action-queue.json');
   fs.writeFileSync(wakeupsPath, JSON.stringify({ wakeups: [{ expectedFireAt: '2001-01-01T00:00:00.000Z',
@@ -412,15 +424,15 @@ async function waitForJson(file, timeoutMs = 10000) {
   git(['add', '-A']);
   git(['commit', '-m', 'focus state fixture']);
   const queueBefore = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, 'utf8') : null;
-  const focusText = must('focus default handoff', run(process.execPath,
-    [CLI, 'handoff', root, '--no-drift-check'], { env: focusEnv })).stdout;
-  assert('default handoff still reports the missed wakeup', /ScheduleWakeup miss/.test(focusText), focusText.slice(-2000));
-  assert('default handoff still shows next-action suggestions', /widgetization/.test(focusText) && /M-\d{4}/.test(focusText),
+  const focusText = must('focus explicit recorded handoff', run(process.execPath,
+    [CLI, 'handoff', root, '--record', '--inspect', '--no-drift-check'], { env: inspectionEnv })).stdout;
+  assert('explicit inspection still reports the missed wakeup', /ScheduleWakeup miss/.test(focusText), focusText.slice(-2000));
+  assert('explicit recorded handoff still shows next-action suggestions', /widgetization/.test(focusText) && /M-\d{4}/.test(focusText),
     focusText.slice(-2000));
   const afterFocus = git(['status', '--porcelain=v1', '--untracked-files=all']).trim();
-  assert('default handoff does not record wakeup or next-action state in tracked files', afterFocus === '', afterFocus);
+  assert('explicit recorded handoff does not record wakeup or next-action state in tracked files', afterFocus === '', afterFocus);
   must('focus writeback handoff', run(process.execPath,
-    [CLI, 'handoff', root, '--writeback', '--no-drift-check'], { env: focusEnv }));
+    [CLI, 'handoff', root, '--record', '--writeback', '--no-drift-check'], { env: inspectionEnv }));
   assert('writeback handoff records the missed wakeup',
     JSON.parse(fs.readFileSync(wakeupsPath, 'utf8')).wakeups[0].status === 'missed', fs.readFileSync(wakeupsPath, 'utf8'));
   const queueAfter = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, 'utf8') : null;

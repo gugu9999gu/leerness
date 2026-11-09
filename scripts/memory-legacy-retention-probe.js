@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0193: legacy-only Markdown mutation must retain opaque suffixes or refuse
-// before domain writes. Exercise the actual CLI, including migration backfill.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -50,8 +50,8 @@ function fixture(surface) {
   const entry = value => surface === 'decisions'
     ? { date: '2026-09-12', title: value, decision: value, reason: 'reason', alternatives: null, impact: null }
     : { date: '2026-09-12', text: value, tag: 'tag' };
-  // T-0318: the seed is an English project, so writers render the English header. The legacy files below carry the
-  // Korean header every earlier version wrote; a write must accept it and replace only that header.
+   
+   
   const render = (rows, lang = 'en') => (surface === 'decisions' ? _renderDecisionsMd : _renderLessonsMd)(rows, lang);
   const entries = [entry('survivor'), entry('selected')];
   if (fs.existsSync(p('json'))) fs.unlinkSync(p('json'));
@@ -86,7 +86,7 @@ try {
           ? ['survivor', 'selected', 'fresh'] : operation === 'restore'
             ? ['survivor', 'selected', 'restored'] : ['survivor', 'selected'];
         assert.deepStrictEqual(f.load().map(e => e.title || e.text), expected);
-        // Once canonical exists, another mutation must not duplicate retained text.
+         
         success(run(f.project, [...commands(surface).add.slice(0, 2), 'second']));
         assert.strictEqual(fs.readFileSync(f.p('md'), 'utf8'), f.render(f.load()) + suffix);
       });

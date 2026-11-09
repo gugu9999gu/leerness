@@ -1,7 +1,7 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Real role/ledger files; narrow stat and I/O seams only. No provider is invoked.
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -12,8 +12,8 @@ const ledger = require('../lib/role-fallback');
 const arena = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'leerness-role-identity-'));
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const clone = (stat, fields) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, fields);
-// Number-based legacy Stats can have inode values above MAX_SAFE_INTEGER.
-// Use a representable change; +1 can be rounded back to the original value.
+ 
+ 
 const changedValue = value => value + Math.max(1, Math.abs(value) * Number.EPSILON * 2);
 let total = 0, failed = 0;
 function test(name, run) {

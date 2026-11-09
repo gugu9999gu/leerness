@@ -1,29 +1,29 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0359: split CI work across parallel jobs. Until 1.36.300 each Windows gate job ran e2e.js (167-226 min) and the
-//   command-surface leaves (43-52 min) one after the other, and the Windows fast job ran its leaves for 79 min, so a
-//   release waited about five hours for CI (run 38193803239). A shard runs part of that work. Shards 1..k of one job
-//   together run every unit exactly once, because every shard computes the same assignment from the same inputs:
-//   the units in source order, weighted by measured seconds (scripts/ci-shard-weights.json), placed largest first on
-//   the least-loaded shard, ties to the earlier unit and the lower shard.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
+ 
 //
-//   node ./scripts/ci-shard.js npm <script> <i>/<k>    run the leaves of an npm script that shard i of k owns
-//   node ./scripts/ci-shard.js plan npm <script> <k>   print the assignment
-//   node ./scripts/ci-shard.js plan e2e <k>            print the assignment of the e2e.js cases
-//   node ./scripts/ci-shard.js weights e2e|npm <times.json>...   replace weights with measured seconds, written by
-//                                                       LEERNESS_E2E_TIMES=<file> (e2e.js) or LEERNESS_CI_SHARD_TIMES=<file>
+ 
+ 
+ 
+ 
+ 
 //
-// A leaf is `node <file> [args]`, or `npm run <name>`, which is expanded. Any other shape is refused rather than
-//   guessed: running it differently from npm would test something else. Leaves run with node directly, in the
-//   package root, in their order in the script. A shard runs all of its leaves and fails if any failed, so one CI
-//   run reports every failing leaf of the shard (a plain `&&` chain stops at the first).
-// T-0357: each leaf records the temp folders it makes (scripts/temp-cleanup.js trackTemp, into a directory this runner
-//   gives it through LEERNESS_TEMP_RECORD), and the runner removes them after the leaf ended with status 0, no signal
-//   and no spawn error: the verdict it uses for pass/fail, read from the exit status, which no code in the leaf can
-//   change afterwards. A failed leaf's folders are kept for inspection.
-// e2e.js uses e2eShard() below: each top-level case is `if (e2eShard.take('<key>')) {`, and finish() checks that the
-//   file has no unguarded top-level block and that every guard was reached exactly once.
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -39,7 +39,7 @@ function parseShard(text) {
   return { index: Number(m[1]), count: Number(m[2]) };
 }
 
-// units: [{ key, weight }] in source order. Returns the shard (1..count) of each unit and each shard's load.
+ 
 function assign(units, count) {
   for (const u of units) {
     if (!(typeof u.weight === 'number' && Number.isFinite(u.weight) && u.weight >= 0)) throw new Error(`bad weight for ${u.key}: ${u.weight}`);
@@ -68,7 +68,7 @@ function loadWeights(file = WEIGHTS_FILE) {
   return data;
 }
 
-// A unit without a measurement weighs the median of its table, so a new case or leaf lands like an ordinary one.
+ 
 function weigh(keys, table) {
   const values = Object.values(table).sort((a, b) => a - b);
   const median = values.length ? values[Math.floor(values.length / 2)] : 1;
@@ -77,8 +77,8 @@ function weigh(keys, table) {
     : Object.prototype.hasOwnProperty.call(table, plain(key)) ? table[plain(key)] : median }));
 }
 
-// Measured seconds (the LEERNESS_E2E_TIMES / LEERNESS_CI_SHARD_TIMES files) replace those units' weights; the
-//   table is kept sorted so a refresh diffs cleanly. A repeated leaf (`<text> #2`) is stored under its text.
+ 
+ 
 function withMeasured(data, kind, measured) {
   const table = { ...data[kind] };
   let updated = 0;
@@ -97,14 +97,14 @@ function uniqueKeys(texts) {
   return texts.map(text => { const n = (seen.get(text) || 0) + 1; seen.set(text, n); return n === 1 ? text : `${text} #${n}`; });
 }
 
-// ---- npm script leaves ----
+ 
 const LEAF_TOKEN = /^[\w./:=@+-]+$/;
 
 function npmLeaves(scripts, name, stack = []) {
   if (!Object.prototype.hasOwnProperty.call(scripts, name)) throw new Error(`npm script not found: ${name}`);
   if (stack.includes(name)) throw new Error(`npm script cycle: ${[...stack, name].join(' -> ')}`);
-  // `npm run <name>` also runs pre<name> and post<name> (review round 1). This runner does not run lifecycle
-  //   scripts, so a script that has one is refused instead of losing it.
+   
+   
   for (const hook of [`pre${name}`, `post${name}`]) {
     if (Object.prototype.hasOwnProperty.call(scripts, hook)) {
       throw new Error(`unsupported npm script ${name}: npm would also run its lifecycle script ${hook}, which ci-shard.js does not run`);
@@ -115,10 +115,12 @@ function npmLeaves(scripts, name, stack = []) {
     const nested = /^npm run ([\w:.-]+)$/.exec(part);
     if (nested) { out.push(...npmLeaves(scripts, nested[1], [...stack, name])); continue; }
     const argv = part.split(/\s+/);
-    if (argv[0] !== 'node' || argv.length < 2 || !argv.every(t => LEAF_TOKEN.test(t)) || argv[1].startsWith('-')) {
-      throw new Error(`unsupported step in npm script ${name}: "${part}" (expected node <file> [args] or npm run <name>)`);
+    const testRunner = argv[1] === '--test' && argv.length === 3 && !argv[2].startsWith('-') && /\.[cm]?js$/.test(argv[2]);
+    if (argv[0] !== 'node' || argv.length < 2 || !argv.every(t => LEAF_TOKEN.test(t)) || (argv[1].startsWith('-') && !testRunner)) {
+      throw new Error(`unsupported step in npm script ${name}: "${part}" (expected node <file> [args], node --test <file> or npm run <name>)`);
     }
-    out.push({ text: argv.join(' '), file: argv[1], args: argv.slice(2), from: name });
+    out.push(testRunner ? { text: argv.join(' '), file: argv[2], args: [], testRunner, from: name }
+      : { text: argv.join(' '), file: argv[1], args: argv.slice(2), from: name });
   }
   return out;
 }
@@ -144,14 +146,15 @@ function runNpm(name, spec, opts = {}) {
   const mine = leaves.filter(l => l.shard === spec.index);
   const log = opts.log || (line => process.stdout.write(line + '\n'));
   const grouped = env.GITHUB_ACTIONS === 'true';
-  // Leaves do not see this runner's times file: a leaf that runs runNpm itself (ci-shard-probe.js) would overwrite it.
+   
   const leafEnv = { ...env };
-  for (const k of Object.keys(leafEnv)) if (['LEERNESS_CI_SHARD_TIMES', temp.RECORD_ENV].includes(k.toUpperCase())) delete leafEnv[k];
+  // With NODE_TEST_CONTEXT set, a test runner leaf exits 0 without running its file.
+  for (const k of Object.keys(leafEnv)) if (['LEERNESS_CI_SHARD_TIMES', 'NODE_TEST_CONTEXT', temp.RECORD_ENV].includes(k.toUpperCase())) delete leafEnv[k];
   log(`ci-shard: ${name} shard ${spec.index}/${spec.count} runs ${mine.length} of ${leaves.length} leaves`);
-  // T-0357: one record directory per leaf, below a root this runner makes. Each is checked right after it is made (an
-  //   empty directory, not a link, its identity kept): a wrapper of fs.mkdtempSync or fs.mkdirSync installed before
-  //   the runner could put an existing folder there (1.36.304 review round 3). A leaf whose directory fails the check
-  //   gets no variable and records nothing; only checked directories are removed, and the root only when it is empty.
+   
+   
+   
+   
   const freshDir = d => {
     try {
       const st = fs.lstatSync(d, { bigint: true });
@@ -159,57 +162,55 @@ function runNpm(name, spec, opts = {}) {
     } catch { return null; }
   };
   let recordRoot = null;
-  try { recordRoot = freshDir(fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-temp-record-'))); } catch { /* nothing recorded */ }
+  try { recordRoot = freshDir(fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-temp-record-'))); } catch {   }
   const tempCount = { removed: 0, left: 0, unrecorded: 0 };
   const results = [];
   for (const [i, leaf] of mine.entries()) {
     if (grouped) log(`::group::${leaf.key}`);
     let recordDir = null;
-    if (recordRoot) { const d = path.join(recordRoot.dir, String(i)); try { fs.mkdirSync(d); recordDir = freshDir(d); } catch { /* nothing recorded */ } }
+    if (recordRoot) { const d = path.join(recordRoot.dir, String(i)); try { fs.mkdirSync(d); recordDir = freshDir(d); } catch {   } }
     if (!recordDir) tempCount.unrecorded++;
     const started = Date.now();
-    const r = cp.spawnSync(process.execPath, [path.resolve(root, leaf.file), ...leaf.args], { cwd: root, stdio: opts.stdio || 'inherit', env: recordDir ? { ...leafEnv, [temp.RECORD_ENV]: recordDir.dir } : leafEnv });
+    // The test runner reads its file as a glob on Node 21+: an absolute path through a folder with
+    // glob characters can match nothing and exit 0, so it gets the relative path, as npm would.
+    const command = leaf.testRunner ? ['--test', leaf.file] : [path.resolve(root, leaf.file), ...leaf.args];
+    const r = cp.spawnSync(process.execPath, command, { cwd: root, stdio: opts.stdio || 'inherit', env: recordDir ? { ...leafEnv, [temp.RECORD_ENV]: recordDir.dir } : leafEnv });
     const seconds = (Date.now() - started) / 1000;
     const ok = r.status === 0 && !r.signal && !r.error;
     if (ok && recordDir) { const t = temp.removeRecorded(recordDir.dir); tempCount.removed += t.removed; tempCount.left += t.left; }
-    if (recordDir) try { temp.removeOwnedTree(recordDir, { timeoutMs: 2000 }); } catch { /* left behind */ }
+    if (recordDir) try { temp.removeOwnedTree(recordDir, { timeoutMs: 2000 }); } catch {   }
     results.push({ key: leaf.key, ok, seconds, status: r.status, signal: r.signal || null, error: r.error ? String(r.error.code || r.error.message) : null });
     if (grouped) log('::endgroup::');
     log(`ci-shard: ${ok ? 'ok  ' : 'FAIL'} ${seconds.toFixed(1).padStart(7)} s  ${leaf.key}${ok ? '' : ` (exit ${r.status}${r.signal ? `, signal ${r.signal}` : ''}${r.error ? `, ${r.error.code || r.error.message}` : ''})`}`);
   }
-  if (recordRoot) {
-    try {
-      const st = fs.lstatSync(recordRoot.dir, { bigint: true });
-      if (!st.isSymbolicLink() && st.dev === recordRoot.dev && st.ino === recordRoot.ino) fs.rmdirSync(recordRoot.dir);
-    } catch { /* not empty or replaced: left behind */ }
-  }
+  if (recordRoot) temp.removeOwnedTree(recordRoot);
   const failed = results.filter(r => !r.ok);
   const total = results.reduce((s, r) => s + r.seconds, 0);
   log(`ci-shard: ${name} shard ${spec.index}/${spec.count}: ${results.length - failed.length}/${results.length} leaves passed · ${total.toFixed(0)} s`);
   for (const f of failed) log(`ci-shard: failed: ${f.key}`);
-  log(`ci-shard: temp folders: ${tempCount.removed} removed after passing leaves${tempCount.left ? `, ${tempCount.left} left (replaced, outside the temp directory, or still held)` : ''}${tempCount.unrecorded ? `, ${tempCount.unrecorded} leaves not recorded (their record directory was not the one made)` : ''}; a failed leaf keeps its own`);
+  log(`ci-shard: temp folders: ${tempCount.removed} removed after passing leaves${tempCount.left ? `, ${tempCount.left} left (automatic cleanup disabled or ownership uncertain)` : ''}${tempCount.unrecorded ? `, ${tempCount.unrecorded} leaves not recorded (their record directory was not the one made)` : ''}; automatic cleanup disabled; runner records retained; a failed leaf keeps its own`);
   if (env.LEERNESS_CI_SHARD_TIMES) {
     fs.writeFileSync(env.LEERNESS_CI_SHARD_TIMES, JSON.stringify(Object.fromEntries(results.map(r => [r.key, Math.round(r.seconds * 10) / 10])), null, 1) + '\n');
   }
   return { ran: results.length, of: leaves.length, failed: failed.map(f => f.key), results };
 }
 
-// ---- e2e.js cases ----
-// A case is a top-level `if (e2eShard.take('<key>')) {` block. Its text, for the check below, runs to the next guard:
-//   a column-0 `}` can sit inside a template literal, and a short text could hide a mention.
-// The helper is created by one line naming the file's shared top-level state (the fixture project and its helpers,
-//   whose state one case leaves for the next). Every case whose text mentions one of those names runs in the same
-//   shard as the others, in source order; the other cases are placed one by one.
+ 
+ 
+ 
+ 
+ 
+ 
 const GUARD = /^if \(e2eShard\.take\('([^'\\\n]+)'\)\) \{$/;
 const CREATE = /^const e2eShard = require\('\.\/ci-shard'\)\.e2eShard\(__filename, \[((?:'[\w$]+'(?:, )?)*)\]\);$/;
 const SHARED_GROUP = '(cases using the shared fixture)';
 // A case's block ends at its first column-0 `}`. The cases start after the line `// e2e-shard: cases start here`;
-//   from there, top-level code outside a case only prepares what later cases use (smoke `run()` calls, fixture files,
-//   environment switches). A block, a control-flow block, an immediately invoked function or a case counter there is
-//   a case without a guard: review round 1 found a block opened by `{ // comment`, round 2 an `if (false) {` in place
-//   of the first guard (the boundary was the first guard then). Whatever wraps a case, its `total++` stays outside
-//   a guard and is reported. The preamble above the line may use any statement except a bare block. The run-wide
-//   section, from a column-0 `setImmediate(` to its column-0 `});` (a comment may follow), ends the file; each of
+ 
+ 
+ 
+ 
+ 
+ 
 //   its own counters carries `// e2e-shard: run-wide check`.
 const CASES_START = /^\/\/ e2e-shard: cases start here\b/;
 const RUN_WIDE_CHECK = /\/\/ e2e-shard: run-wide check\s*$/;
@@ -258,9 +259,9 @@ function e2eCases(source) {
       return;
     }
     if (runWide) {
-      // Review round 3: `}); // end` left the section open, so a case after it was exempt.
+       
       if (/^\}\)\s*;?\s*(?:\/\/.*|\/\*.*\*\/\s*)?$/.test(line)) { runWideEnded = true; return; }
-      // The section's own checks say so; any other counter there is a case without a guard.
+       
       if (CASE_COUNTER.test(line) && !RUN_WIDE_CHECK.test(line)) {
         problems.push(`line ${i + 1}: a case counter in the run-wide section without "// e2e-shard: run-wide check"`);
       }
@@ -283,7 +284,7 @@ function e2eCases(source) {
 function planE2e(source, count, weights) {
   const { keys, problems, shared, usesShared } = e2eCases(source);
   const weighed = weigh(keys, weights.e2e);
-  // One unit for the cases using shared state, at the position of the first of them; one unit per other case.
+   
   const units = [], unitOf = new Map();
   weighed.forEach(u => {
     if (!usesShared.has(u.key)) { unitOf.set(u.key, units.length); units.push({ key: u.key, weight: u.weight }); return; }
@@ -299,7 +300,7 @@ function planE2e(source, count, weights) {
 function e2eShard(file, shared, env = process.env, opts = {}) {
   const raw = env.LEERNESS_E2E_SHARD;
   const timesOut = env.LEERNESS_E2E_TIMES || null;
-  // Children see the environment of an unsharded run: a test that starts this file again runs all of it.
+   
   delete env.LEERNESS_E2E_SHARD; delete env.LEERNESS_E2E_TIMES;
   const spec = raw === undefined || raw === '' ? null : parseShard(raw);
   const source = fs.readFileSync(file, 'utf8');
@@ -320,8 +321,8 @@ function e2eShard(file, shared, env = process.env, opts = {}) {
     take(key) {
       stop();
       reached.set(key, (reached.get(key) || 0) + 1);
-      // A key the parser did not see (a guard in another form) runs in every shard: finish() fails the run, but no
-      //   shard drops the case.
+       
+       
       const run = !mine || mine.has(key) || !known.has(key);
       if (run) { current = key; since = Date.now(); }
       return run;
@@ -338,10 +339,10 @@ function e2eShard(file, shared, env = process.env, opts = {}) {
   };
 }
 
-// ---- .github/workflows/ci.yml shard lists ----
-// The jobs of a workflow written the way ci.yml is: two-space job keys under `jobs:`, matrix entries as one-line flow
-//   mappings (`- { os: windows-latest, node: 18, shard: 1, shards: 4 }`), steps with `run:` and `env:` lines.
-//   Returns { <job>: { entries: [{ key: value }], runs: [command], lines: [line] } }.
+ 
+ 
+ 
+ 
 function workflowJobs(text) {
   const lines = String(text).replace(/\r\n/g, '\n').split('\n');
   const jobs = {};
@@ -367,8 +368,8 @@ function workflowJobs(text) {
   return jobs;
 }
 
-// The configurations of a job's entries (an entry without shard/shards), and for a sharded job the configurations
-//   whose entries are not exactly shards 1..k of one k.
+ 
+ 
 function shardLists(entries) {
   const groups = new Map();
   for (const e of entries) {

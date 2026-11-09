@@ -1,6 +1,6 @@
 'use strict';
 
-// Observation only: never spawn, retry, change the native result or decide success.
+ 
 function childDiagnostics(result, elapsedMs, timeoutMs, parsedReport) {
   const r = result || {};
   const small = (value, limit) => value == null ? null : String(value).slice(0, limit);
@@ -30,4 +30,21 @@ function childDiagnostics(result, elapsedMs, timeoutMs, parsedReport) {
   };
 }
 
-module.exports = { childDiagnostics };
+function childExitMatches(result, expectFail = false) {
+  return !!result && !result.error && !result.signal
+    && Number.isInteger(result.status) && result.status >= 0
+    && (expectFail ? result.status !== 0 : result.status === 0);
+}
+
+function e2eSmokeOnly(args, env = process.env) {
+  if (args.length === 0) return false;
+  if (args.length !== 1 || args[0] !== '--smoke-only') {
+    throw new Error('Usage: node scripts/e2e.js [--smoke-only]');
+  }
+  if (env.LEERNESS_E2E_SHARD || env.LEERNESS_E2E_TIMES) {
+    throw new Error('smoke-only cannot be combined with E2E shard or shard timing settings');
+  }
+  return true;
+}
+
+module.exports = { childDiagnostics, childExitMatches, e2eSmokeOnly };

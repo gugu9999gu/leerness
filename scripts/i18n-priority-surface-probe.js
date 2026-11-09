@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const fs = require('fs');
 const os = require('os');
@@ -21,8 +21,8 @@ const baseEnv = {
   LEERNESS_NO_STALE_CHECK: '1',
   LEERNESS_OFFLINE: '1',
 };
-// The English assertions must be driven by the project manifest written by
-// `init --language en`; an inherited env override would make that path untested.
+ 
+ 
 delete baseEnv.LEERNESS_LANG;
 for (const key of [
   'LEERNESS_ENABLE_CLAUDE', 'LEERNESS_ENABLE_CODEX', 'LEERNESS_ENABLE_AGY',
@@ -74,9 +74,9 @@ try {
   requireSuccess('lesson save', run(['lesson', 'save', 'Keep outputs deterministic', '--tag', 'test', '--path', project]));
   requireSuccess('plan add', run(['plan', 'add', 'Ship the parser', '--path', project]));
 
-  // Exercise the rejected-provider branch without executing an unsafe command.
-  // `provider add` creates the canonical store; the fixture then simulates a
-  // hand-edited/remote catalog that the production sanitizer must reject.
+   
+   
+   
   requireSuccess('provider add unsafe-bin', run(['provider', 'add', 'unsafe-bin', '--bin', 'missing-i18n-bin', '--path', project]));
   requireSuccess('provider add unsafe-args', run(['provider', 'add', 'unsafe-args', '--bin', 'missing-i18n-args', '--path', project]));
   const providersFile = path.join(project, '.leerness', 'providers.json');
@@ -127,8 +127,8 @@ try {
     if (lines.length) leaks.push(`${label}=${lines.length} (${lines.slice(0, 2).join(' | ')})`);
   }
 
-  // Machine output remains locale-neutral in shape: do not expose the private
-  // English projection or replace the canonical registry payload.
+   
+   
   fs.rmSync(toggleFile, { force: true });
   const toggleJson = JSON.parse(requireSuccess('toggle JSON contract', run(['toggle', 'list', '--path', project, '--json'])));
   if (!toggleJson.registry || !toggleJson.registry.gate || toggleJson.registry.gate.descEn !== undefined

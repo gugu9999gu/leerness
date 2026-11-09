@@ -41,6 +41,10 @@ Invalid bytes can be measured without being accepted by a writer.
 Recovery observation covers the shared workspace directory
 `archive/mutation-recovery`, including unknown names, loose scratch files and
 files without a receipt. It does not open or parse recovery file contents.
+Once a write on Windows has made that directory it stays, empty or not, because
+the writers of every store share it and a finished write must not remove it from
+under another. An empty directory reports `exists: true` and `directoryCount: 1`
+with zero entries and zero bytes.
 Do not add the recovery totals from decisions and lessons as if they were
 separate directories. External-temp recovery, relocated directories, temporary
 publication aliases outside this directory, and other CLI/control files are

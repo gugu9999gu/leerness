@@ -12,7 +12,7 @@ Thumbs.db
 *.local.json
 tmp-*-test/
 
-# 1.9.43: 내부 검수 보고서 비공개
+
 _reports/
 *.private.md
 *.private.json
@@ -28,5 +28,8 @@ credentials.json
 .leerness/cache/agent-runs/
 .leerness/execution-ledger.jsonl
 
-# npm 인증 토큰 보호 (1.9.267)
+
 .npmrc
+
+# Local T-0368 repro logs, isolated installations and private case excerpts
+/_artifacts/review-feedback-resume/

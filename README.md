@@ -1,5 +1,7 @@
 # leerness
 
+**2.0.0 major transition:** ordinary handoff reads do not record a session, default JSON may omit diagnostics, and `doctor.healthy` can be null. Existing 1.x consumers must follow the [consumer transition guide](docs/lean-readonly-compatibility.md) and [2.0.0 release notes](docs/release-notes-2.0.0.md). A candidate or source version does not establish publication; verify the approved artifact and registry version using the [install/update/rollback guide](docs/release-candidate-guide.md).
+
 ```
 ██╗     ███████╗███████╗██████╗ ███╗   ██╗███████╗███████╗
 ██║     ██╔════╝██╔════╝██╔══██╗████╗  ██║██╔════╝██╔════╝
@@ -12,9 +14,13 @@
 > **The AI-coding operations layer that makes "done" require evidence — for any language, any AI agent.**
 > leerness does not write code. It gives your AI agent persistent memory, verified completion, and clean handoffs — stored inside your repo as plain files, exposed via CLI + MCP.
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-102-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-104-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
 
 **🇰🇷 한국어 전문: [README.ko.md](./README.ko.md)**
+
+**2.0.0 is an unreleased candidate.** The public release observed on 2026-11-08 was **1.36.305**. A source version or local tarball does not establish publication or release approval. Existing 1.36.305 users do not need to install this candidate.
+
+The candidate changes observable 1.x contracts: ordinary handoff reads no longer record sessions or run environment diagnostics, default JSON can omit diagnostics, and `doctor.healthy` can be `null`. Read the [2.0.0 changes, upgrade and rollback notes](docs/release-notes-2.0.0.md) before updating hooks or JSON consumers. Installing a package does not by itself update project instructions or restore project data.
 
 ---
 
@@ -28,16 +34,18 @@
 
 ## Try it in 30 seconds
 
+Unpinned `npx` resolves the published package, observed here as 1.36.305; it does not install this unreleased candidate. Recording and diagnostic behavior depends on that selected version.
+
 ```bash
 npx -y leerness init . --yes   # adds .leerness/ memory + guard files to your project
-npx leerness handoff .         # everything your AI should know right now, in one call
+npx leerness handoff .         # read context; see version-specific recording behavior below
 ```
 
-`handoff` is safe to run from several AI sessions at once: by default it does not rewrite Git-tracked harness files and updates only an ignored per-session record under `.leerness/cache/sessions/`. Use `handoff --writeback` only when legacy automation explicitly needs refreshed `current-state.md`, `environment.json`, `last-handoff.json`, or generated graph projections.
+In this 2.0 candidate, ordinary `handoff`, `handoff --compact` and `handoff --json` read stored context without session or freshness writes, environment/provider inventories, or automatic workspace migration. This applies on the first read without a Leerness cache too; it is not a timing guarantee. Use `handoff --record` when presence or a freshness receipt is required, `handoff --inspect` for diagnostics, and `handoff --writeback` only when automation explicitly needs legacy state updates. `--no-record` suppresses recording. A session that has only read is invisible to other sessions, so an empty session list does not prove nobody else is working. See [the exact flag effects and read limits](docs/lean-readonly.md).
 
-Existing projects that still use `.harness/` are upgraded to `.leerness/` transactionally on the first normal command run from that project (or targeted with `--path`). To inspect first, run `leerness migrate-workspace-dir . --dry-run`; to migrate an explicit positional project path, omit `--dry-run`. The migration preserves the byte-for-byte legacy tree by atomically renaming it to the ignored `.leerness-backup/` only after canonical copies and hashes verify, preserves an existing structured-state substrate in `.leerness/`, remaps old observability runs into `.leerness/cache/agent-runs/`, and rewrites operational path references. It fails closed when both directories contain independently live state, the backup name already exists, or a link/junction could escape the project. Arbitrary path-shaped command text is never treated as a migration target.
+For an existing project using `.harness/`, ordinary observation commands leave it in place; a stateful command can still trigger the legacy workspace transition. Inspect an isolated project copy first with `leerness migrate-workspace-dir <project-copy> --dry-run`; omit `--dry-run` only for an explicitly chosen migration. The migration retains the legacy tree in ignored `.leerness-backup/` after canonical copies and hashes verify, preserves an existing structured-state substrate, remaps old observability runs, and rewrites operational path references. It refuses independently live conflicting state, an existing backup destination, or escaping links/junctions. Retain hidden files, untracked originals and all existing backups; Git alone may not contain them. Follow the [upgrade and recovery procedure](docs/release-notes-2.0.0.md#upgrade-with-originals-preserved).
 
-For Cursor, run `npx leerness adapter cursor --path .` once. It preserves existing project hooks and adds a local `sessionStart` bridge that maps Cursor's session address to `LEERNESS_SESSION_ID`, so concurrent Cursor/Claude/Codex sessions remain separately traceable. Cursor Cloud currently does not run `sessionStart`/`sessionEnd` hooks; in that environment the agent must provide an explicit session address or run `handoff` itself.
+For Cursor, `npx leerness adapter cursor --path .` preserves existing project hooks and generates a local `sessionStart` bridge that maps the host's session address to `LEERNESS_SESSION_ID`. Verify hook execution and rule applicability in the actual installed editor before relying on them. If the host supplies no session identity, provide one explicitly; in the 2.0 candidate, request `handoff --record` when a receipt is required.
 
 Your project now has agent-independent memory. To see the flagship feature — catching a false "done" claim:
 
@@ -59,11 +67,11 @@ Now write the implementation and record evidence, then run the **same** `verify-
 
 You never have to type a command yourself. Paste this into Claude Code, Cursor, Codex, or any coding agent:
 
-> Set up leerness in this project by running `npx -y leerness init . --yes`. From now on, run `leerness handoff .` at the start of every session, verify finished work with `leerness verify-claim`, and run `leerness session close .` before you finish.
+> Set up leerness in this project by running `npx -y leerness init . --yes`. Follow my existing project rules and use the host agent's planning and test tools. Read `leerness handoff .` when project context is needed, select verification commands for the work's actual acceptance criteria, and use `leerness session close .` when a handoff needs recording. Keep my custom instructions and backups.
 
-The agent installs and operates it for you — `leerness init` also writes the instructions into CLAUDE.md / AGENTS.md so future sessions pick them up automatically.
+The agent installs and operates it for you. In this candidate, newly generated AGENTS/CLAUDE/Cursor/Copilot guidance makes Leerness tools optional unless an actual owner or project policy requires them. Retained custom text and existing rules remain authoritative. Existing instructions need an explicit, rehearsed project migration; external editor applicability needs its own check.
 
-Prefer pure natural language? leerness ships an **MCP server with 102 tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
+Prefer pure natural language? leerness ships an **MCP server with 104 tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
 
 Explicit-input rule applicability advisory: [`rule assess` and `leerness_rule_assess`](docs/rule-applicability.md). This does not change existing rules or gates.
 
@@ -195,7 +203,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.36.305 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v2.0.0 하네스를 사용합니다. 호스트 에이전트의 계획·검토·테스트 도구를 재사용합니다. `leerness handoff`·`leerness check`·`leerness audit`·`leerness session close`는 관련이 있거나 명시적으로 선택했거나 적용되는 현재 사용자·프로젝트 규칙이 요구할 때만 사용합니다. 완료 주장에는 실제 근거가 필요하며 명령과 쓰기는 해당 범위의 승인이 필요합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -249,7 +257,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.305는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **102개 도구**를 노출:
+Leerness v2.0.0는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **104개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -262,24 +270,24 @@ Leerness v1.36.305는 stdio JSON-RPC MCP server를 내장합니다 — Claude Co
 // • Workflow: session_close / agents_list / task_export / env_check / usage_stats / reuse_map / whats_new
 
 // MCP server 실행: leerness mcp serve
-// tools/list 응답: 102 도구
+// tools/list 응답: 104 도구
 ```
 
 ### Autonomous mode (자율 모드)
 
-`<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
-1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.
+`<<autonomous-loop-dynamic>>` 신호는 적용되는 현재 규칙 안에서 범위가 정해진 개발 반복을 요청할 수 있습니다.
+관련 변경과 실제 테스트를 선택합니다. 신호·테스트 통과·session close는 배포 승인이 아니며, npm 게시·Git 태그·main push·다음 라운드 예약은 해당 작업과 대상을 명시한 승인이 필요합니다.
 
-현재 사용 중인 하네스 버전: **1.36.305**. 공개 릴리스 여부는 공개 저장소의 태그와 배포 기록에서 별도로 확인합니다.
+현재 사용 중인 하네스 버전: **2.0.0**. 공개 릴리스 여부는 공개 저장소의 태그와 배포 기록에서 별도로 확인합니다.
 
 ### 성능 가이드
 
-- `leerness handoff .` — 평균 ~1.5s (캐시 워밍업 후 ~0.6s)
-- `leerness memory status --json` — 평균 ~250ms
-- `leerness task list --json` — 평균 ~200ms
-- `leerness drift check --json` — 평균 ~400ms
-- MCP `tools/list` 응답 — 평균 ~150ms
-- usage-stats / lessons / listAllSkills 모두 메모리 캐싱
+- `leerness handoff .` — 필요한 프로젝트 컨텍스트 조회
+- `leerness memory status --json` — 메모리 상태 조회
+- `leerness task list --json` — 작업 목록 조회
+- `leerness drift check --json` — 명시적으로 선택한 정합성 진단
+- MCP `tools/list` — 사용 가능한 도구 목록 조회
+- 실행 시간은 데이터·환경·캐시 상태에 따라 달라집니다. 필요한 명령만 선택하고 같은 조건에서 직접 측정합니다.
 
 ### 빠른 시작
 
@@ -290,10 +298,10 @@ npm install -g leerness
 # 2. 프로젝트에 하네스 설치
 cd my-project && leerness init . --yes --skills recommended
 
-# 3. AI 세션 시작 시
+# 3. 필요한 경우 컨텍스트 읽기
 leerness handoff .            # 컨텍스트 자동 로드
 
-# 4. 세션 종료 시
+# 4. 기록이 필요한 경우 마감 도구 선택
 leerness session close .      # 9 카테고리 + 룰 검증 + 다음 라운드 추천
 
 # 5. release 자동화 (main 자동 push 포함)
@@ -308,7 +316,7 @@ leerness release pack --close --auto-main-push
 - `.leerness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.leerness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.305: 2026-09-30
+Last synced by Leerness v2.0.0: 2026-11-08
 <!-- leerness:project-readme:end -->
 GitHub 로그인 계정 확인용 서버 어댑터: [설정·연결·승인과의 구분](docs/github-login.md). 실제 앱 등록/브라우저 세션 연결과 대상별 승인은 후속입니다.
 

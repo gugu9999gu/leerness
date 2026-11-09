@@ -1,14 +1,14 @@
-// scripts/e2e-repo-guard.js — T-0315: the e2e suite must not write the package repository's own .leerness.
+ 
 //
-// npm test starts scripts/e2e.js in the package root. CLI calls that pass neither a cwd nor a project path ran
-// against this repository: each full run added test `dispatch.prepared` events to its execution ledger (which
-// session close then listed as agent provenance), bumped its usage counter and wrote agent-run records under
-// its cache. e2e.js now runs from a hermetic project and compares these snapshots at the end.
+ 
+ 
+ 
+ 
 //
-// A snapshot records size, mtime (ns) and inode of every file and each directory, gitignored state included.
-// Content hashes are unnecessary: a write moves mtime, and a rename or hard link changes the inode.
+ 
+ 
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -34,7 +34,7 @@ function snapshot(dir) {
   return out;
 }
 
-// Sorted list of `+ added`, `~ changed` and `- removed` entries.
+ 
 function diff(before, after) {
   const changed = [];
   for (const [key, value] of after) {
@@ -47,8 +47,8 @@ function diff(before, after) {
 
 module.exports = { snapshot, diff };
 
-// Run directly to check that the guard discriminates: silent without writes, and it reports an append,
-// a new file in a new directory, a same-size rewrite and a removal.
+ 
+ 
 if (require.main === module) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-repo-guard-selftest-'));
   try {

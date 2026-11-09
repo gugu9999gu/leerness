@@ -1,14 +1,14 @@
-// scripts/lint.js — 0-deps 경량 lint 게이트 (1.36.64, 외부감사 F-10: lint/typecheck 부재)
-//   범위: 배포되는 모든 .js 의 ① node --check 구문 ② 위험 문자(U+2028/U+2029 — 과거 raw U+2028 정규식 리터럴이
-//   전 명령 SyntaxError 를 일으킨 실사고 재발 차단) ③ BOM ④ 저장소 .json 파싱 유효성.
-//   빠르고(수 초) CI 친화(exit 1). npm run lint / test:fast 에 배선.
+ 
+ 
+ 
+ 
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 
-const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));   // 테스트용 루트 오버라이드 허용
-// 1.36.72 (8차 헌트 F16): 존재하지 않는/빈 루트가 "0 js clean" 거짓 PASS 로 통과하던 것 — 명시 오류
+const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));    
+ 
 if (!fs.existsSync(ROOT) || !fs.statSync(ROOT).isDirectory()) {
   console.log(`✗ lint: root not found — ${ROOT}`);
   process.exit(1);
@@ -31,49 +31,49 @@ function listFiles(dir, ext) {
 }
 
 const jsFiles = TARGET_DIRS.flatMap(d => listFiles(path.join(ROOT, d), '.js'));
-// 1.36.72 (F16): 대상 0건도 거짓 PASS — lint 가 아무것도 검사하지 않았다는 뜻이므로 실패
+ 
 if (!jsFiles.length) {
   console.log(`✗ lint: no js files found under ${TARGET_DIRS.join('/')} in ${ROOT} — nothing was checked`);
   process.exit(1);
 }
 
-// ① 구문 (node --check)
+ 
 for (const f of jsFiles) {
   const r = cp.spawnSync(process.execPath, ['--check', f], { encoding: 'utf8', timeout: 30000 });
-  if (r.error) { failures.push(`syntax-check spawn failed: ${path.relative(ROOT, f)} — ${r.error.code || r.error.message}`); continue; }   // (검수 #3) 스폰 실패를 구문오류와 구분
+  if (r.error) { failures.push(`syntax-check spawn failed: ${path.relative(ROOT, f)} — ${r.error.code || r.error.message}`); continue; }    
   if (r.status !== 0) {
     const lines = (r.stderr || '').split('\n');
-    const detail = lines.find(l => /Error/.test(l)) || lines[0] || '';   // (검수 #3) SyntaxError 본문 우선
+    const detail = lines.find(l => /Error/.test(l)) || lines[0] || '';    
     failures.push(`syntax: ${path.relative(ROOT, f)} — ${detail.trim()}`);
   }
 }
 
-// ② 위험 문자 + ③ BOM
+ 
 for (const f of jsFiles) {
   const buf = fs.readFileSync(f);
   if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) failures.push(`bom: ${path.relative(ROOT, f)}`);
   const text = buf.toString('utf8');
-  const ls = text.indexOf('\u2028'); const ps = text.indexOf('\u2029');   // 이스케이프 표기 — 자기참조 트랩 방지
+  const ls = text.indexOf('\u2028'); const ps = text.indexOf('\u2029');    
   if (ls >= 0) failures.push(`U+2028 line-separator: ${path.relative(ROOT, f)}:${text.slice(0, ls).split('\n').length} (과거 전-명령 SyntaxError 실사고 문자)`);
   if (ps >= 0) failures.push(`U+2029 paragraph-separator: ${path.relative(ROOT, f)}:${text.slice(0, ps).split('\n').length}`);
 }
 
-// ④ 저장소 JSON 유효성 (배포 관련 루트 + data 성격 파일)
+ 
 const jsonFiles = ['package.json', ...listFiles(path.join(ROOT, 'lib'), '.json'), ...listFiles(path.join(ROOT, 'scripts'), '.json')].map(f => path.isAbsolute(f) ? f : path.join(ROOT, f));
 for (const f of jsonFiles) {
   if (!fs.existsSync(f)) continue;
   try { JSON.parse(fs.readFileSync(f, 'utf8').replace(/^﻿/, '')); } catch (e) { failures.push(`json: ${path.relative(ROOT, f)} — ${e.message.slice(0, 80)}`); }
 }
 
-// ⑤ `npm test` 의 중복 단계 (1.36.287: 187단계 중 17단계를 그룹과 직접 나열로 두 번 돌렸다)
-//   `npm run <group>` 을 끝까지 펼친 최종 단계가 한 번씩만 나와야 한다. 그룹 단독 실행(CI 잡)은 그대로 둔다.
-//   ⚠ 스크립트 목록을 열거하지도, 가드 이름을 코드에 적지도 않는다. 이 파일은 npm test 가 실행하는 러너라서
-//   `audit` 의 고아 가드 탐지기가 열거를 "test:* 전부 실행" 으로, 이름 언급을 "호출" 로 읽는다
-//   (열거하던 첫 버전이 e2e 1.36.116 자기기준의 심은 잠든 가드를 가렸다 — 실측).
+ 
+ 
+ 
+ 
+ 
 let testSteps = 0;
 {
   let scripts = {};
-  try { scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8').replace(/^\uFEFF/, '')).scripts || {}; } catch { /* ④ 가 이미 보고 */ }
+  try { scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8').replace(/^\uFEFF/, '')).scripts || {}; } catch {   }
   const expand = (name, stack) => {
     if (stack.includes(name)) { failures.push(`npm scripts cycle: ${[...stack, name].join(' -> ')}`); return []; }
     return String(scripts[name]).split('&&').map(p => p.trim()).filter(Boolean).flatMap(p => {

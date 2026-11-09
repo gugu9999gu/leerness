@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0181: test the confirmed UR-0113 diagnostic/exit-code defect separately
-// from the unconfirmed Windows CI failure. The default violates the platform's
-// BOM contract: Windows misses its required replacement, whereas POSIX receives
-// a forbidden BOM in the disposable fixture. Both must retain failure details
-// and restore the caller's exit code. --real-controls uses the actual writer.
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');
@@ -41,15 +41,15 @@ function child(kind, arena, priorExit) {
   try {
     const encoding = require('../lib/shell-encoding');
     if (kind === 'fault') {
-      // Install before bin imports the export by value. Other fixture files
-      // retain the real planner's no-op action, without calling a writer.
+       
+       
       encoding.applyShellScriptUtf8Bom = (file, displayFile = file) => {
         if (path.basename(file) === 's.ps1') {
           injectedCalls++;
           if (process.platform !== 'win32') {
-            // A pre-replacement timeout alone leaves valid POSIX bytes and
-            // therefore does not violate UR-0113's no-change contract. Model
-            // an erroneous POSIX repair instead, confined to this fixture.
+             
+             
+             
             const original = fs.readFileSync(file);
             const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
             assert(!original.subarray(0, bom.length).equals(bom), 'fault fixture already has a BOM');
@@ -86,7 +86,7 @@ function child(kind, arena, priorExit) {
       };
     }
     const afterExit = process.exitCode;
-    // Child status is transport status; report the case's actual exit state.
+     
     process.exitCode = 0;
     process.stdout.write(PREFIX + JSON.stringify({
       kind, node: process.version, platform: process.platform,
@@ -101,8 +101,8 @@ function child(kind, arena, priorExit) {
 
 function childEnvironment(arena) {
   const env = { ...process.env };
-  // The probe must not inherit ambient runtime descriptors, provider choices,
-  // or Node preload hooks. TEMP is overridden inside the isolated child.
+   
+   
   for (const name of Object.keys(env)) {
     if (/^LEERNESS_/i.test(name) || /^NODE_OPTIONS$/i.test(name)) delete env[name];
   }
@@ -158,8 +158,8 @@ function main() {
   const failures = [];
   let total = 0;
   try {
-    // Confine the preservation helper's ancestor search and recovery artifacts
-    // to this exclusive fixture, even if the user's TEMP has another harness.
+     
+     
     fs.mkdirSync(path.join(arena, '.leerness'));
     fs.mkdirSync(canonical);
     const scenarios = mode === '--real-controls'

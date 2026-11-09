@@ -1,32 +1,32 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0336: errors on the shared progress-tracker write path follow the project language. The row-loss guard in
-// writeProgressRows (E_PROGRESS_ROW_LOSS) printed Korean in English projects through the commands that rewrite tracker
-// rows (task fix-evidence --set, task add, task update, task sync and others); lib/managed-text.js errors
-// (E_TEXT_ENCODING, E_TEXT_LIMIT, E_TEXT_LOCK, ...) and writeProgressRows' own missing-snapshot check (E_TEXT_SNAPSHOT)
-// printed English in Korean projects; memory restore's archive refusals (archive_corrupt) were English for the plan and
-// Korean for decisions and lessons in every project. All now use the language of the commands' own text: --language,
-// then LEERNESS_LANG, then the manifest of the project named by --path or a path argument. Codes are unchanged; every
-// existing text stays byte for byte in the language that had it (the expected strings below); a refused write leaves
-// the files as they were. Rows are made through the product; only the malformed row and the invalid bytes are written
-// by hand, as Buffers. Every test works on its own copy of an initialized seed in a folder with Hangul in its name, and
-// the CLI runs outside the project (in the arena, or in a project of the other language).
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
-// Six values and no closing pipe: it looks like a tracker row, but reads as five cells.
+ 
 const MALFORMED = '| T-0900 | done | six values | no closing pipe | none | 2026-10-07\n';
 const observe = fn => { try { fn(); return null; } catch (e) { return { code: e && e.code, message: e && e.message }; } };
 
-// Direct calls run in a child process of this file, so loading the CLI module and replacing a library function stay out
-// of the probe's own process. The child prints what it observed as JSON; the tests below do the asserting.
+ 
+ 
 const directAt = process.argv.indexOf('--direct');
 if (directAt >= 0) {
   const [mode, dir] = process.argv.slice(directAt + 1);
   const out = {};
   if (mode === 'row-loss') {
-    // The second message (fewer rows to write than were read) has no command path: every caller writes the rows it
-    // read, less the removals it expects. In the CLI module's process the language comes from the project's manifest.
+     
+     
     const cli = require(CLI), { captureTextEdit } = require('../lib/managed-text');
     const file = path.join(dir, '.leerness', 'progress-tracker.md'), original = fs.readFileSync(file);
     const rows = original.toString('utf8').split('\n').filter(l => /^\| T-\d{4} \|/.test(l)).map(l => {
@@ -34,16 +34,16 @@ if (directAt >= 0) {
       return { id, status, request, evidence, nextAction, updated };
     });
     const write = (list, opts = {}) => observe(() => cli._withLock(file, () => cli.writeProgressRows(dir, '# Progress Tracker', list, { input: captureTextEdit(file), ...opts })));
-    out.snapshot = observe(() => cli.writeProgressRows(dir, '# Progress Tracker', rows, {}));   // a caller without the checked text
+    out.snapshot = observe(() => cli.writeProgressRows(dir, '# Progress Tracker', rows, {}));    
     out.fewer = write(rows.slice(1));
     out.shrink = write(rows.slice(2), { expectedShrink: 1 });
     fs.writeFileSync(file, Buffer.concat([original, Buffer.from(MALFORMED, 'utf8')]));
     out.malformed = write(rows);
     fs.writeFileSync(file, original);
-    out.control = write(rows);   // the same rows on the same file are written: the refusals above were the guard's
+    out.control = write(rows);    
   } else if (mode === 'managed-text') {
-    // E_TEXT_CHANGED needs the output capture to read other bytes than the input capture while the input check sees no
-    // change, which takes a race; so the output capture is replaced before managed-text loads it.
+     
+     
     const memoryOutput = require('../lib/memory-output'), realCapture = memoryOutput.captureMemoryOutput;
     let changeNext = false;
     memoryOutput.captureMemoryOutput = (file, options) => {
@@ -67,7 +67,7 @@ if (directAt >= 0) {
       overBytes: locked(() => mt.publishTextEdit(mt.captureTextEdit(file, { maxBytes: 64 }), file, 'x'.repeat(65))),
       over4MiB: locked(() => mt.publishTextEdit(mt.captureTextEdit(file), file, 'x'.repeat(mt.MAX_TEXT_BYTES + 1))),
     };
-    // Nothing registered first; a resolver that fails and a value that is not a function count as nothing registered.
+     
     for (const [label, resolve] of [['unset', undefined], ['ko', () => 'ko'], ['en', () => 'en'], ['throws', () => { throw new Error('no language'); }], ['value', 'ko']]) {
       if (resolve !== undefined) mt.setErrorLanguage(resolve);
       out[label] = Object.fromEntries(Object.entries(cases).map(([name, fn]) => [name, observe(fn)]));
@@ -79,8 +79,8 @@ if (directAt >= 0) {
 }
 
 const filter = process.argv.includes('--match') ? process.argv[process.argv.indexOf('--match') + 1] : '';
-// A filter must name something: a missing value or one that selects no test is a failure, not "0/0 passed".
-// Checked before any temporary folder exists, so this exit leaves nothing behind.
+ 
+ 
 if (process.argv.includes('--match') && !filter) { console.error('--match needs a test name substring'); process.exit(1); }
 const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tracker-write-language-'));
 const env = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1',
@@ -102,9 +102,9 @@ const seed = lang => {
   return (seeds[lang] = dir);
 };
 let copies = 0;
-// Project folders have Hangul in their names, as a Korean user's folders may (review round 1), so the language checks
-// below read the output without them: the messages print full paths.
-// T-0343: the fixture folders have Korean names, and Node 22.23.3's fs.cpSync crashes on non-ASCII paths on Windows.
+ 
+ 
+ 
 const { copyTreeSync } = require('../lib/copy-tree');
 const fresh = lang => { const dir = path.join(arena, 'p' + (++copies) + ' 한글'); copyTreeSync(seed(lang), dir); return dir; };
 const withoutPaths = (text, ...dirs) => dirs.reduce((t, d) => t.split(d).join('<dir>').split(JSON.stringify(d).slice(1, -1)).join('<dir>'), String(text));
@@ -116,7 +116,7 @@ const direct = (mode, dir) => {
   return JSON.parse(r.stdout);
 };
 const tracker = P => path.join(P, '.leerness', 'progress-tracker.md');
-// The rows the product wrote: init's own row and one done row with placeholder evidence, so --set has a candidate.
+ 
 const productRows = P => fs.readFileSync(tracker(P), 'utf8').split('\n').filter(l => /^\| T-\d{4} \|.*\|$/.test(l)).length;
 const project = lang => {
   const P = fresh(lang);
@@ -128,7 +128,7 @@ const project = lang => {
   return { P, id, rows: productRows(P) };
 };
 const append = (P, bytes) => fs.writeFileSync(tracker(P), Buffer.concat([fs.readFileSync(tracker(P)), bytes]));
-// Invalid UTF-8 after the table (0xFF and 0xFE never occur in UTF-8): the rows still read, the write's check refuses.
+ 
 const INVALID = Buffer.concat([Buffer.from('\nnote: ', 'utf8'), Buffer.from([0xff, 0xfe]), Buffer.from('\n', 'utf8')]);
 
 const TEXT = {
@@ -153,7 +153,7 @@ const TEXT = {
     taskImport: 'Task import could not be read as bounded UTF-8 JSON. Preserve the original and check the input.',
   },
 };
-// Every managed-text message: [code, English reason, Korean sentence].
+ 
 const MANAGED = {
   lock: ['E_TEXT_LOCK', 'requires its existing state lock', '관리 문서는 해당 상태 잠금을 잡은 상태에서만 편집할 수 있습니다'],
   utf8: ['E_TEXT_ENCODING', 'has invalid UTF-8; no replacement was attempted', '관리 문서에 UTF-8 로 읽을 수 없는 바이트가 있어 대체 문자로 바꾸지 않았습니다'],
@@ -168,16 +168,16 @@ const MANAGED = {
 const managed = (lang, file) => Object.fromEntries(Object.entries(MANAGED).map(([name, [code, en, ko]]) => [name, { code,
   message: lang === 'ko' ? `${ko}: ${file}. 원본을 보존하고 확인한 뒤 다시 시도하세요.` : `Managed text ${en}: ${file}. Preserve the original and retry after checking it.` }]));
 
-// A refused write: exit 1, the message on stdout as the CLI's error line (and nothing else), the tracker unchanged.
-// With --json the message is the error of the JSON on stdout and the error line goes to stderr.
-const refused = (label, lang, message, args, P, before, extraEnv, cwd) => {
+ 
+ 
+const refused = (label, lang, message, args, P, before, extraEnv, cwd, jsonTransport = { code: 'error', stderr: '✗ ' + message + '\n' }) => {
   const r = run(args, extraEnv, cwd);
+  assert.ok(fs.readFileSync(tracker(P)).equals(before), label + ': the refused write changed the tracker');
   const json = args.includes('--json');
   let got;
   try { got = json ? [r.status, JSON.parse(r.stdout), r.stderr] : [r.status, r.stdout, r.stderr]; } catch { got = [r.status, r.stdout, r.stderr]; }
-  assert.deepStrictEqual(got, json ? [1, { ok: false, error: message, code: 'error' }, '✗ ' + message + '\n'] : [1, '✗ ' + message + '\n', ''], label + ': ' + show(r));
+  assert.deepStrictEqual(got, json ? [1, { ok: false, error: message, code: jsonTransport.code }, jsonTransport.stderr] : [1, '✗ ' + message + '\n', ''], label + ': ' + show(r));
   assert.strictEqual(HANGUL.test(withoutPaths(r.stdout + r.stderr, P)), lang === 'ko', label + ': the output is not ' + lang + '\n' + r.stdout + r.stderr);
-  assert.ok(fs.readFileSync(tracker(P)).equals(before), label + ': the refused write changed the tracker');
 };
 const writers = (P, id) => [
   ['task fix-evidence --set', ['task', 'fix-evidence', '--set', 'checked by hand', '--path', P]],
@@ -197,13 +197,14 @@ for (const lang of ['en', 'ko']) {
     const { P, id } = project(lang);
     append(P, INVALID);
     const before = fs.readFileSync(tracker(P)), message = TEXT[lang].encoding(tracker(P));
-    for (const [label, args] of writers(P, id)) refused(label, lang, message, args, P, before);
+    for (const [label, args] of writers(P, id)) refused(label, lang, message, args, P, before, undefined, undefined,
+      args.includes('--json') ? { code: 'store_corrupt', stderr: '' } : undefined);
   });
 }
 
 test('the language is chosen as for the commands\' own text: --language, then LEERNESS_LANG, then the manifest', () => {
-  // Each override against the other source, in both directions. task update takes no --language, so the flag cases
-  // run task fix-evidence --set.
+   
+   
   const cases = [
     ['a Korean project, LEERNESS_LANG=en', 'ko', 'update', { LEERNESS_LANG: 'en' }, 'en'],
     ['an English project, LEERNESS_LANG=ko', 'en', 'update', { LEERNESS_LANG: 'ko' }, 'ko'],
@@ -224,8 +225,8 @@ test('the language is chosen as for the commands\' own text: --language, then LE
 });
 
 test('the project is the one named by --path, else by a path argument, never the cwd', () => {
-  // Review round 1: the other CLI cases all name the project with --path. Here each run starts in a project of the other
-  // language, so a choice by the cwd shows, and --path is given together with a path argument to the other project.
+   
+   
   const en = project('en'), ko = project('ko'), enMode = fresh('en'), koMode = fresh('ko');
   for (const p of [en, ko]) append(p.P, Buffer.from(MALFORMED, 'utf8'));
   for (const P of [enMode, koMode]) { const a = path.join(P, 'AGENTS.md'); fs.writeFileSync(a, Buffer.concat([fs.readFileSync(a), Buffer.from([0xff, 0xfe])])); }
@@ -240,7 +241,7 @@ test('the project is the one named by --path, else by a path argument, never the
     const before = fs.readFileSync(tracker(p.P));
     refused(label, want, TEXT[want].rowLoss(tracker(p.P), p.rows + 1, p.rows), args, p.P, before, {}, cwd);
   }
-  // The managed-text language comes from the resolver the CLI registers: the same cases through mode set.
+   
   const modeCases = [
     ['mode set: an English project as a path argument, run in a Korean project', enMode, ['mode', 'set', 'minimal', enMode], koMode, 'en'],
     ['mode set: a Korean project as a path argument, run in an English project', koMode, ['mode', 'set', 'minimal', koMode], enMode, 'ko'],
@@ -257,8 +258,8 @@ test('the project is the one named by --path, else by a path argument, never the
 
 for (const lang of ['en', 'ko']) {
   test(`${lang}: memory restore refuses invalid UTF-8 in the plan, decisions and lessons archives in the project language`, () => {
-    // Review round 1: the plan restore put a fixed English sentence in place of the managed-text error, and the same
-    // refusal for decisions and lessons was Korean in every project. Both follow the project now (code archive_corrupt).
+     
+     
     const P = fresh(lang), ws = path.join(P, '.leerness');
     for (const surface of ['plan', 'decisions', 'lessons']) {
       const archive = path.join(ws, surface + '.archive.md');
@@ -279,8 +280,8 @@ for (const lang of ['en', 'ko']) {
   });
 
   test(`${lang}: task sync --from refuses an import file with invalid UTF-8 or invalid JSON in the project language`, () => {
-    // Review round 2: task sync put a fixed English sentence in place of the managed-text error (and of a JSON syntax
-    // error). The code is the one the reading failed with: E_TEXT_ENCODING, or invalid_task_import for the syntax error.
+     
+     
     const P = fresh(lang), before = fs.readFileSync(tracker(P)), message = TEXT[lang].taskImport;
     const inputs = [['invalid UTF-8', Buffer.concat([Buffer.from('[{"content":"x', 'utf8'), Buffer.from([0xff, 0xfe]), Buffer.from('","status":"pending"}]', 'utf8')]), 'E_TEXT_ENCODING'],
       ['invalid JSON', Buffer.from('[{"content": "x",', 'utf8'), 'invalid_task_import']];
@@ -300,8 +301,8 @@ for (const lang of ['en', 'ko']) {
   });
 
   test(`${lang}: mode set, which puts the managed-text message inside its own, gives that part in the project language`, () => {
-    // Another module's wrapper: mode's own --json text is Korean in every project (T-0164), while the managed-text part
-    // follows the project, so an English project keeps the English text it had there.
+     
+     
     const P = fresh(lang), agents = path.join(P, 'AGENTS.md');
     fs.writeFileSync(agents, Buffer.concat([fs.readFileSync(agents), Buffer.from([0xff, 0xfe])]));
     const before = fs.readFileSync(agents), message = TEXT[lang].encoding(agents);

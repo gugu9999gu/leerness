@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0090: run the three real selftest bodies that leaked native Windows EPERM
-// cleanup failures. Healthy runs use the actual writers, heartbeat, and rmSync.
-// Fault controls model an exhausted cleanup error, not a successful no-op delete.
+ 
+ 
+ 
 const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -49,8 +49,8 @@ function ownedFixture(root, prefix) {
   assert.strictEqual(fs.realpathSync.native(root), root, 'cleanup target is not canonical');
 }
 
-// Harness teardown only: verdicts inspect leftovers before this runs. Do not
-// rely on native retry options, which differ between supported Node versions.
+ 
+ 
 function removeOwned(root) {
   const deadline = Date.now() + 5000;
   for (;;) {
@@ -90,7 +90,7 @@ function persistentCleanupDenial(specification, testCase) {
       assert.strictEqual(options.force, true, 'owned cleanup must retain force semantics');
       assert(fs.readdirSync(target).length > 0, 'fault did not reach a populated real fixture');
       fault.path = target;
-      throw fault; // every attempt remains denied; never silently delete it
+      throw fault;  
     }
     return originalRm.apply(this, arguments);
   };
@@ -121,11 +121,11 @@ function persistentCleanupDenial(specification, testCase) {
 
 try {
   fs.mkdirSync(fixtures);
-  // Match the relevant e2e environment without importing/running the e2e suite.
+   
   Object.assign(process.env, { LEERNESS_OFFLINE: '1', LC_ALL: '', LC_CTYPE: '', LANG: '',
     LANGUAGE: 'ko', LEERNESS_NO_AUTO_ROADMAP: '1', TMPDIR: fixtures, TEMP: fixtures, TMP: fixtures,
-    // Node 26's own compile cache is not a selftest fixture. Route it separately
-    // inside our arena, keeping the fixture-directory emptiness check exact.
+     
+     
     NODE_COMPILE_CACHE: path.join(arena, 'node-compile-cache') });
   for (const name of Object.keys(process.env)) {
     if (/^GIT_CONFIG_(GLOBAL|SYSTEM)$/i.test(name)) delete process.env[name];

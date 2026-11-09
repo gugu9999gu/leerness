@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// A live legacy migration must own its project lock before migration revalidation.
-// Otherwise a peer can populate `.leerness/` after validation and
-// make the first caller misclassify the peer's intermediate copy as a user
-// conflict. A second fixture admits newcomers during an actual dual-live copy.
-// Both interleavings use handshakes rather than scheduler luck or bulk-copy delay.
+ 
+ 
+ 
+ 
+ 
 
 const fs = require('fs');
 const os = require('os');
@@ -40,10 +40,10 @@ const peerDoneFile = path.join(root, '.leerness-lock-order-peer-done');
 function loadWorkspace() {
   if (!IS_MUTANT) return require(WORKSPACE_MODULE);
 
-  // Recreate validation-before-lock in memory: bypass the outer early-lock
-  // wrapper so the original migration validates before its fallback lock.
-  // Keep the real writer guard and all other source unchanged; the peer uses
-  // the unmodified module. Never overwrite a product file to run a mutant.
+   
+   
+   
+   
   const source = fs.readFileSync(WORKSPACE_MODULE, 'utf8');
   const entry = 'function migrateLegacyWorkspace(root, opts = {}) {';
   if (source.split(entry).length !== 2) throw new Error('migration mutant entry is not unique');
@@ -61,10 +61,10 @@ function isMigrationRevalidation() {
     Error.prepareStackTrace = (_error, frames) => frames;
     const trace = {};
     Error.captureStackTrace(trace, isMigrationRevalidation);
-    // Direct function boundaries distinguish migration's inspection from
-    // runtime compatibility reads, including reads made inside write guards.
-    // Do not condition this hook on lock existence: that would miss the bug.
-    const callers = trace.stack.slice(1, 4); // skip patchedLstat
+     
+     
+     
+    const callers = trace.stack.slice(1, 4);  
     return ['_inspectDir', 'inspectWorkspace', '_migrateLegacyWorkspace'].every((name, index) => {
       const frame = callers[index];
       return frame && frame.getFunctionName() === name && frame.getFileName() === WORKSPACE_MODULE;
@@ -126,7 +126,7 @@ function isWriterAdmissionWait() {
     Error.prepareStackTrace = (_error, frames) => frames;
     const trace = {};
     Error.captureStackTrace(trace, isWriterAdmissionWait);
-    const frame = trace.stack[1]; // skip patched Atomics.wait
+    const frame = trace.stack[1];  
     return frame && frame.getFunctionName() === 'createRuntimeWriterAdmission'
       && frame.getFileName() === RUNTIME_MODULE;
   } finally { Error.prepareStackTrace = originalPrepare; }
@@ -146,8 +146,8 @@ function observeWriterAdmissionWait() {
   Atomics.wait = function (...args) {
     const admission = isWriterAdmissionWait();
     const result = originalWait.apply(this, args);
-    // Record a completed real wait in the writer-admission loop, not merely
-    // seeing a lock pathname or starting a process. Public diagnosis is separate.
+     
+     
     if (admission && exactLockRead && result === 'timed-out') write(peerContendedFile, `${process.pid}\n`);
     return result;
   };
@@ -166,9 +166,9 @@ function runPeer() {
         version: 'lock-order-peer', lockWaitMs: 20000, at: '2026-08-27T00:00:01.000Z',
       });
     };
-    // The original lock-order scenario is an already-admitted operation. Its
-    // real guard stays active, but it can reach open("wx") while a holder runs.
-    // Copy-admission peers instead create a genuinely new operation mid-copy.
+     
+     
+     
     report = IS_ADMITTED_PEER ? require('../lib/runtime-writes').withRuntimeWrites(root, migrate) : migrate();
   } catch (error) {
     report = { error: { code: error.code, reasonCode: error.reasonCode, message: error.message } };
@@ -253,9 +253,9 @@ async function copyAdmissionRace(entry) {
       observation.dualLive = state.legacy.live && state.canonical.live && state.conflict;
       observation.lockHeld = fs.existsSync(lockFile);
       observation.diagnosisBlockedReadOnly = diagnosePausedCopy();
-      // The real copy has committed a live marker but the real holder has not
-      // renamed legacy or released its lock. No fabricated lock/dual-live state
-      // and no wait-for-lock prerequisite can hide an early admission failure.
+       
+       
+       
       peer = startCopyPeer(entry);
       const handshake = waitForPeerHandshake(20000);
       observation.ready = handshake.ready;
@@ -315,8 +315,8 @@ async function main() {
 
   write(path.join(legacy, 'HARNESS_VERSION'), '1.36.161\n');
   write(path.join(legacy, 'progress-tracker.md'), `# Read ${workspace.LEGACY_WORKSPACE_DIR}/progress-tracker.md\n`);
-  // The handshake, not copy throughput, keeps the peer at the race boundary.
-  // One nested file exercises recursive copying without timing a large tree.
+   
+   
   write(path.join(legacy, 'bulk', 'fixture.md'), `Read ${workspace.LEGACY_WORKSPACE_DIR}/bulk/fixture.md\n`);
 
   const originalLstat = fs.lstatSync;
@@ -331,9 +331,9 @@ async function main() {
   let lockReleaseObserved = false;
   let peerBlockedUntilRelease = false;
 
-  // Admit the original peer before any holder lock exists, then start its
-  // migration at revalidation. This retains the actual exclusive-open race;
-  // the separate copy scenario exercises writer admission arriving later.
+   
+   
+   
   peer = cp.spawn(process.execPath, [__filename, '--admitted-peer', root], {
     cwd: root, windowsHide: true, timeout: 30000,
     env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1',
@@ -355,9 +355,9 @@ async function main() {
       earlyLockSeen = fs.existsSync(lockFile);
       write(peerStartFile, 'start\n');
 
-      // The child records an actual failed `open(..., "wx")`, not merely that
-      // it was spawned. This proves it reached lock acquisition while the
-      // victim is paused inside migration's canonical workspace revalidation.
+       
+       
+       
       const handshake = waitForPeerHandshake(20000);
       peerReadySeen = handshake.ready;
       peerContentionSeen = handshake.contended;
@@ -465,8 +465,8 @@ async function main() {
 
 if (IS_CLI_PEER) {
   observeWriterAdmissionWait();
-  // Preload observes the actual CLI process, including its normal error mapper
-  // and forced exit path. It neither calls nor substitutes the command body.
+   
+   
   process.once('exit', status => write(peerDoneFile, `${JSON.stringify({ status })}\n`));
 } else main()
   .catch((error) => {

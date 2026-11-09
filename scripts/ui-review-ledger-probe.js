@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -222,7 +222,7 @@ test('event cap refuses oversized record set without partial correlation', async
 });
 test('newline-terminated exact byte cap is accepted', async () => {
   const s = seed(), size = fs.statSync(ledger(s)).size;
-  // Padding is preserved but not mistaken for a record. No append room remains.
+   
   fs.appendFileSync(ledger(s), ' '.repeat(MAX_LEDGER_BYTES - size - 1) + '\n');
   const r = await observe(s, (_p, rc) => encode(rc)); assert.notEqual(r.ledger.beforeDigest, null); assert.equal(r.reasonCode, 'review_ambiguous_or_missing'); safe(r);
 });

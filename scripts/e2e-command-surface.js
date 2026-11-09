@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0099 / UR-0076: historically uncovered command families.
-// Local state commands execute end-to-end in a disposable fixture. Commands that
-// can touch external systems or the desktop are exercised through permission
-// denial or --dry-run, with an explicit proof that no marker was created.
+ 
+ 
+ 
+ 
 
 const fs = require('fs');
 const http = require('http');
@@ -140,7 +140,7 @@ async function main() {
   const init = run(null, ['init', root, '--yes', '--language', 'ko', '--no-stale-check'], { noPath: true, cwd: root, timeout: 90000 });
   check('fixture init succeeds', init.status === 0, init.stderr || init.stdout);
 
-  // creds list/register/check/refresh: values stay in env and are never persisted.
+   
   const deployScript = path.join(root, 'surface-deploy-command.js');
   const deployMarker = path.join(root, 'surface-deploy-ran.txt');
   fs.writeFileSync(deployScript, "require('fs').writeFileSync('surface-deploy-ran.txt', 'ran\\n');\n", 'utf8');
@@ -158,7 +158,7 @@ async function main() {
   const refreshed = JSON.parse(fs.readFileSync(path.join(root, '.leerness', 'credentials.local.json'), 'utf8'));
   check('creds refresh records a valid timestamp', r.status === 0 && !Number.isNaN(Date.parse(refreshed.services.surface.lastRefreshed)), r.stderr || r.stdout);
 
-  // env check/sync/detect: keys synchronize, values do not leak.
+   
   fs.writeFileSync(path.join(root, '.env'), 'SURFACE_PUBLIC=visible\nSURFACE_PRIVATE=do-not-copy\n', 'utf8');
   fs.writeFileSync(path.join(root, '.env.example'), 'SURFACE_PUBLIC=\n', 'utf8');
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'surface-fixture', version: '1.0.0', dependencies: { react: '1.0.0', 'surface-unknown-dep': '1.0.0' } }, null, 2) + '\n');
@@ -171,11 +171,12 @@ async function main() {
   r = run(root, ['env', 'check', '--json']);
   const envAfter = parseJson(r);
   check('env check is clean after sync', r.status === 0 && envAfter?.inEnvOnly?.length === 0, r.stdout || r.stderr);
-  r = run(root, ['env', 'detect', '--json'], { timeout: 90000 });
+  const envTools = require('./e2e-env-tools').create(fresh('leerness-surface-env-tools-'), baseEnv);
+  r = run(root, ['env', 'detect', '--json'], { timeout: 90000, env: envTools.env });
   const detected = parseJson(r);
-  check('env detect persists a machine-readable snapshot', r.status === 0 && detected?.persisted === true && fs.existsSync(path.join(root, '.leerness', 'environment.json')), r.stdout || r.stderr);
+  check('env detect persists a machine-readable snapshot', r.status === 0 && detected?.persisted === true && fs.existsSync(path.join(root, '.leerness', 'environment.json')) && envTools.verify(detected), r.stdout || r.stderr);
 
-  // Adaptive wakeup interval state round-trip.
+   
   r = run(root, ['wakeup-interval', 'set', '600', '--json']);
   check('wakeup-interval set stores an override', r.status === 0 && parseJson(r)?.override === 600, r.stdout || r.stderr);
   r = run(root, ['wakeup-interval', 'get', '--json']);
@@ -189,7 +190,7 @@ async function main() {
   r = run(root, ['wakeup-interval', 'auto', '--json']);
   check('wakeup-interval auto clears the override', r.status === 0 && parseJson(r)?.override === null, r.stdout || r.stderr);
 
-  // Workspace directory, feature toggles, glossary, and policy.
+   
   r = run(root, ['workspace-dir', 'get', '--json']);
   check('workspace-dir get reports .leerness as the active store', r.status === 0 && parseJson(r)?.current === '.leerness', r.stdout || r.stderr);
   r = run(root, ['workspace-dir', 'guide']);
@@ -212,12 +213,12 @@ async function main() {
   const policyCheck = parseJson(r);
   check('policy check blocks publish and signals exit 1', r.status === 1 && policyCheck?.allowed === false, r.stdout || r.stderr);
 
-  // PATH is diagnostic-only unless --apply is explicit.
+   
   r = run(root, ['path-setup', '--json'], { timeout: 30000 });
   const pathSetup = parseJson(r);
   check('path-setup default is read-only (applied=null)', r.status === 0 && pathSetup && pathSetup.applied === null, r.stdout || r.stderr);
 
-  // Browser/desktop bridges: inspect availability, then prove basic mode rejects actions before loading/using them.
+   
   r = run(root, ['web', 'check', '--json'], { timeout: 30000 });
   check('web check returns structured capability state', r.status === 0 && typeof parseJson(r)?.installed === 'boolean', r.stdout || r.stderr);
   const webOut = path.join(root, 'must-not-exist.png');
@@ -235,7 +236,7 @@ async function main() {
   r = run(root, ['pc', 'screenshot', '--out', pcOut, '--json']);
   check('pc screenshot is permission-denied without output', r.status === 1 && parseJson(r)?.ok === false && !fs.existsSync(pcOut), r.stdout || r.stderr);
 
-  // LSP bridge executes locally through TypeScript API or the built-in regex fallback.
+   
   const sample = path.join(root, 'surface-sample.js');
   fs.writeFileSync(sample, 'function surfaceFn() { return 1; }\nmodule.exports = { surfaceFn };\n', 'utf8');
   r = run(root, ['lsp', 'check', '--json'], { timeout: 30000 });
@@ -246,7 +247,7 @@ async function main() {
   r = run(root, ['lsp', 'references', 'surfaceFn', '--in', root, '--json'], { timeout: 30000 });
   check('lsp references finds local usages', r.status === 0 && parseJson(r)?.count >= 2, r.stdout || r.stderr);
 
-  // Webhook listener is safe to exercise fully on localhost.
+   
   const port = await freePort();
   const webhook = cp.spawn(process.execPath, [CLI, 'webhook', 'serve', '--port', String(port), '--path', root], {
     cwd: root, env: baseEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
@@ -265,13 +266,13 @@ async function main() {
     children.delete(webhook);
   }
 
-  // Deploy auto reaches its dry-run gate but must never execute the stored command.
+   
   r = run(root, ['permissions', 'set', 'extended']);
   check('permissions extended enables allowlisted shell diagnostics', r.status === 0, r.stderr || r.stdout);
   r = run(root, ['deploy', 'auto', 'surface', '--dry-run']);
   check('deploy auto --dry-run skips the registered command', r.status === 0 && r.stdout.includes('dry-run') && !fs.existsSync(deployMarker), r.stderr || r.stdout);
 
-  // release sync-main: a local two-branch repository, no remote, and dry-run must preserve branch + HEAD.
+   
   const repo = fresh('leerness-sync-main-');
   git(repo, ['init']);
   git(repo, ['config', 'user.email', 'surface@example.invalid']);

@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { LEGACY_WORKSPACE_DIR } = require('../lib/workspace-dir');
@@ -132,8 +132,8 @@ test('observed directory change marks traversal incomplete', () => {
   const r = scan(dir, { io: ioWith({ lstatSync: (file, opts) => { const s = fs.lstatSync(file, opts);if (file === dir && ++calls === 2) { const copy = Object.create(s);copy.mtimeNs += 1n;return copy; }return s; } }) });
   assert.strictEqual(r.coverage.skipped['directory-changed'], 1);assert.strictEqual(r.ok, false);
 });
-// T-0343: an entry added within the directory's timestamp tick leaves its lstat unchanged, so a file the traversal
-// never saw could still be reported as complete coverage. The directory timestamps are held fixed here.
+ 
+ 
 test('entry added during traversal within one timestamp tick marks traversal incomplete', () => {
   const dir = fixture({ 'file.md': sample });let first = null, added = false;
   const r = scan(dir, { io: ioWith({
@@ -173,7 +173,7 @@ test('a missing Windows path device requires a second matching handle', () => {
   }) });
   assert.strictEqual(closes, opens);
   if (process.platform === 'win32') { assert.strictEqual(opens, 2);assert.strictEqual(r.ok, true); }
-  else assert.strictEqual(r.ok, false); // Missing-device exception is Windows-specific.
+  else assert.strictEqual(r.ok, false);  
 });
 test('a different confirmation handle rejects content and closes both handles', () => {
   const dir = fixture({ 'file.md': sample });let opens = 0, closes = 0, second;

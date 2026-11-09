@@ -1,7 +1,7 @@
 'use strict';
 
-// In-memory transport and descriptor fixtures: never launches Git or changes a
-// repository. Exercise the real runtime operation/latch and gitSpawn boundary.
+ 
+ 
 const assert = require('assert');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -19,8 +19,8 @@ const layout = require('../lib/runtime-layout');
 const runtime = require('../lib/runtime-writes');
 const originalAdmission = layout.createRuntimeWriterAdmission;
 let compatible = true;
-// This transport-classification fixture supplies observations at the writer
-// admission seam. Real Git discovery/admission is covered by the other probes.
+ 
+ 
 layout.createRuntimeWriterAdmission = () => ({
   reader: () => ({ compatible, writeDisposition: compatible ? 'allowed' : 'blocked',
     reasonCode: compatible ? 'legacy_absent' : 'layout_unsupported' }),

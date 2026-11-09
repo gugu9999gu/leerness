@@ -17,8 +17,7 @@ function cmd(root, args, options = {}) {
 }
 function setup(root, { ledger = true, format, materialBytes } = {}) {
   fs.mkdirSync(root);
-  cmd(root, ['init', '-q', '--template=', ...(format ? ['--object-format=' + format] : [])]);
-  cmd(root, ['config', 'user.name', 'Run Fixture']); cmd(root, ['config', 'user.email', 'run@example.invalid']);
+  cmd(root, ['init', '-q', '--template=' + path.join(__dirname, 'fixtures/ui-review-git-template'), ...(format ? ['--object-format=' + format] : [])]);
   cmd(root, ['config', 'core.hooksPath', path.join(root, 'empty-hooks')]);
   fs.mkdirSync(path.join(root, '.leerness')); fs.writeFileSync(path.join(root, '.leerness/HARNESS_VERSION'), '1.0.0\n');
   const input = fixture(), files = [];

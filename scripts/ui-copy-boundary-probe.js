@@ -1,7 +1,7 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0309: the UI copy boundary reaches the UI-building agent as an on-demand skill.
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -28,8 +28,8 @@ function run(root, args, input) {
   return result.stdout;
 }
 const INIT = ['--yes', '--no-setup-agents', '--no-mcp', '--no-auto-roadmap', '--no-official-skills', '--no-banner'];
-// Frontmatter as a YAML loader sees it: a plain scalar may not contain ": " (the first English
-// description did, which a YAML loader rejects); a double-quoted scalar must parse.
+ 
+ 
 function frontmatter(skill) {
   const block = /^---\n([\s\S]*?)\n---\n/.exec(skill);
   assert.ok(block, 'frontmatter block');
@@ -65,7 +65,7 @@ try {
         assert.strictEqual(meta.name, 'ui-copy-boundary');
         assert.ok(typeof meta.description === 'string' && meta.description.length > 40);
         assert.ok(skill.includes(guide.GUIDE_PATH));
-        // A pointer, not a copy: the rule list lives only in the guide.
+         
         assert.ok(!skill.includes(lang === 'ko' ? '## 예외' : '## Exceptions'));
         assert.ok(skill.length < text.length / 2);
       }
@@ -104,8 +104,8 @@ try {
   test('reinstall refreshes the managed guide and keeps an authored project note', () => {
     const dir = path.join(arena, 'standard-ko');
     const file = path.join(dir, guide.GUIDE_PATH);
-    // An older managed wording plus a team note: reinstall must bring the current guide back
-    // (the file is managed) without dropping what the team wrote.
+     
+     
     fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('# 화면 문구 경계', '# 옛 화면 문구 안내')
       + '\n## 우리 팀 규칙\n관리 화면의 필드 이름은 영어 원문을 유지한다.\n');
     run(dir, ['init', dir, '--language', 'ko', ...INIT]);

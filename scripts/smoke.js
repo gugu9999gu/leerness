@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// 1.9.273 (UR-0027, GPT-5.5 리뷰): 빠른 핵심-경로 smoke 테스트.
-//   전체 e2e(수백 케이스)는 CI/릴리스 게이트용. 이 smoke 는 개발 중 제한된 핵심 명령만 확인한다.
-//   전체 selftest는 test:core/npm test의 명시적 최종 단계에서 실행한다.
-//   fast smoke에서 같은 355건을 다시 실행하면 핵심 명령의 빠른 피드백이 늦어진다.
-//   핵심 명령이 정상 동작하는지만 단일 임시 프로젝트에서 빠르게 확인한다.
-//   실패 시 exit 1 (CI 친화). 사용: npm run test:fast  또는  node scripts/smoke.js
+ 
+ 
+ 
+ 
+ 
+ 
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const { performance } = require('node:perf_hooks');
+const { childDiagnostics, childExitMatches } = require('./e2e-child-diagnostics');
 
 process.env.LEERNESS_OFFLINE = process.env.LEERNESS_OFFLINE || '1';
 const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
@@ -20,38 +22,40 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-smoke-'));
 let failed = 0, total = 0;
 const t0 = Date.now();
 
-// 단일 명령 실행 + assert. check(라벨, args, {expectFail?, match?(stdout)→bool})
+ 
 function check(label, args, opts = {}) {
   total++;
+  const started = performance.now();
   const r = cp.spawnSync(process.execPath, [CLI, ...args], { cwd: opts.cwd || tmp, encoding: 'utf8', timeout: opts.timeout || 30000 });
-  let ok = (r.status === 0) === !opts.expectFail;
+  const diagnostic = childDiagnostics(r, performance.now() - started, opts.timeout || 30000);
+  let ok = childExitMatches(r, opts.expectFail);
   if (ok && typeof opts.match === 'function') { try { ok = !!opts.match(r.stdout || '', r.stderr || ''); } catch { ok = false; } }
-  process.stdout.write(`${ok ? '✓' : '✗'} ${label}${opts.expectFail ? ' (expect-fail)' : ''}\n`);
-  if (!ok) { failed++; process.stdout.write((r.stdout || '').slice(0, 300)); process.stderr.write((r.stderr || '').slice(0, 200)); }
+  process.stdout.write(`${ok ? '✓' : '✗'} ${label}${opts.expectFail ? ' (expect-fail)' : ''} (elapsedMs=${diagnostic.elapsedMs})\n`);
+  if (!ok) { failed++; process.stdout.write((r.stdout || '').slice(0, 300)); process.stderr.write((r.stderr || '').slice(0, 200)); console.log(JSON.stringify(diagnostic)); }
   return { ok, stdout: r.stdout || '', stderr: r.stderr || '', status: r.status };
 }
 
 console.log(`# leerness smoke (test:fast) @ ${tmp}`);
 
-// 1) CLI 진입. 전체 selftest는 이 smoke 밖의 필수 단계가 소유한다.
+ 
 check('--version', ['--version'], { match: s => /^\d+\.\d+\.\d+/.test(s.trim()) });
 
-// 2) 설치 + 필수 파일
+ 
 check('init', ['init', tmp, '--yes', '--language', 'ko', '--skills', 'recommended']);
 check('status', ['status', tmp], { match: s => /present|존재|설치/.test(s) || true });
 check('verify (필수 파일)', ['verify', tmp]);
 
-// 3) 세션 워크플로
+ 
 check('handoff', ['handoff', tmp]);
 check('audit', ['audit', tmp]);
 check('drift check', ['drift', 'check', tmp], { match: s => /drift/i.test(s) });
 check('session close', ['session', 'close', tmp]);
 
-// 4) 보안·인코딩 가드
+ 
 check('scan secrets', ['scan', 'secrets', tmp]);
 check('encoding check', ['encoding', 'check', tmp]);
 
-// 5) 신규 기능 스모크 (역할 1.9.270 / 권한공개 1.9.272)
+ 
 check('roles set + list', ['roles', 'set', 'coder', '--provider', 'codex', '--model', 'gpt-5.5', '--path', tmp, '--json'],
   { match: s => { try { return JSON.parse(s).set === 'coder'; } catch { return false; } } });
 check('capabilities --json', ['capabilities', '--json'],

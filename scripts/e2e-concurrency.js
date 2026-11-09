@@ -1,7 +1,7 @@
-// scripts/e2e-concurrency.js — T-0115의 silent lost-update 회귀 방지.
-// LOCKPROBE_STALL_*은 scripts/lock-probe.js를 명시 preload한 이 테스트에서만 활성화된다.
+ 
+ 
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const fs = require('fs');
 const os = require('os');
@@ -11,6 +11,9 @@ const cp = require('child_process');
 const CLI = path.resolve(process.argv[2] || path.join(__dirname, '..', 'bin', 'leerness.js'));
 const PRELOAD = path.join(__dirname, 'lock-probe.js');
 const { overlapOf } = require('./race-overlap');
+const { stopTestProcessTree } = require('../lib/test-process-tree');
+const { childDiagnostics, childExitMatches } = require('./e2e-child-diagnostics');
+const { performance } = require('node:perf_hooks');
 const ENV = {
   ...process.env,
   LEERNESS_OFFLINE: '1',
@@ -20,45 +23,91 @@ const ENV = {
 const STALL_MS = 1200;
 
 const nap = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const wait = child => new Promise(resolve => child.on('close', code => resolve(code)));
+function watchChild(child, { timeoutMs = 60000, shutdownMs = 5000, stop = stopTestProcessTree } = {}) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || !Number.isFinite(shutdownMs) || shutdownMs < 1) {
+    throw new TypeError('Child deadlines must be positive finite numbers');
+  }
+  const started = performance.now();
+  const result = { status: null, signal: null, error: null, timedOut: false, cancelled: false,
+    closed: false, timeoutMs, elapsedMs: null, stopError: null };
+  let settled = false, timer, shutdown, resolve;
+  const done = new Promise(r => { resolve = r; });
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer); clearTimeout(shutdown);
+    result.elapsedMs = Math.round(performance.now() - started);
+    resolve({ ...result });
+  };
+  const cancel = reason => {
+    if (settled || result.closed || result.cancelled) return;
+    result.cancelled = true;
+    result.timedOut = reason === 'timeout';
+    shutdown = setTimeout(() => {
+      if (!result.closed && typeof child.unref === 'function') child.unref();
+      finish();
+    }, shutdownMs);
+    try { stop(child); } catch (error) { result.stopError = String(error && error.message || error); }
+  };
+  child.on('error', error => {
+    result.error = { code: error && error.code || null, message: String(error && error.message || error) };
+  });
+  child.once('close', (status, signal) => {
+    result.status = status; result.signal = signal || null; result.closed = true; finish();
+  });
+  timer = setTimeout(() => cancel('timeout'), timeoutMs);
+  return { child, done, cancel, get closed() { return result.closed; } };
+}
+
+function childPassed(result, expected = 0) {
+  return result.closed === true && !result.timedOut && !result.cancelled && !result.error
+    && !result.signal && Number.isInteger(result.status) && result.status === expected;
+}
+
+function trace(event, name, data = {}) {
+  process.stderr.write(JSON.stringify({ event, name, ...data }) + '\n');
+}
 
 function run(d, args) {
+  const started = performance.now();
   const r = cp.spawnSync(process.execPath, [CLI, ...args, '--path', d],
-    { cwd: d, env: ENV, encoding: 'utf8', timeout: 60000 });
-  if (r.status !== 0) throw new Error(args.slice(0, 3).join(' ') + ' setup exit=' + r.status);
+    { cwd: d, env: ENV, encoding: 'utf8', timeout: 60000, killSignal: 'SIGKILL' });
+  if (!childExitMatches(r)) throw new Error(args.slice(0, 3).join(' ') + ' setup ' + JSON.stringify(childDiagnostics(r, performance.now() - started, 60000)));
   return r;
 }
 
 function init(d) {
+  const started = performance.now();
   const r = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--minimal'],
-    { cwd: d, env: ENV, encoding: 'utf8', timeout: 60000 });
-  if (r.status !== 0) throw new Error('init exit=' + r.status);
+    { cwd: d, env: ENV, encoding: 'utf8', timeout: 60000, killSignal: 'SIGKILL' });
+  if (!childExitMatches(r)) throw new Error('init ' + JSON.stringify(childDiagnostics(r, performance.now() - started, 60000)));
 }
 
-// The preload writes this file at the moment it stalls the final publication of the target, so "stalled"
-// is observed rather than inferred. T-0314: inferring it from `<target>.tmp-*` names stopped working when
-// 1.36.190 published memory outputs through `.<target>.publish-*` + link; 8 of 11 races then never raced.
+ 
+ 
+ 
 const readyFileOf = d => path.join(d, '.stall-ready.json');
-// T-0346: the second command writes this file after it read the target, or tried its lock or a lock the first
-// command held when it stalled; the first command's stall ends only after it exists (see scripts/lock-probe.js).
-// A fixed 1.2 s stall could end before the second command had started (a Node start alone can take that long on
-// Windows), and the race then passed without overlapping the publication.
+ 
+ 
+ 
+ 
 const reachFileOf = d => path.join(d, '.stall-reached.json');
 
-// role 'first' stalls the publication of `target` until the second command reaches it; role 'second' reports
-// reaching it. Both run with the lock-probe preload.
+ 
+ 
 function spawn(d, args, role, target) {
   const nodeArgs = ['--require', PRELOAD, CLI, ...args, '--path', d];
   const env = role === 'first'
     ? { ...ENV, LOCKPROBE_STALL_TARGET: target, LOCKPROBE_STALL_MS: String(STALL_MS), LOCKPROBE_READY_FILE: readyFileOf(d), LOCKPROBE_WAIT_FILE: reachFileOf(d) }
     : { ...ENV, LOCKPROBE_REACH_TARGET: target, LOCKPROBE_REACH_FILE: reachFileOf(d), LOCKPROBE_REACH_LOCKS_FILE: readyFileOf(d) };
-  return cp.spawn(process.execPath, nodeArgs, { cwd: d, env, stdio: 'ignore' });
+  return watchChild(cp.spawn(process.execPath, nodeArgs, { cwd: d, env, stdio: 'ignore',
+    windowsHide: true, detached: process.platform !== 'win32' }));
 }
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 
 function waitForStall(d, target) {
-  // T-0343: an absolute target (a file outside .leerness) is acknowledged by its full path, a relative one by its
-  //   path inside .leerness; the two are not mixed.
+   
+   
   const normalized = path.isAbsolute(target) ? path.resolve(target).replace(/\\/g, '/') : target.replace(/\\/g, '/').replace(/^\.?\/+/, '');
   for (let i = 0; i < 800; i++) {
     try { if (JSON.parse(fs.readFileSync(readyFileOf(d), 'utf8')).target === normalized) return true; } catch {}
@@ -68,36 +117,51 @@ function waitForStall(d, target) {
 }
 
 async function race(name, config) {
+  const started = performance.now(), children = [];
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-t0115-race-'));
+  let result;
+  trace('case-start', name);
   try {
     init(d);
     if (config.seed) config.seed(d);
-    // T-0343: a target outside .leerness is given as a function of the project directory (its absolute path).
     const stallTarget = typeof config.stallTarget === 'function' ? config.stallTarget(d) : config.stallTarget;
-    const first = spawn(d, config.first, 'first', stallTarget);
+    const first = spawn(d, config.first, 'first', stallTarget); children.push(first);
     const stalled = waitForStall(d, stallTarget);
+    trace('stall', name, { stalled, elapsedMs: Math.round(performance.now() - started) });
     if (config.beforeSecond) config.beforeSecond(d);
     const second = spawn(d, typeof config.second === 'function' ? config.second(d) : config.second, 'second', stallTarget);
-    const exits = await Promise.all([wait(first), wait(second)]);
-    // T-0346: the race counts only when the second command overlapped the first one's stalled section (see
-    // scripts/race-overlap.js): a contended lock attempt, or, for a command that tried none of those locks, a read
-    // of the stalled file that finished before the first command resumed.
+    children.push(second);
+    const observations = await Promise.all(children.map(child => child.done));
+    const exits = observations.map(child => child.status);
+    trace('children-finished', name, { children: observations });
     const ready = readJson(readyFileOf(d)) || {}, reach = readJson(reachFileOf(d));
     const { overlapped, why } = overlapOf({ stalled, ready, reach });
-    const inspected = config.inspect(d);
-    // T-0343: `secondExit` names the second command's expected exit when it is not 0 (lazy detect reports issues with 1).
+    const inspected = observations.every(child => child.closed) ? config.inspect(d) : { preserved: false };
     const secondExit = config.secondExit === undefined ? 0 : config.secondExit;
-    return { name, stalled, overlapped, why, read: reach && reach.read && reach.read.how, lock: reach && reach.lock && reach.lock.result,
-      waitedMs: ready.waitedMs, exits, ...inspected,
-      ok: overlapped && exits[0] === 0 && exits[1] === secondExit && inspected.preserved === true };
+    result = { name, stalled, overlapped, why, read: reach && reach.read && reach.read.how, lock: reach && reach.lock && reach.lock.result,
+      waitedMs: ready.waitedMs, exits, ...inspected, children: observations,
+      ok: overlapped && childPassed(observations[0]) && childPassed(observations[1], secondExit) && inspected.preserved === true };
   } catch (e) {
-    return { name, error: String(e && e.message || e), ok: false };
+    result = { name, error: String(e && e.message || e), ok: false };
   } finally {
-    try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    for (const child of children) if (!child.closed) child.cancel('cleanup');
+    const observations = await Promise.all(children.map(child => child.done));
+    if (!result.children) result.children = observations;
+    if (observations.some(child => !child.closed)) {
+      result.ok = false; result.cleanup = { status: 'retained', path: d, reason: 'child termination unconfirmed' };
+    } else {
+      try { fs.rmSync(d, { recursive: true, force: true }); result.cleanup = { status: 'removed' }; }
+      catch (e) { result.ok = false; result.cleanup = { status: 'failed', path: d, error: String(e && e.message || e) }; }
+    }
+    result.elapsedMs = Math.round(performance.now() - started);
+    trace('case-end', name, { ok: result.ok, elapsedMs: result.elapsedMs, cleanup: result.cleanup });
   }
+  return result;
 }
 
-(async () => {
+module.exports = { watchChild, childPassed };
+
+if (require.main === module) (async () => {
   const results = [];
   results.push(await race('creds-register', {
     stallTarget: 'credentials.local.json',
@@ -172,8 +236,8 @@ async function race(name, config) {
       };
     }
   }));
-  // T-0343 (review round 1): commands that decided on an unlocked existence check while the first writer, holding
-  // its lock, had the file renamed away for its POSIX publication.
+   
+   
   results.push(await race('plan-remove-vs-plan-add', {
     stallTarget: 'plan.md',
     seed: d => run(d, ['plan', 'add', 'victim']),
@@ -197,8 +261,8 @@ async function race(name, config) {
       return { same, other, preserved: same === 1 && other === 1 };
     }
   }));
-  // The same text twice: the second add checked before the first one's row had landed (on Windows too, where the
-  // tracker is replaced in place and never missing).
+   
+   
   results.push(await race('task-add-same-text-twice', {
     stallTarget: 'progress-tracker.md',
     first: ['task', 'add', 'same request text', '--no-review'],
@@ -226,7 +290,7 @@ async function race(name, config) {
       return { hasB: /^B=/m.test(example), hasC: /^C=/m.test(example), preserved: /^B=/m.test(example) && /^C=/m.test(example) };
     }
   }));
-  // T-0343 (review round 2): more commands whose unlocked read decided a write, a skip or an error.
+   
   const rowIdOf = (d, text) => (fs.readFileSync(path.join(d, '.leerness', 'progress-tracker.md'), 'utf8').split(/\r?\n/)
     .map(line => line.split('|').map(s => s.trim())).find(cells => /^T-\d+$/.test(cells[1] || '') && cells[3] === text) || [])[1];
   const rowOf = (d, id) => fs.readFileSync(path.join(d, '.leerness', 'progress-tracker.md'), 'utf8').split(/\r?\n/)
@@ -274,7 +338,7 @@ async function race(name, config) {
   for (const [verb, extra, want] of [['update', ['--status', 'in-progress'], 'in-progress'], ['drop', [], 'dropped']]) {
     results.push(await race(`task-${verb}-vs-task-add`, {
       stallTarget: 'progress-tracker.md',
-      // The ID is read at seed time: when the second command starts, the tracker is the file being published.
+       
       seed: d => { run(d, ['task', 'add', 'target request text', '--no-review']); fs.writeFileSync(path.join(d, '.target-id'), rowIdOf(d, 'target request text')); },
       first: ['task', 'add', 'other request text', '--no-review'],
       second: d => ['task', verb, fs.readFileSync(path.join(d, '.target-id'), 'utf8'), ...extra],
@@ -298,7 +362,7 @@ async function race(name, config) {
     second: d => ['task', 'sync', '--from', path.join(d, 'todos.json')],
     inspect: d => { const same = activeRows(d, 'existing todo text'); return { same, preserved: same === 1 }; }
   }));
-  // An ID assigned from a tracker read as missing: the new row could take an existing row's ID and replace it.
+   
   results.push(await race('task-sync-new-item-id-vs-task-add', {
     stallTarget: 'progress-tracker.md',
     seed: d => {
@@ -313,7 +377,7 @@ async function race(name, config) {
       return { firstRowKept, imported, preserved: firstRowKept && imported };
     }
   }));
-  // T-0343 (review round 3): task export, bugfix start and claims baseline create.
+   
   results.push(await race('task-export-vs-task-add', {
     stallTarget: 'progress-tracker.md',
     seed: d => run(d, ['task', 'add', 'export target text', '--no-review']),

@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -103,16 +103,16 @@ async function main() {
     });
     await test('a JSON handle reconstruction cannot publish', () => { reject(() => API.retainUiReviewRun(clone(handle)), 'handle_invalid'); });
     await test('a project folder too deep for Git refs on Windows refuses a run before any write and works with long paths on globally', async () => {
-      // T-0326: the run, attempt, dispatch and result refs (refs/leerness/<family>/v1/project-<64 hex>/<64 hex>) are
-      // written in update-ref --stdin transactions. On Windows, Git without core.longpaths cannot lock them once their
-      // lock paths reach 260 characters, and refs written with long paths break the user's own Git there. So the
-      // observation is refused with git_long_paths_required before the callback runs or anything is written; with
-      // core.longpaths=true in the user's global Git configuration it is observed and retained, and the user's own Git
-      // still reads the repository.
-      // The user's own global and system Git configuration are replaced by test files for this test only.
+       
+       
+       
+       
+       
+       
+       
       const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
       const empty = path.join(arena, 'empty.gitconfig'); fs.writeFileSync(empty, '');
-      // Other platforms have no such limit, so there the run is set up, observed and retained without the setting.
+       
       const longPaths = process.platform === 'win32' ? path.join(arena, 'longpaths.gitconfig') : empty;
       if (longPaths !== empty) fs.writeFileSync(longPaths, '[core]\n\tlongpaths = true\n');
       process.env.GIT_CONFIG_GLOBAL = longPaths; process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';
@@ -122,7 +122,7 @@ async function main() {
         fs.mkdirSync(path.dirname(deep), { recursive: true });
         const d = F.setup(deep), projectKey = require('../lib/review-control-git').context(deep, 'probe').projectKey;
         if (process.platform === 'win32') {
-          // A run ref's last segment is a 64-hex digest, so its lock path length is fixed by the project key and the root.
+           
           assert.ok(path.join(deep, '.git', `refs/leerness/review-runs/v1/${projectKey}/${'0'.repeat(64)}.lock`).length >= 260, 'the case must reach MAX_PATH');
           process.env.GIT_CONFIG_GLOBAL = empty;
           const before = snapshot(deep);
@@ -319,7 +319,7 @@ async function main() {
     });
   } finally {
     for (const child of children) child.kill();
-    // Delete only this probe's owned temp directory, after validating both parent and prefix.
+     
     const owned = path.resolve(arena), base = path.resolve(os.tmpdir());
     assert.equal(path.dirname(owned), base); assert.ok(path.basename(owned).startsWith('leerness-ui-review-run-'));
     removeTree(owned, { recursive: true, force: true });

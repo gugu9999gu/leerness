@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -66,13 +66,13 @@ async function main() {
       assert.equal(F.cmd(root, ['status', '--porcelain']), '?? .leerness/');
     }, true);
     await test('a project folder too deep for Git refs on Windows is refused before any write and works once core.longpaths is on', () => {
-      // T-0326: the floor ref is refs/leerness/ui-review-authority/v1/project-<64 hex>/<64 hex>. On Windows, Git without
-      // core.longpaths cannot lock it once its lock path reaches 260 characters (initialization used to fail as
-      // git_failed), and a ref written with long paths breaks the user's own Git there (git log --all, fsck and gc
-      // fail). So initialization and opening are refused with git_long_paths_required before anything is written;
-      // after `git config core.longpaths true` the floor initializes and advances, and the user's own Git still reads,
-      // packs and checks the repository.
-      // The user's global and system Git configuration are switched off so that every machine runs the same case.
+       
+       
+       
+       
+       
+       
+       
       const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
       const empty = path.join(arena, 'empty.gitconfig'); fs.writeFileSync(empty, '');
       process.env.GIT_CONFIG_GLOBAL = empty; process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';

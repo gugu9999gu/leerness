@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0193: canonical JSON이 authoritative인 상태에서 projection Markdown 뒤에
-// 붙은 사용자/producer 원문은 보존하고, projection 내부 divergence는 덮어쓰지 않는다.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -46,8 +46,8 @@ function fixture(surface) {
   const entry = surface === 'decisions'
     ? { date: '2026-09-11', title: 'base', decision: 'base', reason: 'reason', alternatives: null, impact: null }
     : { date: '2026-09-11', text: 'base', tag: 'tag' };
-  // T-0318: the seed is an English project, so writers render the English header; the projection below carries
-  // the Korean header earlier versions wrote in every project, which a write accepts and replaces.
+   
+   
   const render = (entries, lang = 'en') => surface === 'decisions' ? _renderDecisionsMd(entries, lang) : _renderLessonsMd(entries, lang);
   fs.writeFileSync(p('json'), JSON.stringify([entry], null, 2) + '\n');
   fs.writeFileSync(p('md'), render([entry], 'ko'));

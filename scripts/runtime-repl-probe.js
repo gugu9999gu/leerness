@@ -1,8 +1,8 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Real readline events and product REPL implementation; provider replies and
-// incidental startup context/catalog are local stubs. No provider is launched.
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const crypto = require('crypto');
@@ -12,8 +12,8 @@ const os = require('os');
 const path = require('path');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const PREFIX = 'leerness-runtime-repl-';
-// Match state-git canonicalDirectory: Windows' JS realpath preserves path case
-// and short-name aliases, so an exact argv guard would reject a valid Git query.
+ 
+ 
 const tempParent = fs.realpathSync.native(os.tmpdir());
 const REPLY = 'LOCAL_REPL_FIXTURE_REPLY';
 const MESSAGE = 'local fixture conversation';
@@ -69,8 +69,8 @@ function compileRepl(root, observations) {
       return runtime.withRuntimeWrites(target, fn, options);
     } };
   };
-  // Append only test access and provider dependency injection. The REPL body,
-  // readline, session writer, and admission implementation remain unchanged.
+   
+   
   compiled._compile(fs.readFileSync(CLI, 'utf8') + `
     module.exports.__replProbe = {
       run: _agentRepl,
@@ -110,7 +110,7 @@ async function childMain(root) {
   };
   const repl = compileRepl(root, observations);
   const runtime = require('../lib/runtime-writes');
-  // Match the long-lived outer operation used by the real CLI entry point.
+   
   const session = runtime.withRuntimeWrites(root, () => repl(root, {
     provider: 'codex', model: 'fixture-model', stream: false, autoFallback: false,
   }));
@@ -118,9 +118,9 @@ async function childMain(root) {
   await session;
   const environmentUnchanged = Object.keys(process.env).length === Object.keys(environmentBefore).length
     && Object.entries(environmentBefore).every(([key, value]) => process.env[key] === value);
-  assert(environmentUnchanged, 'REPL changed the inherited environment'); // Never print credential values on failure.
+  assert(environmentUnchanged, 'REPL changed the inherited environment');  
   process.send({ phase: 'done', exitCode: process.exitCode || 0, observations });
-  process.stdin.destroy(); // The direct export has no CLI main() exit wrapper.
+  process.stdin.destroy();  
   process.disconnect();
 }
 
@@ -186,13 +186,13 @@ async function scenario(arena, label) {
       const file = sessionFile(root);
       const before = signature(file);
       await delay(30);
-      state.child.stdin.end(); // The actual readline close event must persist.
+      state.child.stdin.end();  
       await until(state, () => state.exited, 'healthy EOF close');
       assert.strictEqual(state.code, 0, state.stderr);
       assertConversation(file);
       assert.notDeepStrictEqual(signature(file), before, 'healthy close did not write the session');
     } else {
-      makeIncompatible(root); // Different process from the real REPL writer.
+      makeIncompatible(root);  
       const before = snapshot(root);
       if (label === 'blocked-close') state.child.stdin.end();
       else state.child.stdin.write('/save\n');
@@ -225,8 +225,8 @@ function windowsTempAliasControl() {
     const key = Object.keys(env).find(candidate => candidate.toUpperCase() === name) || name;
     env[key] = alias;
   }
-  // Start a fresh copy so os.tmpdir() and all fixture paths see the alias, just
-  // as on hosted Windows runners. Only this child's launch env is changed.
+   
+   
   const result = cp.spawnSync(process.execPath, [__filename, '--temp-alias-control'], {
     cwd: path.dirname(CLI), env, encoding: 'utf8', timeout: 45000, windowsHide: true,
   });

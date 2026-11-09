@@ -37,8 +37,10 @@ Human reports group unresolved corrections under `TO_GO`, retained fixed checks
 under `FIXED_CRITERIA`, and missing owner actions under `DECISION_REQUIRED`.
 Non-blocking suggestions, scope risks and resolved issues have separate sections;
 each finding is rendered once. An unrun check requests actual verification, not a
-fabricated code correction. A stopped review still requires an owner decision and
-cannot accept another round or restart under a new ID to evade its budget.
+fabricated code correction. A stopped review requires an owner decision before a
+further round; do not restart under a new ID to evade its budget. The resume
+procedure below permits one additional review against the same criteria and
+remaining budget, including the current stage of a v2 review.
 
 The public result adds `decision` (`GO`, `NO GO` or `NOT_REVIEWED`) and a derived
 `goRequirements` index: unresolved `issueIds`, pending `criterionIds`, whether the
@@ -50,6 +52,22 @@ not another stored authority. Existing history and v1 input remain compatible:
 structured verdicts are still `PASS`, `FAIL`, `NEEDS_DECISION`, **not** `GO`/`NO GO`.
 GO is a declared review result, not deployment permission or an automatic promise
 that performing the listed actions will pass the next review.
+
+`outcome` (derived on read, also printed as `[OUTCOME]`) says which NO GO it is, so
+an orchestrating agent does not turn every NO GO into another code change:
+
+| `outcome` | Meaning | Next action |
+| --- | --- | --- |
+| `fix-required` | FAIL: an implementation defect blocks GO | change the code for the open blockers |
+| `verification-pending` | NEEDS_DECISION only because checks are unverified (or a resume allowed a re-review with no open blocker) | run the missing tests and submit their evidence; do not invent a code change |
+| `decision-pending` | NEEDS_DECISION for a dispute, scope risk, exhausted budget, unchanged source or no resolved blocker | stop automatic revisions; the owner decides |
+| `passed` | PASS | continue the existing verification and approval gates |
+| `not-reviewed` | no round yet | run the first review |
+
+A refused CLI operation returns `ok: false` with `error.kind`: `rejected` when the
+caller's input breaks the contract, `tool-error` when the ledger, stored history or
+I/O failed. A tool error is reported as a tooling blocker, never as evidence of a
+product defect or of a pass. Verdict values and exit codes are unchanged.
 
 ## The GO route
 
@@ -67,18 +85,142 @@ the same in every language. The report begins with a `[GO_ROUTE]` block:
 - when the review stopped, the owner decisions it needs instead of next steps;
 - otherwise the ordered next steps with their commands: change the implementation,
   record the attempt (`agents record completed ... --id`), request the re-review
-  (stage, reviewer, `expectedRound`, a new session for a staged review), record
-  the review (`agents record reviewed ... --feedback-round`), then later stages.
+  (stage, reviewer, `expectedRound`; for a staged review the session to continue,
+  or a session no other stage or the implementation used), record the review
+  (`agents record reviewed ... --feedback-round`), then later stages.
 
 JSON adds the same data as `result.goRoute` (`decision`, `status`, `stage`,
-`passedStages`, `laterStages`, `reviewer`, `budget`, `blockers` with their
+`passedStages`, `laterStages`, `reviewer`, `budget`, `reviewBudget`, `blockers` with their
 `checks`, `criteria`, `regression`, `decisions`, `steps`) and
 `result.nextRoundTemplate`: a skeleton of the next round with the frozen IDs,
 contract digest, expected round, stage, and every resolution and check the round
 must cover. Its `<…>` placeholders and empty evidence lists are invalid on
 purpose, so an unfilled skeleton is rejected instead of being recorded as a
-review. It is `null` after GO or a stop. Both fields are derived on read like
+review. It is `null` after GO or a stop without a valid resume decision. Both fields are derived on read like
 `goRequirements`; nothing extra is stored.
+
+## Keep the review loop short
+
+**Budget.** For ordinary work, keep the whole review, all reviewers and stages
+together, within 3 rounds: `maxRounds: 3` for one reviewer, or stages such as 2
+and 1. Round 1 reviews the full frozen scope; round 2 rechecks the reported
+findings and related regressions; round 3 confirms what remains and decides to
+stop. This is a recommendation, not a new rule: contracts keep the budget frozen in
+them (a stage without `maxRounds` still defaults to 3), so older contracts, their
+digests and idempotent replays are unchanged. `goRoute.reviewBudget` adds up all
+stages (`roundsUsed`, `maxRounds`, `remaining`, `recommendedMax: 3`) and the human
+route prints the total for staged reviews plus an advisory line when the frozen
+total is above 3. A spent budget is not GO: unresolved blockers stop as
+`NEEDS_DECISION` (`round-budget-exhausted`), resume cannot extend it, and another
+review ID for the same task is rejected (`feedback_contract_exists`).
+
+Only accepted rounds count. Rejected submissions consume nothing, and model calls
+that never produced a submitted round are not observable by Leerness; report
+them separately when they matter.
+
+**Sessions.** A new stage starts in a session that no other stage and not the
+implementation used (`feedback_session_reused`, `feedback_session_not_independent`).
+A re-review within the same stage may continue that stage's reviewer session; the
+route's `request-review` step names it in `continueSession`. For a repair re-review, give the reviewer `leerness review-feedback show REVIEW-ID --brief`,
+the diff since the last reviewed revision and actual test results. For a new
+**independent final stage**, do not provide that brief or the previous reviewer's
+verdicts/findings before the first cold inspection. Give frozen requirements,
+base/target Git commits, affected code context and actual test results instead.
+After recording the independent findings, reconcile against earlier open issues.
+Reusing a review ID does not restore conversation memory.
+
+**Scope.** The first review covers the agreed change, the related source/API/state
+boundaries, authentication, permission and data-loss risk, the related tests and
+the frozen criteria. A re-review covers the open finding IDs, the diff since the
+previously reviewed revision, the call paths that diff affects, the related
+regression tests, the frozen criteria, and real new regressions or serious risks.
+Widen it only where the change reached a new module or data boundary.
+
+**Brief view.** `show REVIEW-ID --brief` (human or `--json`, schema
+`leerness.review-feedback-brief/v1`) returns the scope, contract digest, `outcome`,
+stage and review-wide budget, open blockers with their checks and latest evidence,
+fixed criteria, the regression check, required decisions, scope-risk issues, the
+last reviewed round (source revision, attempt, session) and the IDs of resolved and
+non-blocking findings with the command for the full history. Nothing is deleted;
+`show --json` is unchanged and still returns every round and finding.
+
+**Severity.** Preferences, UX ideas and out-of-scope requests are non-blocking
+follow-ups. Severity alone does not make a medium finding non-blocking, and rarity
+does not lower a real data-loss risk. Security bypass, access to another user's
+data, data loss and a required contract violation can still block.
+
+**Tests.** Add a regression test for a reproduced defect; reuse existing tests that
+already cover it; use mutation testing only for a critical boundary whose test
+detection is uncertain; run one source through one check rather than several
+wrappers; never weaken or delete a failing security or data-integrity test.
+
+## Resume a stopped review without changing its result
+
+Read `review-feedback show REVIEW-ID --json`. When `resumeEligibility.allowed`
+is true, copy `result.nextResumeTemplate` into a decision file and fill in a
+unique decision ID, the actual owner's instruction/source, and evidence references.
+Record it with `review-feedback resume --file decision.json --path PROJECT --json`.
+Both v1 and staged v2 reviews are supported. For v2, `stageId` names the current
+stopped stage and `expectedRound` is its used round count, not the review-wide count.
+
+`resume` records a caller-declared decision; it does not contact or authenticate
+the owner. Its schema is `leerness.review-feedback-resume/v1`, with reviewId,
+taskId, contractDigest, expectedRound, lastRoundId, stopReasons, decisionId,
+decisionSource, evidence and (for staged reviews) stageId. The template includes
+the exact frozen bindings and intentionally invalid placeholders for the decision.
+All current stop reasons must be listed. Verification gaps, disputed findings,
+unchanged source and lack of resolved blockers can be re-reviewed. Serious scope
+risks require a separate scope decision and are rejected by this command; exhausted
+budgets cannot be extended. Neither condition authorizes a new review ID to evade
+the contract. `resumeEligibility.code` explains why no template is offered.
+
+A recorded decision keeps NEEDS_DECISION / NO GO, all rounds, findings, the
+reviewer, criteria, contract digest and remaining budget unchanged. Automatic
+revision stays stopped and approvalGranted stays false. Only a valid submission
+consumes the one-round permit. Rejected input does not consume it. The existing
+full coverage, reviewer/session independence and implementation-attempt checks
+still apply. Another stopped result needs a new decision bound to that result;
+a decision cannot erase stop reasons or mark an issue resolved.
+
+The exact same decision ID and content is idempotent, including retries after the
+permit has been consumed: it returns the current state and never grants another
+permit. Changed content under the same ID is rejected. Round IDs follow the same
+rule. Conflicting decisions and submissions are serialized under the existing
+canonical execution-ledger lock, with history reread under that lock.
+
+Successful `resume` normally returns process exit code 1 because the verdict
+remains NO GO. Inspect `ok: true` and `result.resumePermit`; exit 2 / `ok: false`
+means rejection. An old idempotent decision retry returns the current verdict's
+exit code, which may be 0 after a later PASS. GO remains a declared review result,
+not deployment approval.
+
+### Mixed-version ledgers
+
+The resume decision uses `review.feedback.resume_authorized` / `feedbackResume`.
+Every round after the first decision, including later stages, uses the additive
+`review.feedback.continued` / `feedbackContinuedRound` event. Ordinary v1/v2
+contract and round payloads are unchanged. Do not write those rounds as the old
+`review.feedback.submitted` event: 1.36.305 would replay them without the decision
+and fail even when showing an unrelated review in the same ledger.
+
+Version 1.36.305 can read and append unrelated reviews in this mixed ledger. For
+the resumed review, it deliberately retains the older stopped NO GO projection,
+with its older round count, and cannot continue or attest the new rounds. Use the
+new CLI/MCP process for that review's current state and review recording. New
+readers project the full history. An old process is not upgraded merely because
+the package on disk changed; verify the executable/version used by the process.
+No global restart or change to other projects is needed to preserve their reads.
+This is safe legacy readability, not a claim that old tools understand new results.
+
+### Keep product work within its scope
+
+If the installed CLI lacks resume or reports a tool/ledger error, record the error,
+review ID, digest and remaining budget as a tooling blocker. Continue independent
+product work where possible. Do not repair the verification tool, edit its ledger,
+reset a review ID, update shared installations, or stop other projects' processes
+unless that work is explicitly requested. Report product readiness separately from
+the tooling blocker and retain the existing NO GO. A tool error is not evidence
+that the product itself has a new defect or has passed review.
 
 ## Staged reviewers
 
@@ -118,7 +260,8 @@ contract with ordered `stages` instead of `reviewer` and `maxRounds`:
   review; issues keep their `stageId`.
 - A v2 round (`leerness.review-feedback-round/v2`) adds `stageId` and
   `reviewerSession`. The same model may serve several stages, but each stage
-  reviews in its own new session: a session another stage used is rejected
+  starts in its own new session, which its later re-reviews may continue: a
+  session another stage used is rejected
   (`feedback_session_reused`), and so is the session that recorded the reviewed
   implementation attempt (`feedback_session_not_independent`, compared with the
   attempt's recorded `sessionId`). Sessions are declared strings, not
@@ -138,8 +281,10 @@ contract and does not authenticate the meaning or truth of supplied evidence.
 leerness review-feedback start --stdin --path PROJECT --json
 leerness review-feedback submit --stdin --path PROJECT --json
 leerness review-feedback submit --file ROUND.json --path PROJECT --json
+leerness review-feedback resume --file DECISION.json --path PROJECT --json
 leerness review-feedback show REVIEW-ID --path PROJECT --json
 leerness review-feedback show REVIEW-ID --path PROJECT --language ko
+leerness review-feedback show REVIEW-ID --path PROJECT --brief [--json]
 ```
 
 Pipe a UTF-8 JSON document into start/submit, or name a file with `--file` (relative
@@ -154,7 +299,7 @@ malformed values fail before append. Output without `--json` presents
 `show` is read-only. Start/submit append to the existing execution ledger under
 its canonical lock; no second task database, model invocation or login is needed.
 The library equivalents are `start(root, contract)`, `submit(root, round)` and
-`show(root, reviewId)` from `leerness/lib/review-feedback`.
+`show(root, reviewId)` and `resume(root, decision)` from `leerness/lib/review-feedback`.
 
 Successful recording is distinct from a passing review: CLI exit 0 means open/PASS,
 1 means a valid recorded FAIL/NEEDS_DECISION, and 2 means rejected input/operation.
@@ -248,6 +393,20 @@ source digests. A newly discovered serious existing risk is `risk-escalation`
 (high/critical), which stops for a scope decision instead of disappearing as a
 suggestion or silently becoming another automatic revision.
 
+A pre-existing medium defect found after the first round that breaks a frozen
+criterion is recorded as `risk-escalation` with `severity: "medium"` and that
+`criterionId` (a medium escalation without a criterion, or a low one, is still
+rejected). The criterion may then be marked `failed`, and the review stops as
+NEEDS_DECISION / `new-risk-needs-decision` without inflating the severity or
+calling a pre-existing defect a regression. Before this, the only accepted shapes
+were a false `high`, a false regression or a false `passed`/`unverified` check.
+Such a round is stored as the additive `review.feedback.continued` event, because
+1.36.305 rejects a medium escalation while replaying and would fail every review in
+the ledger. 1.36.305 skips that round and keeps showing the earlier FAIL projection
+of that review; unrelated reviews stay usable. Do not continue an escalated review
+with 1.36.305: a round it appends there makes newer readers report the ledger as a
+`tool-error` (`feedback_review_stopped` from history).
+
 PASS requires all fixed criteria and the regression check to pass with no open
 blockers. Disputes, serious risks, exhausted round budget, unchanged source with
 unresolved work, or a repeated unresolved blocker set produce NEEDS_DECISION.
@@ -255,8 +414,8 @@ The repeated-set rule deliberately stops even when partial implementation effort
 occurred: evidence of effort is not evidence that a blocker was resolved.
 Stop automatic revision/review calls and show the remaining issues and evidence.
 There is no force-PASS, automatic restart, baseline-amend or budget-reset command.
-Human decisions and any later scope change must be recorded explicitly outside
-this v1 protocol; it does not itself authorize a new task or approve deployment.
+Owner decisions to re-review use the resume protocol above. Scope changes remain
+separate; this command does not authorize a new task or approve deployment.
 
 After activation, `agents record reviewed` also requires `--feedback-round ID`
 matching the latest round (in a staged review, the latest round of its stage),
@@ -280,3 +439,7 @@ independent external model review is implied by a deterministic test result.
 Run `npm run test:review-feedback` for isolated real CLI, ledger, concurrent-write,
 re-review and refusal cases. Generated instructions apply on installation or
 migration to this version; existing unrelated projects are not edited remotely.
+
+## Resume decision boundary
+
+A decision permits one submission. It is never a review result, identity proof, issue waiver, scope change, budget extension, or deployment approval. This is the contract implemented by `lib/review-feedback-resume.js`; moving this explanation out of source does not change its checks.

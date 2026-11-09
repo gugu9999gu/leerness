@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Provider-capacity observation must never turn installation, enablement, or generic
-// authentication into a model-entitlement or remaining-quota claim. All provider
-// executables here are local fakes. They record every invocation and whether a secret
-// loaded from the project .env reached the child environment.
+ 
+ 
+ 
+ 
 
 const fs = require('fs');
 const os = require('os');
@@ -57,7 +57,7 @@ function appendSource(file, text) {
 function writeWindowsNodeShim(dir, name, source) {
   const entry = `${name}.js`;
   fs.writeFileSync(path.join(dir, entry), source, 'utf8');
-  // Narrow npm-style shim accepted by portable-process without cmd.exe execution.
+   
   fs.writeFileSync(path.join(dir, `${name}.cmd`), [
     '@ECHO off',
     `"%_prog%" "%dp0%\\${entry}" %*`,
@@ -327,7 +327,7 @@ try {
     lines(authMarker).length === 4 && lines(authMarker).every(line => line === 'auth-check'),
     `auth=${JSON.stringify(lines(authMarker))}`);
 
-  // Disable only Codex: neither its version command nor auth command may execute.
+   
   fs.writeFileSync(path.join(root, '.env'), envFile(allIds.filter(id => id !== 'codex')), 'utf8');
   const codexCommandsBefore = countPrefix(commandMarker, 'codex:');
   const authBefore = lines(authMarker).length;
@@ -353,9 +353,9 @@ try {
       && disabledData.policy.presenceOnlyChecks.includes('codex'),
     `commands=${JSON.stringify(lines(commandMarker))} row=${JSON.stringify(disabledCodex)} policy=${JSON.stringify(disabledData && disabledData.policy)}`);
 
-  // A path merely ending in a built-in filename is a different executable
-  // authority. It may be version-probed when explicitly enabled, but must not
-  // inherit the built-in's privileged authentication subcommand.
+   
+   
+   
   const spoofDir = path.join(root, 'tools');
   fs.mkdirSync(spoofDir, { recursive: true });
   writeNodeExecutable(spoofDir, 'codex', codexSource(commandMarker, authMarker, secretMarker));
@@ -384,7 +384,7 @@ try {
     }],
   }, null, 2) + '\n', 'utf8');
 
-  // Disable every provider: the entire command must be observation-only with no provider process spawn.
+   
   fs.writeFileSync(path.join(root, '.env'), envFile([]), 'utf8');
   const commandCountBeforeAllDisabled = lines(commandMarker).length;
   const allDisabledResult = runCapacity(isolatedEnv(binDir));

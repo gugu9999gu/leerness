@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Real CLI regressions for the configuration consumed by Codex/Claude hooks.
+ 
 const fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');
 const assert = require('assert/strict');
 const selection = process.argv.slice(2);
@@ -115,7 +115,7 @@ try {
     assert.equal(q.status, 0); assert.equal(q.stdout, ''); assert.equal(q.stderr, '');
   });
 } finally {
-  // Only the exact fresh fixture owned by this process is removed.
+   
   assert(path.dirname(root) === os.tmpdir() && path.basename(root).startsWith('leerness hooks '));
   fs.rmSync(root, { recursive: true, force: true });
 }

@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -176,7 +176,7 @@ async function main() {
   await test('two processes race at execution fence: exactly one POST', async () => {
     const s = setup(), gate = path.join(arena, 'race'), n = posts();
     const first = worker(s, 'before-start'); assert.equal(await first.phase, 'before-start');
-    first.child.kill(); await first.done; // Establish the same durable reservation/intent for both competitors.
+    first.child.kill(); await first.done;  
     const a = worker(s, 'before-start', gate), b = worker(s, 'before-start', gate);
     assert.equal(await a.phase, 'before-start'); assert.equal(await b.phase, 'before-start'); fs.writeFileSync(gate, 'go');
     const results = await Promise.all([a.done, b.done]);

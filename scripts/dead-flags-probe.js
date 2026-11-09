@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0094: advertised options must change observable behavior (or fail closed).
-// This probe intentionally uses isolated projects and real CLI processes so a
-// flag that is merely present in source/help cannot pass.
+ 
+ 
+ 
 
 const fs = require('fs');
 const os = require('os');
@@ -253,8 +253,8 @@ async function main() {
 
   await check('provider add persists and exposes env/version/description options', () => {
     const root = temp('leerness-dead-provider-');
-    // A value that itself starts with "--" uses the CLI's documented
-    // --flag=value spelling so it cannot be mistaken for another option.
+     
+     
     const add = run(['provider', 'add', 'probeai', '--bin', 'probe-ai', '--env-flag', 'PROBE_AI_ON', '--version-args=--version --verbose', '--desc', 'Probe provider', '--path', root]);
     assert(add.status === 0, `provider add failed: ${(add.stdout || add.stderr).slice(0, 240)}`);
     const stored = JSON.parse(fs.readFileSync(path.join(root, '.leerness', 'providers.json'), 'utf8'));

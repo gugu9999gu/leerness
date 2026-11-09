@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0022: destructive shell-encoding repair must fail closed when encoding
-// provenance, file identity, metadata, or concurrent-writer state is uncertain.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -92,13 +92,13 @@ try {
     init(dir);
     const fixtures = {
       'legacy-cp949.ps1': Buffer.concat([Buffer.from('Write-Host "', 'ascii'), Buffer.from([0xBE, 0xC8, 0xB3, 0xE7]), Buffer.from('"\r\n', 'ascii')]),
-      'ambiguous.ps1': Buffer.from([0x41, 0xC2, 0xA1, 0x42]), // UTF-8 A¡B, CP949 A징B
+      'ambiguous.ps1': Buffer.from([0x41, 0xC2, 0xA1, 0x42]),  
       'corrupt-bom.ps1': Buffer.concat([BOM, Buffer.from([0xBE, 0xC8, 0xB3, 0xE7])]),
       'shebang.sh': Buffer.from('#!/bin/sh\nprintf "안녕\\n"\n', 'utf8'),
       'batch.cmd': Buffer.from('@echo off\r\necho 안녕\r\n', 'utf8'),
       'batch.bat': Buffer.from('@echo off\r\necho 안녕\r\n', 'utf8'),
-      // Emoji contains a CP949-invalid 0x80 trail byte, providing explicit
-      // byte-level evidence that this body is not a valid legacy Korean file.
+       
+       
       'safe.ps1': Buffer.from('Write-Host "😀"\r\n', 'utf8'),
     };
     for (const [name, body] of Object.entries(fixtures)) fs.writeFileSync(path.join(dir, name), body);
@@ -179,8 +179,8 @@ try {
   const originalWriter = io.writeBufferIfUnchanged;
   const shellEncoding = require(shellPath);
 
-  // Encoding provenance: both-byte-valid input and a corrupt BOM body must be
-  // rejected, while a UTF-8 body invalid under CP949 remains eligible.
+   
+   
   passed = check(shellEncoding.planShellScriptUtf8Bom('x.ps1', Buffer.from([0x41, 0xC2, 0xA1, 0x42])).action.startsWith('skipped-ambiguous'), 'UTF-8/CP949 ambiguity fails closed') && passed;
   passed = check(shellEncoding.planShellScriptUtf8Bom('x.ps1', Buffer.concat([BOM, Buffer.from([0xBE, 0xC8])])).action.startsWith('skipped-invalid-bom-body'), 'BOM-prefixed CP949 corruption is detected') && passed;
   passed = check(shellEncoding.planShellScriptUtf8Bom('x.ps1', Buffer.from('Write-Host "😀"', 'utf8')).action === 'utf8-bom-added', 'unambiguous UTF-8 remains repairable') && passed;
@@ -197,7 +197,7 @@ try {
     global.TextDecoder = NativeTextDecoder;
   }
 
-  // Scanner I/O denial is data, never a clean scan.
+   
   const scanDir = path.join(tempRoot, 'scan-errors');
   fs.mkdirSync(scanDir);
   const deniedFile = path.join(scanDir, 'denied.ps1');
@@ -214,7 +214,7 @@ try {
   const concurrentDir = path.join(tempRoot, 'concurrent-cas');
   fs.mkdirSync(concurrentDir);
   if (process.platform === 'win32') {
-    // Stale plan between caller read and shared writer.
+     
     const staleFile = path.join(concurrentDir, 'stale.ps1');
     const staleOriginal = Buffer.from('Write-Host "😀"\r\n', 'utf8');
     const staleConcurrent = Buffer.from('Write-Host "CONCURRENT 😀"\r\n', 'utf8');
@@ -231,8 +231,8 @@ try {
     passed = check(staleError && staleError.code === 'E_CONCURRENT_MODIFICATION', 'shared mutator rejects a stale concurrent plan') && passed;
     passed = check(fs.readFileSync(staleFile).equals(staleConcurrent), 'stale-plan concurrent edit survives byte-exact') && passed;
 
-    // Final compare -> ReplaceFile window. No risky rollback: the concurrent
-    // file object remains at a reported recovery path.
+     
+     
     const raceFile = path.join(concurrentDir, 'replace-race.ps1');
     const raceExpected = Buffer.from('race-expected');
     const racePlanned = Buffer.concat([BOM, raceExpected]);
@@ -251,8 +251,8 @@ try {
     passed = check(Array.isArray(raceError.recoveryArtifacts) && raceError.recoveryArtifacts.some(a => a.content === 'concurrent-or-unknown'), 'recovery artifacts expose byte roles') && passed;
     cleanupRecovery([raceError.backupFile]);
 
-    // A handle opened before replacement may write to the displaced file after
-    // validation. Retaining (rather than deleting) that file prevents loss.
+     
+     
     const lateFile = path.join(concurrentDir, 'late-handle.ps1');
     const lateExpected = Buffer.from('late-original');
     const latePlanned = Buffer.concat([BOM, lateExpected]);
@@ -267,7 +267,7 @@ try {
     passed = check(fs.readFileSync(lateResult.backupFile).equals(lateBytes), 'late displaced-handle write remains recoverable') && passed;
     cleanupRecovery([lateResult.backupFile]);
 
-    // ADS handle update follows the same retained file object.
+     
     const adsFile = path.join(concurrentDir, 'ads-late.ps1');
     const adsExpected = Buffer.from('ads-original');
     const adsPlanned = Buffer.concat([BOM, adsExpected]);
@@ -282,8 +282,8 @@ try {
     passed = check(fs.readFileSync(adsResult.backupFile + ':Zone.Identifier', 'utf8') === 'NEW-ADS', 'late ADS update survives on retained recovery file') && passed;
     cleanupRecovery([adsResult.backupFile]);
 
-    // Same-content hard-link creation in the last window is detected from the
-    // displaced file identity/link count and its alias remains intact.
+     
+     
     const linkRaceFile = path.join(concurrentDir, 'link-race.ps1');
     const linkAlias = path.join(concurrentDir, 'link-race-alias.ps1');
     const linkExpected = Buffer.from('link-original');
@@ -301,8 +301,8 @@ try {
     fs.unlinkSync(linkAlias);
     cleanupRecovery([linkRaceError.backupFile]);
 
-    // Documented ReplaceFileW 1177 partial progress: target moved to backup,
-    // planned source remains, and target path is absent. Both roles are exposed.
+     
+     
     const partialFile = path.join(concurrentDir, 'partial-1177.ps1');
     const partialExpected = Buffer.from('partial-original');
     const partialPlanned = Buffer.concat([BOM, partialExpected]);
@@ -322,7 +322,73 @@ try {
     passed = check(partialRoles.has('planned-source:planned-replacement') && partialRoles.has('displaced-original:expected-original'), '1177 exposes both artifacts with validated roles', JSON.stringify(partialError.recoveryArtifacts)) && passed;
     cleanupRecovery([partialError.backupFile]);
 
-    // Cleanup exhaustion must become an explicit retained artifact, not success.
+     
+    const sharedProject = path.join(concurrentDir, 'shared-recovery');
+    const sharedRecovery = path.join(sharedProject, '.leerness', 'archive', 'mutation-recovery');
+    const sharedStore = path.join(sharedProject, '.leerness', 'lessons.json');
+    fs.mkdirSync(path.dirname(sharedStore), { recursive: true });
+    fs.writeFileSync(sharedStore, 'store-0');
+    const sharedScratches = dir => { try { return fs.readdirSync(dir).filter(name => name.startsWith('.leerness-write-')); } catch (e) { if (e.code === 'ENOENT') return []; throw e; } };
+    const realRmdir = fs.rmdirSync;
+    const rmdirCalls = [];
+    fs.rmdirSync = (file, ...args) => { rmdirCalls.push(path.resolve(String(file))); return realRmdir(file, ...args); };
+    try { originalWriter(sharedStore, Buffer.from('store-0'), Buffer.from('store-1'), { retainBackup: false }); }
+    finally { fs.rmdirSync = realRmdir; }
+    passed = check(fs.readFileSync(sharedStore, 'utf8') === 'store-1' && sharedScratches(sharedRecovery).length === 0, 'a publication that keeps no backup leaves no scratch folder') && passed;
+    passed = check(fs.existsSync(sharedRecovery) && !rmdirCalls.includes(path.resolve(sharedRecovery)), 'a finished write never removes the recovery folder other stores share', JSON.stringify(rmdirCalls)) && passed;
+
+    const realMkdtemp = fs.mkdtempSync;
+    const vanishing = (times, fail = null) => {
+      let left = times, seen = 0;
+      fs.mkdtempSync = (prefix, ...args) => {
+        if (path.dirname(String(prefix)) === sharedRecovery) { seen++; if (fail) throw fail; if (left-- > 0) realRmdir(sharedRecovery); }
+        return realMkdtemp(prefix, ...args);
+      };
+      return () => seen;
+    };
+    let tries = vanishing(1), scratchError = null;
+    try { originalWriter(sharedStore, Buffer.from('store-1'), Buffer.from('store-2'), { retainBackup: false }); } catch (e) { scratchError = e; }
+    finally { fs.mkdtempSync = realMkdtemp; }
+    passed = check(!scratchError && fs.readFileSync(sharedStore, 'utf8') === 'store-2' && tries() === 2, 'a recovery folder that vanishes before the scratch folder is made again', String(scratchError)) && passed;
+    passed = check(fs.existsSync(sharedRecovery) && sharedScratches(sharedRecovery).length === 0, 'the write that made it again leaves the folder and no scratch') && passed;
+
+    tries = vanishing(2);
+    scratchError = null;
+    try { originalWriter(sharedStore, Buffer.from('store-2'), Buffer.from('store-3'), { retainBackup: false }); } catch (e) { scratchError = e; }
+    finally { fs.mkdtempSync = realMkdtemp; }
+    passed = check(!scratchError && fs.readFileSync(sharedStore, 'utf8') === 'store-3' && tries() === 3, 'a folder that vanishes twice still does not fail the write', String(scratchError)) && passed;
+
+    tries = vanishing(3);
+    scratchError = null;
+    try { originalWriter(sharedStore, Buffer.from('store-3'), Buffer.from('store-4'), { retainBackup: false }); } catch (e) { scratchError = e; }
+    finally { fs.mkdtempSync = realMkdtemp; }
+    passed = check(scratchError && scratchError.code === 'ENOENT' && fs.readFileSync(sharedStore, 'utf8') === 'store-3' && tries() === 3, 'the third miss stops the write before the store changes', String(scratchError)) && passed;
+    passed = check(sharedScratches(path.dirname(sharedStore)).length === 0, 'no scratch folder goes beside a store when the recovery folder keeps missing') && passed;
+
+    const longPathMiss = Object.assign(new Error('simulated mkdtemp miss on a long path'), { code: 'ENOENT' });
+    fs.mkdirSync(sharedRecovery, { recursive: true });
+    tries = vanishing(0, longPathMiss);
+    scratchError = null;
+    try { originalWriter(sharedStore, Buffer.from('store-3'), Buffer.from('store-4'), { retainBackup: false }); } catch (e) { scratchError = e; }
+    finally { fs.mkdtempSync = realMkdtemp; }
+    passed = check(scratchError === longPathMiss && fs.readFileSync(sharedStore, 'utf8') === 'store-3' && sharedScratches(path.dirname(sharedStore)).length === 0, 'ENOENT with the folder still there is refused the same way, nothing beside the store', String(scratchError)) && passed;
+
+    const denied = Object.assign(new Error('simulated denial'), { code: 'EACCES' });
+    tries = vanishing(0, denied);
+    scratchError = null;
+    try { originalWriter(sharedStore, Buffer.from('store-3'), Buffer.from('store-4'), { retainBackup: false }); } catch (e) { scratchError = e; }
+    finally { fs.mkdtempSync = realMkdtemp; }
+    passed = check(scratchError === denied && tries() === 1 && fs.readFileSync(sharedStore, 'utf8') === 'store-3', 'any other scratch failure stops at once, before the store changes', String(scratchError)) && passed;
+
+    const blockedProject = path.join(concurrentDir, 'blocked-recovery');
+    const blockedStore = path.join(blockedProject, '.leerness', 'lessons.json');
+    fs.mkdirSync(path.dirname(blockedStore), { recursive: true });
+    fs.writeFileSync(path.join(blockedProject, '.leerness', 'archive'), 'a file where the folder should be');
+    fs.writeFileSync(blockedStore, 'blocked-0');
+    scratchError = null;
+    try { originalWriter(blockedStore, Buffer.from('blocked-0'), Buffer.from('blocked-1'), { retainBackup: false }); } catch (e) { scratchError = e; }
+    passed = check(!scratchError && fs.readFileSync(blockedStore, 'utf8') === 'blocked-1' && sharedScratches(path.dirname(blockedStore)).length === 0, 'a recovery folder that cannot be made sends the scratch folder beside the store', String(scratchError)) && passed;
+
     const cleanupFile = path.join(concurrentDir, 'cleanup-denied.ps1');
     const cleanupExpected = Buffer.from('cleanup-original');
     fs.writeFileSync(cleanupFile, cleanupExpected);
@@ -344,7 +410,7 @@ try {
     const cleanupScratch = cleanupError.recoveryArtifacts.find(a => a.role === 'cleanup-failed-scratch').path;
     cleanupRecovery([cleanupScratch]);
 
-    // A reserved scratch directory is not authority to delete unexpected data.
+     
     const unexpectedFile = path.join(concurrentDir, 'unexpected-scratch.ps1');
     fs.writeFileSync(unexpectedFile, cleanupExpected);
     const originalMkdtemp = fs.mkdtempSync;
@@ -366,7 +432,7 @@ try {
     'nonempty scratch is retained with an explicit cleanup notice') && passed;
     cleanupRecovery([unexpectedResult.cleanupDirectory]);
 
-    // Retry only no-progress Win32 sharing violations.
+     
     const retryFile = path.join(concurrentDir, 'transient-sharing.ps1');
     const retryExpected = Buffer.from('retry-original');
     const retryPlanned = Buffer.concat([BOM, retryExpected]);
@@ -392,7 +458,7 @@ try {
     passed = check(result.action.startsWith('skipped-platform') && fs.readFileSync(posixFile).equals(posixBytes), 'POSIX policy rejects metadata-loss replacement byte-exactly') && passed;
   }
 
-  // Filesystem preconditions outside the direct writer.
+   
   const protectedDir = path.join(tempRoot, 'filesystem-contracts');
   fs.mkdirSync(protectedDir);
   const readOnlyFile = path.join(protectedDir, 'readonly.ps1');
@@ -436,11 +502,11 @@ try {
     if (!['EPERM', 'EACCES', 'UNKNOWN'].includes(e.code)) throw e;
   }
 
-  // Direct drift DI probes: one failed stage must be JSON-visible/exit 1.
+   
   const drift = require('../lib/drift');
 
-  // An unborn repository is valid and has no release refs to clean. Do not
-  // ask Git to resolve `main` until the cleanup threshold can be reached.
+   
+   
   const unbornDir = path.join(tempRoot, 'drift-unborn-git');
   const gitInit = cp.spawnSync('git', ['init', unbornDir], { encoding: 'utf8', timeout: 30000 });
   passed = check(gitInit.status === 0, 'unborn Git fixture initializes', (gitInit.stderr || '').slice(0, 300)) && passed;
@@ -488,8 +554,8 @@ try {
     && driftJson.autoFixSummary.stages.idempotency.status === 'failed', 'non-encoding drift auto-fix failure is JSON-visible and exits 1', driftOut.slice(0, 300)) && passed;
   process.exitCode = savedExit;
 
-  // A missing Git executable is an operational failure, not evidence that the
-  // path is outside a worktree. Preserve the failure in JSON and the exit code.
+   
+   
   const missingGitDeps = {
     ...driftDeps,
     _autoFixIdempotency: () => [],
@@ -509,11 +575,11 @@ try {
   'missing Git executable is JSON-visible and exits 1', missingGitOut.slice(0, 300)) && passed;
   process.exitCode = savedExit;
 
-  // Security + critical drift must still run session recovery in the same pass.
+   
   const combinedDir = path.join(tempRoot, 'drift-security-critical');
   fs.mkdirSync(path.join(combinedDir, '.leerness'), { recursive: true });
-  // The DI fixture writes a synthetic usage.json, unlike the real cache path.
-  // Establish workspace ownership before exercising its recovery sequence.
+   
+   
   fs.writeFileSync(path.join(combinedDir, '.leerness', 'HARNESS_VERSION'), 'fixture\n');
   fs.writeFileSync(path.join(combinedDir, '.env'), 'TOKEN=value\n');
   fs.writeFileSync(path.join(combinedDir, '.gitignore'), 'node_modules/\n');

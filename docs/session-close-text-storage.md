@@ -32,13 +32,27 @@ retrying. Invalid UTF-8 and unpaired generated Unicode are rejected. Valid
 Korean, other languages, combining marks, symbols and literal replacement
 characters remain valid input. This does not detect every damaged sentence.
 
-The existing handoff generated-body replacement policy is unchanged: only
-leading, closed frontmatter is retained. Empty frontmatter is valid; LF, CRLF
-and a closing delimiter at EOF are supported. An unclosed leading frontmatter
-block now fails without publication. Separators inside the old body are not
-interpreted as frontmatter. Current state keeps its existing automatic-line
-policy and authored sections. New generated lines use the existing LF style;
-this is not a promise to retain every whole-document line ending.
+An owner-curated current handoff is retained inside its markers. Session close
+repairs only the canonical task bullet under Next Exact Step, or inserts it if
+absent. Paragraphs, examples, other bullets, CRLF, frontmatter and outer history
+are retained. Headings and task bullets inside backtick/tilde code fences are not
+instructions. An exact canonical action is unchanged; a longer obsolete action
+containing the new action as a substring is not accepted. Multiple real Next
+headings or task bullets fail before publication rather than selecting one or
+silently erasing user text.
+
+A generated region (identified by an unfenced Last generated stamp before
+Completed) still refreshes its sections. Generated Next Exact Step lines include
+the task ID. Legacy text and non-generated notes keep the existing preservation
+behavior in context-current. This is a bounded compatibility rule, not universal
+proof of whether a human or a template authored a line. Current state keeps its
+existing automatic-line policy. Graph HTML omits the synthetic absolute root
+metadata field; authored paths inside project documents are not silently redacted.
+
+Closed frontmatter, including empty frontmatter and a closing delimiter at EOF,
+is retained. An unclosed frontmatter block fails without publication. Existing
+selected-document byte limits, lock, source recheck and publisher boundaries are
+unchanged.
 
 ## Failure and limits
 

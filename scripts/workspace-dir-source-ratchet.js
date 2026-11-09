@@ -27,12 +27,12 @@ function inspect(rel) {
   const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
-    // E2E fixtures may name the one supported legacy directory explicitly.
-    // Requiring this line-local marker keeps the exception reviewable instead
-    // of exempting the entire (large) E2E suite from the production ratchet.
+     
+     
+     
     if (lines[i].includes('workspace-dir-legacy-fixture')) continue;
-    // Match the legacy directory token, not compatible data fields such as
-    // `versionSkew.harnessVersion` that happen to share the same characters.
+     
+     
     if (/\.harness(?=$|[\\/"'`\s])/.test(lines[i])) violations.push(`${rel.replace(/\\/g, '/')}:${i + 1}`);
   }
 }

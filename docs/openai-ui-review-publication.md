@@ -64,9 +64,11 @@ Git and JSONL are separate storage boundaries. Append or ref acknowledgement can
 be lost after writing. Errors do not imply rollback. Re-read the actual journal
 and ledger before an explicit retry; never resend POST, delete uncertain bytes
 or silently overwrite a conflict. A process killed while holding the ledger lock
-leaves an owner record: the shared lock refuses automatic takeover. Operator
-recovery requires establishing the previous owner has ended. No lock-recovery
-command, directory durability guarantee or physical power-loss guarantee is added.
+leaves an owner record: the next writer reclaims the lock once the owner is proven
+dead on the same host (see [state-store-locking](state-store-locking.md)). Reclaim
+touches the lock folder and a leftover second name of the same file, never ledger
+bytes, and admission still rejects bad history; the retry rules above stay. No lock-recovery command, directory durability
+guarantee or physical power-loss guarantee is added.
 External filesystem edits and actors able to rewrite all local Git history are
 outside fencing guarantees. Owner, original input/profile and material checks
 still apply; old history is not permission to write after ownership changes.

@@ -157,8 +157,8 @@ test('multibyte raw input uses byte count', () => {
   assert.deepEqual(report.reasonCodes, ['input_budget_exceeded']);
 });
 
-// Compare the counter against the real existing serializers, not another copy
-// of its formula. Includes escaping, C0/C1 controls, astral Unicode and fields.
+ 
+ 
 test('generated-format byte measurements match 160 varied writer outputs', () => {
   const samples = ['가', '😀', '"\\', '\u0001', '\b\t\f\r', '\u0080\u009f', '\u2028\u2029', 'one two'];
   for (const surface of ['decisions', 'lessons']) for (let i = 0; i < 80; i++) {

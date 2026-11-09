@@ -1,18 +1,18 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const S=require('./memory-write-budget-support');
 const {assert,fs,path,cp,test,finish,fixture,arena}=S;
 const os=require('os'),runtime=require('../lib/runtime-writes'),{attachMemoryRecovery}=require('../lib/memory-recovery');
-// Node 18 writeFileSync dispatches through the later intercepted writeSync.
-// Capture primitive fixture writers before installing interception, so descriptor
-// changes represent an external writer rather than the guarded operation itself.
+ 
+ 
+ 
 const rawOpen=fs.openSync.bind(fs),rawWriteSync=fs.writeSync.bind(fs),rawClose=fs.closeSync.bind(fs),rawRename=fs.renameSync.bind(fs);
 const rawSymlink=fs.symlinkSync.bind(fs),rawUnlink=fs.unlinkSync.bind(fs),rawRmdir=fs.rmdirSync.bind(fs);
 const rawUnlinkLink=link=>{try{rawUnlink(link);}catch{rawRmdir(link);}};
 function rawWrite(file,text){const fd=rawOpen(file,'w');try{rawWriteSync(fd,Buffer.from(text));}finally{rawClose(fd);}}
 const descriptor={schema:'leerness.runtime-layout/v1',schemaVersion:1,scope:'project-local',generation:1,layout:'legacy',requiredWriterProtocol:1};
-// Begin in the supported implicit legacy layout. Creating an incompatible
-// descriptor inside the operation then exercises the existing failure latch.
+ 
+ 
 function project(){const p=fixture();fs.mkdirSync(path.join(p,'.leerness','cache'));return p;}
 function latch(p,fn){
   let observed=false,innerError,outer;
@@ -39,8 +39,8 @@ test('a temp directory inside the project is rejected before producer work',()=>
     os.tmpdir=()=>p;try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{os.tmpdir=original;}
   });assert.equal(called,false);
 });
-// T-0349: the same folder spelled so that its text is outside the project: through a link placed outside it, and
-// on Windows by its 8.3 short name. The guard compared spellings only and let both through.
+ 
+ 
 function shortName(p){const r=cp.spawnSync(process.env.ComSpec||'cmd.exe',['/d','/s','/c',`"for %I in ("${p}") do @echo %~sI"`],{encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true});const out=String(r.stdout||'').trim();return r.status===0&&out&&!out.includes('"')&&out.toLowerCase()!==p.toLowerCase()?out:null;}
 const insideSpellings=[['a link outside the project',(p,inside)=>{const link=p+'-temp-link';fs.symlinkSync(inside,link,process.platform==='win32'?'junction':'dir');return link;}],
   ...(process.platform==='win32'?[['its 8.3 short name',(p,inside)=>shortName(inside)]]:[])];
@@ -54,16 +54,16 @@ for(const [name,spell] of insideSpellings){
     });assert.equal(called,false);assert.deepEqual(fs.readdirSync(inside),[]);
   });
 }
-// T-0349 review: a project folder renamed away while the operation runs has no real path. Its recovery must still be
-// written outside it, as before; only a temp folder that does not resolve is refused.
+ 
+ 
 test('a project renamed away during the operation still gets its recovery outside it',()=>{
   const p=project(),moved=p+'-moved';let dir;latch(p,()=>{
     rawRename(p,moved);try{dir=runtime.writeExternalRecoveryStream(p,sink=>sink.write('before.bin',put=>put(Buffer.from('before'))),8);}finally{rawRename(moved,p);}
   });
   external.push(dir);assert(path.relative(p,dir).startsWith('..'));assert.equal(fs.readFileSync(path.join(dir,'before.bin'),'utf8'),'before');
 });
-// Review round 1: a child folder whose name starts with two dots is inside the project, named directly and through a
-// link outside the project (only the real paths then show it).
+ 
+ 
 for(const [name,spell] of [['directly',(p,inside)=>inside],['through a link outside the project',(p,inside)=>{const link=p+'-dots-link';fs.symlinkSync(inside,link,process.platform==='win32'?'junction':'dir');return link;}]]){
   test('a temp folder inside the project whose name starts with two dots, named '+name+', is rejected before producer work',()=>{
     const p=project(),inside=path.join(p,'..temp');fs.mkdirSync(inside);const spelled=spell(p,inside),original=os.tmpdir;let called=false;latch(p,()=>{
@@ -77,8 +77,8 @@ test('a project path that fails to resolve for a reason other than absence is re
     try{assert.throws(()=>runtime.writeExternalRecoveryStream(p,()=>{called=true;},8),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{fs.realpathSync.native=original;}
   });assert.equal(called,false);
 });
-// Review round 2: the temp link is retargeted into the project after it was checked (here, while the guard resolves
-// the project path). The bundle must still go below the folder that was checked.
+ 
+ 
 test('a temp link retargeted into the project after the check still gets the recovery outside the project',()=>{
   const p=project(),inside=path.join(p,'temp-after-retarget');fs.mkdirSync(inside);
   const safe=fs.mkdtempSync(path.join(path.dirname(p),'safe-temp-')),link=p+'-temp-retarget-link',type=process.platform==='win32'?'junction':'dir';
@@ -92,6 +92,19 @@ test('a temp link retargeted into the project after the check still gets the rec
   external.push(dir);assert(retargeted,'the link must have been retargeted during the check');
   assert.deepEqual(fs.readdirSync(inside),[]);assert.equal(fs.readFileSync(path.join(dir,'before.bin'),'utf8'),'before');
   assert(path.relative(fs.realpathSync.native(p),fs.realpathSync.native(dir)).split(path.sep)[0]==='..','the recovery must be outside the project: '+dir);
+});
+for(const [label,write] of [['stream',p=>runtime.writeExternalRecoveryStream(p,()=>{throw new Error('producer must not run');},8)],['bundle',p=>runtime.writeExternalRecoveryBundle(p,[{name:'receipt.json',bytes:Buffer.from('{}')}])]])test('T-0356 '+label+': the checked real temp folder swapped for a link into the project before mkdtemp is refused and leaves nothing inside',()=>{
+  const p=project(),inside=path.join(p,'temp-swapped-in');fs.mkdirSync(inside);
+  const realTemp=fs.mkdtempSync(path.join(path.dirname(p),'real-temp-')),moved=realTemp+'-moved',type=process.platform==='win32'?'junction':'dir';
+  const originalTmp=os.tmpdir,originalReal=fs.realpathSync.native;let swapped=false;
+  try{
+    latch(p,()=>{
+      os.tmpdir=()=>realTemp;
+      fs.realpathSync.native=function(q,...rest){const r=originalReal.call(this,q,...rest);if(!swapped&&path.resolve(String(q))===path.resolve(p)){swapped=true;rawRename(realTemp,moved);rawSymlink(inside,realTemp,type);}return r;};
+      try{assert.throws(()=>write(p),e=>e.code==='E_RECOVERY_TEMP_UNSAFE');}finally{os.tmpdir=originalTmp;fs.realpathSync.native=originalReal;}
+    });
+    assert(swapped,'the folder must have been swapped during the check');assert.deepEqual(fs.readdirSync(inside),[]);
+  }finally{if(swapped){rawUnlinkLink(realTemp);rawRename(moved,realTemp);}}
 });
 test('a missing temp folder is refused when the project path is gone too',()=>{
   const p=project(),moved=p+'-moved-too',original=os.tmpdir;let called=false;latch(p,()=>{
@@ -139,8 +152,8 @@ test('layout failure after a primary copy preserves both attempts and charges re
 for(const failReceipt of [false,true])test('streaming full recovery after layout latch '+(failReceipt?'retains failed external receipt':'preserves before/live/cause and costs'),()=>{
   const p=project(),source=path.join(p,'source'),cause=path.join(p,'cause');fs.writeFileSync(source,Buffer.alloc(65539,70));fs.writeFileSync(cause,Buffer.from('cause'));
   const error=Object.assign(new Error('publication'),{code:'EIO',backupFile:cause});
-  // A producer-side failure simulates receipt serialization failure without
-  // replacing or weakening the runtime sink's private write primitives.
+   
+   
   const stringify=JSON.stringify;let rawReads=0;const read=fs.readFileSync;
   latch(p,()=>{
     fs.readFileSync=function(file,...args){if(file===source||file===cause)rawReads++;return read.call(fs,file,...args);};
@@ -177,5 +190,111 @@ test('128 MiB accounting ceiling uses a counting write primitive without allocat
   const result=cp.spawnSync(process.execPath,['-e','('+child.toString()+')()',p,modulePath],{cwd:arena,env,encoding:'utf8',timeout:30000,windowsHide:true});
   assert.equal(result.status,0,result.stderr);assert(result.stdout.includes('COUNTING_CAP_PASS'));
 });
+{
+  const crypto=require('crypto'),observations=[];
+  function inventory(root){
+    const rows={};
+    function visit(file){
+      const s=fs.lstatSync(file,{bigint:true});
+      const row=Object.fromEntries(['dev','ino','mode','nlink','size','mtimeNs','ctimeNs'].map(k=>[k,String(s[k])]));
+      if(s.isSymbolicLink())row.link=fs.readlinkSync(file);
+      else if(s.isFile())row.sha256=crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      rows[path.relative(root,file)]=row;
+      if(s.isDirectory()&&!s.isSymbolicLink())for(const name of fs.readdirSync(file).sort())visit(path.join(file,name));
+    }
+    visit(root);return rows;
+  }
+  function outcome(fn){try{return{returned:fn()};}catch(e){return{code:e.code,message:e.message};}}
+  function save(row){observations.push(row);fs.writeFileSync(path.join(arena,'recovery-guard-observations.json'),JSON.stringify(observations,null,2));}
+  function alias(p,name,long){
+    let parent=path.join(arena,name);
+    if(long){while(parent.length+62<260)parent=path.join(parent,'x'.repeat(60));}
+    fs.mkdirSync(parent,{recursive:true});
+    const link=path.join(parent,long?'j'.repeat(270-parent.length-1):'alias');
+    if(long)assert.equal(link.length,270);
+    rawSymlink(p,link,process.platform==='win32'?'junction':'dir');return link;
+  }
+  function geometry(p,link){
+    const real=fs.realpathSync.native(path.toNamespacedPath(link));
+    const canonicalProject=fs.realpathSync.native(p);
+    const identity=file=>{const s=fs.statSync(file,{bigint:true});return[s.dev,s.ino,s.mode,s.nlink].map(String);};
+    assert.equal(real,canonicalProject);assert.deepEqual(identity(real),identity(link));
+    return{project:p,alias:link,aliasLength:link.length,rawAlias:outcome(()=>fs.realpathSync.native(link)),canonical:real,identity:identity(real)};
+  }
+  if(process.platform==='win32'){
+  test('Windows long project alias cannot admit temp inside its physical project',()=>{
+    const p=project(),inside=path.join(p,'inside-temp');fs.mkdirSync(inside);
+    const link=alias(p,'initial-long-alias',true),row=geometry(p,link),tmp=os.tmpdir;
+    try{latch(link,()=>{
+      row.before={project:inventory(p),aliasParent:inventory(path.dirname(link))};os.tmpdir=()=>inside;
+      try{row.shortControl=outcome(()=>runtime.assertExternalRecoveryAllowed(p));row.longAlias=outcome(()=>runtime.assertExternalRecoveryAllowed(link));}
+      finally{os.tmpdir=tmp;}
+      row.after={project:inventory(p),aliasParent:inventory(path.dirname(link))};
+      assert.deepEqual(row.after,row.before);
+    });}finally{save(row);}
+    assert.equal(row.shortControl.code,'E_RECOVERY_TEMP_UNSAFE');assert.equal(row.longAlias.code,'E_RECOVERY_TEMP_UNSAFE');
+  });
+  test('Windows retargeted long project alias is refused by the post-mkdtemp guard before producer work',()=>{
+    const a=project(),b=project(),inside=path.join(b,'inside-temp');fs.mkdirSync(inside);
+    const link=alias(a,'post-long-alias',true),row=geometry(a,link),tmp=os.tmpdir,native=fs.realpathSync.native;
+    let called=false,retargeted=false;row.calls=[];
+    try{latch(link,()=>{
+      row.before={a:inventory(path.join(a,'.leerness')),b:inventory(path.join(b,'.leerness'))};os.tmpdir=()=>inside;
+      fs.realpathSync.native=function(q,...args){
+        const match=[link,path.toNamespacedPath(link)].includes(String(q));let value,error;
+        try{value=native.call(this,q,...args);return value;}catch(e){error=e;throw e;}
+        finally{if(match){row.calls.push({input:String(q),returned:value,code:error&&error.code});if(!retargeted){retargeted=true;rawRename(link,link+'-retained');rawSymlink(b,link,'junction');}}}
+      };
+      try{row.result=outcome(()=>runtime.writeExternalRecoveryStream(link,()=>{called=true;},8));}
+      finally{os.tmpdir=tmp;fs.realpathSync.native=native;}
+      row.after={a:inventory(path.join(a,'.leerness')),b:inventory(path.join(b,'.leerness'))};row.insideEntries=fs.readdirSync(inside);row.producerCalled=called;
+      assert.deepEqual(row.after,row.before);
+    });}finally{row.retargeted=retargeted;save(row);}
+    assert(retargeted);assert.equal(row.calls.length,2);assert.equal(row.result.code,'E_RECOVERY_TEMP_UNSAFE');assert.equal(called,false);assert.deepEqual(row.insideEntries,[]);
+  });
+  test('Windows genuinely external long temp base admits a bounded recovery stream',()=>{
+    const p=project(),tmp=os.tmpdir,row={kind:'long-external-temp-positive',project:p};
+    let base=path.join(arena,'positive-long-temp');
+    while(base.length+62<270)base=path.join(base,'x'.repeat(60));
+    base=path.join(base,'t'.repeat(270-base.length-1));fs.mkdirSync(base,{recursive:true});assert.equal(base.length,270);
+    row.tempBase=base;
+    try{latch(p,()=>{
+      row.before=inventory(p);os.tmpdir=()=>base;
+      try{
+      row.directory=runtime.writeExternalRecoveryStream(p,sink=>sink.write('tiny.bin',put=>put(Buffer.from('safe'))),8);
+      external.push(row.directory);assert(row.directory.length>=300);
+      row.realBase=fs.realpathSync.native(path.toNamespacedPath(base));
+      row.realDirectory=fs.realpathSync.native(path.toNamespacedPath(row.directory));
+      assert.equal(path.dirname(row.realDirectory),row.realBase);
+      const relative=path.relative(fs.realpathSync.native(p),row.realDirectory);
+      assert(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative));
+      const bytes=fs.readFileSync(path.join(row.directory,'tiny.bin'));assert.deepEqual(bytes,Buffer.from('safe'));row.bytes=bytes.length;
+      row.bundleDirectory=runtime.writeExternalRecoveryBundle(p,[{name:'tiny.bin',bytes:Buffer.from('safe')}]);
+      external.push(row.bundleDirectory);assert(row.bundleDirectory.length>=300);
+      row.realBundleDirectory=fs.realpathSync.native(path.toNamespacedPath(row.bundleDirectory));
+      assert.equal(path.dirname(row.realBundleDirectory),row.realBase);
+      const bundleRelative=path.relative(fs.realpathSync.native(p),row.realBundleDirectory);
+      assert(bundleRelative==='..'||bundleRelative.startsWith('..'+path.sep)||path.isAbsolute(bundleRelative));
+      const bundleBytes=fs.readFileSync(path.join(row.bundleDirectory,'tiny.bin'));assert.deepEqual(bundleBytes,Buffer.from('safe'));row.bundleBytes=bundleBytes.length;
+      row.after=inventory(p);assert.deepEqual(row.after,row.before);
+      }finally{os.tmpdir=tmp;}
+    });}finally{save(row);}
+  });
+  }
+  for(const code of ['EACCES','EPERM','EIO'])test('post-mkdtemp project '+code+' is refused before producer work',()=>{
+    const a=project(),b=project(),inside=path.join(b,'inside-temp');fs.mkdirSync(inside);
+    const link=alias(a,'post-unknown-'+code,false),row=geometry(a,link),tmp=os.tmpdir,native=fs.realpathSync.native;
+    let calls=0,called=false;
+    try{latch(link,()=>{
+      row.before={a:inventory(path.join(a,'.leerness')),b:inventory(path.join(b,'.leerness'))};os.tmpdir=()=>inside;
+      fs.realpathSync.native=function(q,...args){if([link,path.toNamespacedPath(link)].includes(String(q))&&++calls===2)throw Object.assign(new Error('owned post-guard failure'),{code});return native.call(this,q,...args);};
+      try{row.result=outcome(()=>runtime.writeExternalRecoveryStream(link,()=>{called=true;},8));}
+      finally{os.tmpdir=tmp;fs.realpathSync.native=native;}
+      row.after={a:inventory(path.join(a,'.leerness')),b:inventory(path.join(b,'.leerness'))};row.insideEntries=fs.readdirSync(inside);row.producerCalled=called;row.projectResolutionCalls=calls;
+      assert.deepEqual(row.after,row.before);
+    });}finally{save(row);}
+    assert.equal(calls,2);assert.equal(row.result.code,'E_RECOVERY_TEMP_UNSAFE');assert.equal(called,false);assert.deepEqual(row.insideEntries,[]);
+  });
+}
 fs.writeFileSync(path.join(arena,'external-directories.json'),JSON.stringify(external,null,2));
 finish('memory recovery external');

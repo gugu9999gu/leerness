@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// Actual CLI processes, with bounded filesystem fault injection only in owned fixtures.
+require('./temp-cleanup').trackTemp(module);  
+ 
 const fs = require('fs'), path = require('path'), os = require('os');
 const cp = require('child_process'), assert = require('assert/strict'), crypto = require('crypto');
 const { _renderDecisionsMd, _renderLessonsMd } = require('../lib/pure-utils');
@@ -141,9 +141,9 @@ try {
       assert.deepEqual(f.load().map(v=>v.title||v.text),['survivor','selected']);
     });
     const f=fixture(surface),survivor=f.load()[0];
-    // T-0193 archive-retention guard: concurrency itself is the subject here, so
-    // make the drop target exactly representable by the legacy Markdown archive.
-    // The survivor keeps its extension field, preserving the canonical-value control.
+     
+     
+     
     const concurrentSeed=f.load(); delete concurrentSeed[1].extension;
     fs.writeFileSync(f.p('json'),JSON.stringify(concurrentSeed));
     const parallelArgs=[0,1,2,3].map(i=>[...f.args,'parallel-'+i]);

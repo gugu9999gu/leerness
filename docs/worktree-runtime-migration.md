@@ -201,8 +201,9 @@ an already-installed old executable, external editor, Git hook or arbitrary work
   portable revision CAS, a multi-file transaction or a proven power-loss durability protocol.
 - `writeBufferIfUnchanged` is Windows-only metadata-preserving replacement; POSIX currently
   throws `E_METADATA_PRESERVATION_UNAVAILABLE`. Do not reuse it as a portable ControlStore CAS.
-- `_withLock` serializes cooperating writers to one canonical target. Keep the existing
-  no-automatic-takeover policy for owner-bearing locks. It does not freeze another path or client.
+- `_withLock` serializes cooperating writers to one canonical target. Age alone never takes a
+  lock over; a lock is reclaimed only when its owner is proven dead on this host (see
+  state-store-locking.md). It does not freeze another path or client.
 - Existing `.harness` migration's inventory/hash/recheck/stage patterns are references only;
   its lock is not taken by all writers, and its backup restore is not post-activation rollback.
 - Node >=18, zero runtime dependencies, no network/provider call from diagnosis or admission.

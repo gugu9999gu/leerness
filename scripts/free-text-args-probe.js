@@ -1,18 +1,18 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0321: free text given to a command is exactly the positional text the user typed.
-// Reported: `clarify "<request>" --path <dir>` appends <dir> to the request. That did not reproduce —
-// main() builds args with nonFlagArgs(), which already drops registered value flags and their values; the
-// first group pins it, with an in-probe control showing that a leaked form would be detected.
-// What was broken is the opposite direction: a request that begins with "-" (a markdown bullet, "-5%")
-// could not reach any free-text command. Before "--" such a token is an option; after "--" it is text, but
-// dispatch sites re-filtered nonFlagArgs() with startsWith('-') and dropped it, the flag guards scanned past
-// "--" and rejected "--"-leading text, and the 7 MCP free-text tools put the text before "--", so the child
-// parsed a bullet list as an option and answered text_required.
-// Cross-model review (gpt-6.1-sol) found, and this probe now covers: bugfix/referee parsers that treated
-// tokens after "--" as options, so `drop <id> -- --path B` wrote to the cwd project once the guards stopped at
-// "--"; agent, agents route and release note dropping text after "--"; release note keeping the value of any
-// value flag but --path; and a literal "--json" after "--" sending success output to stderr.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
@@ -24,7 +24,7 @@ for (const key of ['HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TM
 let passed = 0, failed = 0;
 const filter = process.argv.includes('--match') ? process.argv[process.argv.indexOf('--match') + 1] : '';
 const test = (name, fn) => { if (filter && !name.includes(filter)) return; try { fn(); passed++; console.log('PASS ' + name); } catch (e) { failed++; console.error('FAIL ' + name + ': ' + (e && e.stack || e)); } };
-// Checks every site before failing, so one run names all the sites that lose the text.
+ 
 const each = (items, fn) => {
   const misses = [];
   for (const item of items) { try { fn(item); } catch (e) { misses.push(String(e && e.message || e).split('\n')[0]); } }
@@ -44,9 +44,9 @@ const runIn = (cwd, args, extra = {}) => cp.spawnSync(process.execPath, [CLI, ..
 const run = (args, extra) => runIn(P, args, extra);
 const show = r => `exit ${r.status}\n${String(r.stdout || '').slice(0, 800)}${String(r.stderr || '').slice(0, 400)}`;
 const json = (r, label) => { const out = String(r.stdout || ''); try { return JSON.parse(out.slice(out.indexOf('{'))); } catch { throw new Error(label + ': not JSON — ' + show(r)); } };
-const ORCH_ENV = { LEERNESS_OLLAMA_BASE_URL: 'http://127.0.0.1:9' };   // nothing listens there: the model call fails at once
+const ORCH_ENV = { LEERNESS_OLLAMA_BASE_URL: 'http://127.0.0.1:9' };    
 
-// Every CLI site whose command takes free text, and where the text it received can be read back.
+ 
 const queueTitles = () => json(run(['next-action', 'list', '--path', P, '--json']), 'next-action list').queue.map(a => a.title);
 const lastRoute = () => { const e = json(run(['agents', 'route', '--log', '--path', P, '--json']), 'route log').entries; return e.length ? e[e.length - 1].task : undefined; };
 const changelogNotes = () => { try { return fs.readFileSync(path.join(P, 'CHANGELOG.md'), 'utf8').split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2)); } catch { return []; } };
@@ -62,7 +62,7 @@ const SITES = [
   { site: 'reuse find', cmd: ['reuse', 'find'], field: 'query' },
   { site: 'reuse-check', cmd: ['reuse-check'], field: 'feature' },
   { site: 'register-pending', cmd: ['register-pending'], field: 'request' },
-  // These print no JSON with the text; what they received is read back from where they put it.
+   
   { site: 'next-action add', cmd: ['next-action', 'add'], json: false, read: () => queueTitles(), stored: true },
   { site: 'agents route', cmd: ['agents', 'route'], read: () => lastRoute() },
   { site: 'release note', cmd: ['release', 'note'], json: false, read: () => changelogNotes(), stored: true },
@@ -76,13 +76,13 @@ const expectReceived = (s, r, text, label) => {
   assert.strictEqual(got, text, `${label}: received ${JSON.stringify(got)} instead of ${JSON.stringify(text)} — ${show(r)}`);
 };
 const runSite = (s, argv) => run(argv, s.env);
-// clarify echoes no text: its signal kinds are the only view of what it received (a same-signal corruption is invisible).
+ 
 const clarify = (r, label) => { const j = json(r, label); assert.strictEqual(j.ok, true, `${label}: ${j.code || 'not ok'} (exit ${r.status})`); return j.signals.map(x => x.kind).sort().join(','); };
 let seq = 0;
-const unique = text => `${text} [${++seq}]`;   // stored entries stay distinct across calls
+const unique = text => `${text} [${++seq}]`;    
 
 test('registered value flags never reach the free text (16 CLI sites)', () => {
-  // Control: the leaked form itself is visible to clarify, so the clarify checks below can fail.
+   
   assert.strictEqual(clarify(run(['clarify', 'A 또는 ' + P, '--json']), 'control'), 'alternative');
   for (const argv of [['clarify', 'A 또는', '--path', P, '--language', 'en', '--json'], ['clarify', '--path=' + P, '--json', 'A 또는'], ['clarify', 'A 또는', '-y', '--json']]) {
     assert.strictEqual(clarify(run(argv), argv.join(' ')), '', argv.join(' '));
@@ -99,7 +99,7 @@ test('text after -- reaches every CLI free-text site verbatim, even when it star
   for (const s of SITES) {
     cases.push({ s, label: '"-" text', text: unique('- 로그인 버튼 적당히 고쳐줘') });
     cases.push({ s, label: '"--" text', text: unique('--force 옵션 추가해줘') });
-    // Tokens after -- are text even when they spell a flag: no missing --path value, no second --json.
+     
     const first = unique('- 첫째');
     cases.push({ s, label: 'flag-shaped tokens', text: first, tokens: [first, '--path', '--json'], expected: first + ' --path --json' });
   }
@@ -107,7 +107,7 @@ test('text after -- reaches every CLI free-text site verbatim, even when it star
     { label: 'clarify "-" text', tokens: ['- 그거 적당히 고쳐줘'], kinds: 'pronoun,vague-quality' },
     { label: 'clarify "--" text', tokens: ['--force 로 그거 고쳐줘'], kinds: 'pronoun' },
     { label: 'clarify flag-shaped tokens', tokens: ['- 그거', '--path', '--json'], kinds: 'pronoun' },
-    // Without a real --path before --, these reach the --path value check and the init-only --authoring-language check.
+     
     { label: 'clarify "--path=" text', argv: ['clarify', '--json', '--', '--path=그거 고쳐줘'], kinds: 'pronoun' },
     { label: 'clarify "--authoring-language=" text', argv: ['clarify', '--json', '--', '--authoring-language=en 그거'], kinds: 'pronoun' },
   ];
@@ -143,13 +143,13 @@ test('tokens after -- never retarget or get dropped by a write, and a literal --
   assert.ok(bf.status === 1 && ids('bugfix-receipts.json').includes('T-0001'), 'bugfix drop -- --path B changed ' + A + ': ' + show(bf));
   const rf = runIn(A, ['referee', 'drop', 'r1', '--json', '--', '--path', B]);
   assert.ok(rf.status === 1 && json(rf, 'referee drop').code === 'too_many_arguments' && ids('referees.json').includes('r1'), 'referee drop -- --path B: ' + show(rf));
-  // Controls: the same drops without the stray tokens succeed, so the refusals above were not a broken setup.
+   
   assert.ok(runIn(A, ['bugfix', 'drop', 'T-0001', '--json']).status === 0 && !ids('bugfix-receipts.json').includes('T-0001'), 'bugfix drop control');
   assert.ok(runIn(A, ['referee', 'drop', 'r1', '--json']).status === 0 && !ids('referees.json').includes('r1'), 'referee drop control');
-  // `-- --json` is a title, not a switch to JSON mode: the confirmation stays on stdout (lib/io.js),
+   
   const na = run(['next-action', 'add', '--path', P, '--', '--json']);
   assert.ok(na.status === 0 && /next-action/.test(na.stdout) && !/next-action/.test(na.stderr) && queueTitles().includes('--json'), 'next-action add -- --json: ' + show(na));
-  // and an error raised through main's catch handler stays human-readable too.
+   
   const dry = run(['release', 'note', '--dry-run', '--path', P, '--', '--json']);
   assert.ok(dry.status === 1 && !String(dry.stdout).trimStart().startsWith('{') && /--dry-run/.test(dry.stdout), 'release note --dry-run -- --json: ' + show(dry));
 });
@@ -180,7 +180,7 @@ test('MCP free-text tools deliver the text of any shape and keep their flags bef
     assert.ok(reply && reply.result, label + ': no result ' + JSON.stringify(reply || r.stderr).slice(0, 300));
     const text = reply.result.content[0].text;
     const oneLine = text.replace(/\s+/g, ' ').slice(0, 240);
-    if (c.embedding) {   // --embedding stayed an option: without an Ollama URL the command refuses instead of matching the text
+    if (c.embedding) {    
       assert.ok(reply.result.isError === true && /LEERNESS_OLLAMA_BASE_URL/.test(text), `${label}: --embedding was not applied — ${oneLine}`);
       return;
     }
@@ -196,8 +196,8 @@ test('MCP free-text tools deliver the text of any shape and keep their flags bef
 });
 
 test('no dispatch site re-filters positional tokens with startsWith("-") (source ratchet for new commands)', () => {
-  // The behavior checks above cover the known sites; this catches a new command copying the old idiom,
-  // including the startsWith('--') variant and a block-bodied callback. Comment lines are not code.
+   
+   
   const pkg = path.resolve(__dirname, '..');
   const files = ['bin/leerness.js', ...fs.readdirSync(path.join(pkg, 'lib')).filter(f => f.endsWith('.js')).map(f => 'lib/' + f)];
   const re = /\.filter\(\s*\(?\s*(\w+)\s*\)?\s*=>\s*(?:\{\s*return\s+)?!\s*\1\.startsWith\(\s*(['"])--?\2\s*\)/g;
@@ -211,7 +211,7 @@ test('no dispatch site re-filters positional tokens with startsWith("-") (source
     }
   }
   assert.deepStrictEqual(hits, [], 'nonFlagArgs() output is already free of options before --; re-filtering it drops text after --: ' + hits.join(', '));
-  // The pattern itself: it must see each spelling of the idiom and skip it in a comment.
+   
   const sample = "a.filter(x => !x.startsWith('-'))\nb.filter((t) => { return !t.startsWith(\"--\"); })\n// c.filter(x => !x.startsWith('-'))\n";
   assert.strictEqual([...sample.matchAll(re)].filter(m => !/\/\//.test(sample.slice(sample.lastIndexOf('\n', m.index) + 1, m.index))).length, 2, 'ratchet pattern self-check');
 });

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0110: MCP lifecycle calls with an explicit sessionKey must participate in
-// the same presence registry as direct CLI handoff/session-close calls. Generic
-// internal subprocesses and unaddressed MCP calls must remain invisible.
+ 
+ 
+ 
 
 const fs = require('fs');
 const os = require('os');
@@ -30,8 +30,8 @@ const controlledEnvKeys = new Set([
   'LEERNESS_NO_SUGGEST', 'LEERNESS_NO_SKILL_SUGGEST', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
   'CI', 'GITHUB_ACTIONS', 'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM',
 ].map(key => key.toLowerCase()));
-// Windows에서 실제로 발생한 lower-case 상속 오염을 모든 OS에서 재현한다. scrub이 다시
-// exact-case delete로 퇴행하면 첫 assertion이 실패하므로, 뒤의 "파일 없음" 검사가 거짓 통과하지 않는다.
+ 
+ 
 baseEnv.leerness_no_session_presence = '1';
 for (const key of Object.keys(baseEnv)) {
   if (controlledEnvKeys.has(key.toLowerCase())) delete baseEnv[key];
@@ -48,8 +48,8 @@ function check(label, condition, detail = '') {
 function fresh(name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `leerness-mcp-presence-${name}-`));
   roots.push(root);
-  // T-0343: a new empty project takes the system locale's language (LANG on Linux, the Intl locale on Windows), and
-  //   the checks below read Korean text ("다른 세션 1"). Pin it, or an English-locale machine (every CI runner) fails.
+   
+   
   const result = cp.spawnSync(process.execPath, [CLI, 'init', root, '--yes', '--minimal', '--language', 'ko'], {
     cwd: root,
     encoding: 'utf8',
@@ -153,8 +153,8 @@ try {
     !!(alphaRecord && alphaRecord.closedAt) && !!(bravoRecord && !bravoRecord.closedAt),
     `alpha=${JSON.stringify(alphaRecord)} bravo=${JSON.stringify(bravoRecord)}`);
 
-  // 외부 Codex P2: lifecycle이 아닌 도구에 숨은 sessionKey를 주면 marker가 agent-mode의
-  // nested handoff까지 전파됐다. 광고하지 않은 주소 입력은 실행 전에 거절해야 한다.
+   
+   
   const unsupportedRoot = fresh('unsupported-address');
   const unsupported = runMcp(unsupportedRoot, [
     rpcCall('leerness_agent_mode', { path: unsupportedRoot, sub: 'start', sessionKey: 'mcp-hidden-address' }, 2),
@@ -186,13 +186,13 @@ try {
     child.result.status === 0 && sessionFiles(childRoot).includes('mcp-child-addressed.json'),
     `exit=${child.result.status} files=${JSON.stringify(sessionFiles(childRoot))}`);
 
-  // 공백이 있는 임시 경로에서도 NODE_OPTIONS preload가 한 토큰으로 전달되어야 한다.
+   
   const suppressedRoot = fresh('hook ci suppression');
   const childEnvLog = path.join(suppressedRoot, 'child-env.ndjson');
   const noRecordEnvLog = path.join(suppressedRoot, 'no-record-child-env.ndjson');
   const preloadPath = path.join(suppressedRoot, 'capture-child-env.js');
-  // NODE_OPTIONS 파서는 인용된 Windows 역슬래시도 escape로 소비한다. Node가 Windows에서도
-  // 절대 경로로 이해하는 forward-slash 표기로 바꾼 뒤 한 인자로 묶는다.
+   
+   
   const preloadModule = preloadPath.replace(/\\/g, '/');
   const preloadOption = `--require="${preloadModule.replace(/"/g, '\\"')}"`;
   fs.writeFileSync(preloadPath, [
@@ -248,8 +248,8 @@ try {
       && noRecordNestedRows.every(row => row.marker === null) && sessionFiles(suppressedRoot).length === 0,
     `exit=${noRecordClose.status} stderr=${String(noRecordClose.stderr || '').slice(0, 300)} rows=${JSON.stringify(noRecordRows)}`);
 
-  // T-0110의 옛 currentRunId 단일 슬롯 결함은 1.36.145 이후 이미 sessionKey별 run으로
-  // 격리돼 있다. lifecycle presence 수정이 그 상태 귀속을 되돌리지 않는지 같은 MCP 경계에서 확인한다.
+   
+   
   const stateRoot = fresh('state-isolation');
   const state = runMcp(stateRoot, [
     rpcCall('leerness_state_start', { path: stateRoot, goal: 'alpha', sessionKey: alpha }, 2),
@@ -278,8 +278,8 @@ try {
   check('state-only MCP calls do not create presence records', sessionFiles(stateRoot).length === 0,
     `files=${JSON.stringify(sessionFiles(stateRoot))}`);
 
-  // 외부 Codex P1: 명시된 잘못된 값이 서버의 CODEX_THREAD_ID로 폴백하면 호출자는 주소가
-  // 거절된 줄 모르고 공유 run 슬롯을 다시 쓴다. 세 형태 모두 -32602이며 파일을 만들지 않아야 한다.
+   
+   
   const invalidRoot = fresh('invalid-address');
   const beforeRuns = runFiles(invalidRoot);
   const invalid = runMcp(invalidRoot, [
@@ -311,8 +311,8 @@ try {
       && SP.confirmedCloseMs({ closedAt: validClose }) === 1700000000000,
     JSON.stringify(SP.selectPrunable(malformed, { selfKey: 'selfpeer', nowMs: Date.now() })));
 
-  // POSIX legacy case variants are logically collapsed by read-only sessions, then migrated on the
-  // next canonical write. Windows cannot hold two case variants, so only the logical assertion applies.
+   
+   
   const legacyRoot = fresh('legacy-case');
   fs.mkdirSync(sessionDir(legacyRoot), { recursive: true });
   const legacyName = 'CaseGhost01';
@@ -329,7 +329,7 @@ try {
   });
   let legacyJson = null;
   try { legacyJson = JSON.parse(listedLegacy.stdout); } catch {}
-  const migratedLegacy = cp.spawnSync(process.execPath, [CLI, 'handoff', legacyRoot, '--compact'], {
+  const migratedLegacy = cp.spawnSync(process.execPath, [CLI, 'handoff', legacyRoot, '--record', '--compact'], {
     cwd: legacyRoot, encoding: 'utf8', timeout: 120000,
     env: { ...baseEnv, LEERNESS_SESSION_ID: foldedLegacy },
   });
@@ -340,8 +340,8 @@ try {
       && (!caseSensitive || (migratedFiles.includes(`${foldedLegacy}.json`) && !migratedFiles.includes(`${legacyName}.json`))),
     `caseSensitive=${caseSensitive} listed=${JSON.stringify(legacyJson)} files=${JSON.stringify(migratedFiles)}`);
 
-  // 대소문자 구분 저장소의 두 열린 legacy variant는 서로 다른 구버전 세션일 수 있다.
-  // 자동 병합/삭제하지 않고 canonical record와 조회 표면에 충돌을 남긴다.
+   
+   
   const ambiguousRoot = fresh('legacy-case-conflict');
   fs.mkdirSync(sessionDir(ambiguousRoot), { recursive: true });
   const variantA = 'CaseTwin01';
@@ -363,7 +363,7 @@ try {
   if (ambiguousCaseSensitive) {
     fs.writeFileSync(path.join(sessionDir(ambiguousRoot), `${variantB}.json`),
       JSON.stringify(openRecord(variantB), null, 2) + '\n', 'utf8');
-    const wrote = cp.spawnSync(process.execPath, [CLI, 'handoff', ambiguousRoot, '--compact'], {
+    const wrote = cp.spawnSync(process.execPath, [CLI, 'handoff', ambiguousRoot, '--record', '--compact'], {
       cwd: ambiguousRoot, encoding: 'utf8', timeout: 120000,
       env: { ...baseEnv, LEERNESS_SESSION_ID: canonicalTwin },
     });

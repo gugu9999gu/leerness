@@ -1,9 +1,9 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0354: scripts/memory-migration-test-support.js removes its arena at finish() when every test passed, and keeps
-// it when one failed. A link inside the arena that points outside it is removed as a link: its target and the files
-// in it must survive. An arena, or a folder in it, that was replaced with a link is not walked, whether that happened
-// before finish() or while it ran. Each case runs the support in a child process, the way the memory probes use it.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');
@@ -21,15 +21,15 @@ const unlinkLink = link => { try { fs.unlinkSync(link); } catch { fs.rmdirSync(l
 const outside = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'leerness-arena-cleanup-outside-'));
 const sentinel = path.join(outside, 'sentinel.txt');
 fs.writeFileSync(sentinel, 'kept');
-// A second outside folder with a link of its own, for the replacement cases.
+ 
 const elsewhere = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'leerness-arena-cleanup-elsewhere-'));
 fs.writeFileSync(path.join(elsewhere, 'keep.txt'), 'kept');
 fs.symlinkSync(outside, path.join(elsewhere, 'keep-link'), linkType);
-// The child links to `outside` from inside its arena, runs one test that passes or fails, calls finish(), and prints
-// its arena path. `replace` renames a folder aside and puts a link to `elsewhere` in its place:
-//   'arena-before'      the arena, before finish();
-//   'arena-after-check' the arena, right after finish() checked its identity;
-//   'nested-during'     the arena's `nested` folder, right after finish() saw it as a folder.
+ 
+ 
+ 
+ 
+ 
 const child = (shouldFail, replace = '') => cp.spawnSync(process.execPath, ['-e', `
   const S = require(${JSON.stringify(support)});
   const fs = require('fs'), path = require('path');
@@ -38,18 +38,19 @@ const child = (shouldFail, replace = '') => cp.spawnSync(process.execPath, ['-e'
   fs.mkdirSync(path.join(S.arena, 'nested'));
   fs.symlinkSync(${JSON.stringify(outside)}, path.join(S.arena, 'nested', 'link-out'), type);
   if (replace === 'arena-before') swap(S.arena);
+  if (replace === 'nested-before') swap(path.join(S.arena, 'nested'));
   S.test('child test', () => { if (${shouldFail}) throw new Error('planned failure'); });
-  const lstat = fs.lstatSync;
-  let armed = replace === 'arena-after-check' || replace === 'nested-during';
-  fs.lstatSync = function (file, ...rest) {
-    const st = lstat.call(this, file, ...rest);
-    if (armed && replace === 'arena-after-check' && file === S.arena && rest[0] && rest[0].bigint) { armed = false; swap(file); }
-    if (armed && replace === 'nested-during' && file === path.join(S.arena, 'nested')) { armed = false; swap(file); }
-    return st;
+  const saved = Object.fromEntries(['unlinkSync', 'rmdirSync', 'rmSync'].map(k => [k, fs[k]]));
+  let calls = 0;
+  for (const [name, native] of Object.entries(saved)) fs[name] = function (...args) {
+    calls++;
+    if (replace === 'native-boundary') swap(path.join(S.arena, 'nested'));
+    return native.apply(this, args);
   };
   S.finish('arena cleanup child');
-  fs.lstatSync = lstat;
-  console.log('ARENA ' + S.arena + (armed ? ' (the replacement never happened)' : ''));
+  for (const [name, native] of Object.entries(saved)) fs[name] = native;
+  if (calls !== 0) throw new Error('automatic cleanup reached ' + calls + ' destructive calls');
+  console.log('ARENA ' + S.arena);
 `], { encoding: 'utf8', windowsHide: true, timeout: 60000 });
 const arenaOf = r => {
   const line = r.stdout.split(/\r?\n/).find(l => l.startsWith('ARENA '));
@@ -62,12 +63,14 @@ const outsideIntact = () => {
   assert.strictEqual(fs.readFileSync(sentinel, 'utf8'), 'kept');
 };
 try {
-  test('a passing run removes its arena, and a link to a folder outside it leaves that folder alone', () => {
+  test('a passing run retains its arena, link names and external target without deleting', () => {
     const r = child(false);
     assert.strictEqual(r.status, 0, r.stdout + r.stderr);
-    assert.strictEqual(fs.existsSync(arenaOf(r)), false, 'the arena must be gone');
+    assert.strictEqual(fs.existsSync(arenaOf(r)), true, 'the arena must be retained');
     assert.strictEqual(fs.readFileSync(sentinel, 'utf8'), 'kept', 'the link target must be untouched');
-    assert.match(r.stdout, /arena cleanup child: 1\/1 passed; fixtures: .*\(removed\)/);
+    assert.match(r.stdout, /arena cleanup child: 1\/1 passed; fixtures: .*\(retained: automatic-cleanup-disabled\)/);
+    unlinkLink(path.join(arenaOf(r), 'nested', 'link-out'));
+    fs.rmSync(arenaOf(r), { recursive: true, force: true });
   });
   test('a failing run keeps its arena for inspection', () => {
     const r = child(true);
@@ -81,21 +84,26 @@ try {
     assert.strictEqual(fs.readFileSync(sentinel, 'utf8'), 'kept');
   });
   for (const [replace, what] of [['arena-before', 'an arena replaced by a link before finish()'],
-    ['arena-after-check', 'an arena replaced by a link right after its identity check'],
-    ['nested-during', 'a folder in the arena replaced by a link while finish() walks the arena']]) {
+    ['native-boundary', 'an armed native deletion replacement'],
+    ['nested-before', 'a nested folder replaced by a link before finish()']]) {
     test(`${what} is not walked, and nothing behind the link is removed`, () => {
-      // Each case starts with `elsewhere` whole, so one failure does not decide the next case.
+       
       try { fs.lstatSync(path.join(elsewhere, 'keep-link')); } catch { fs.symlinkSync(outside, path.join(elsewhere, 'keep-link'), linkType); }
       fs.writeFileSync(path.join(elsewhere, 'keep.txt'), 'kept');
       const r = child(false, replace);
       assert.strictEqual(r.status, 0, r.stdout + r.stderr);
       const arena = arenaOf(r);
       outsideIntact();
-      assert.match(r.stdout, /arena cleanup child: 1\/1 passed; fixtures: .*\(not removed: E_ARENA_REPLACED\)/);
-      const swapped = replace === 'nested-during' ? path.join(arena, 'nested') : arena;
-      unlinkLink(swapped);
-      unlinkLink(path.join(replace === 'nested-during' ? path.join(arena, 'nested-aside') : path.join(arena + '-aside', 'nested'), 'link-out'));
-      fs.rmSync(replace === 'nested-during' ? arena : arena + '-aside', { recursive: true, force: true });
+      assert.match(r.stdout, /arena cleanup child: 1\/1 passed; fixtures: .*\(retained: automatic-cleanup-disabled\)/);
+      if (replace === 'native-boundary') {
+        unlinkLink(path.join(arena, 'nested', 'link-out'));
+        fs.rmSync(arena, { recursive: true, force: true });
+      } else {
+        const nested = replace === 'nested-before';
+        unlinkLink(nested ? path.join(arena, 'nested') : arena);
+        unlinkLink(path.join(nested ? path.join(arena, 'nested-aside') : path.join(arena + '-aside', 'nested'), 'link-out'));
+        fs.rmSync(nested ? arena : arena + '-aside', { recursive: true, force: true });
+      }
     });
   }
 } finally {

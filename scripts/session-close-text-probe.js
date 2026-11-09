@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -55,9 +55,9 @@ const open=fs.openSync.bind(fs);fs.openSync=function(p,flags,...args){if(mode===
 const spawn=cp.spawnSync.bind(cp);cp.spawnSync=function(a,b,o){if(o?.env?.LEERNESS_REPLACE_TO===target){if(mode==='publication')inject(target);const r=spawn(a,b,o);if(mode==='after-publication'&&r.status===0)inject(target);return r;}return spawn(a,b,o);};
 const link=fs.linkSync.bind(fs);fs.linkSync=function(a,b){if(mode==='publication')inject(b);const r=link(a,b);if(mode==='after-publication')inject(b);return r;};
 `);
-// T-0337: the partial-save notes and the memory input and output errors follow the project language of the commands'
-// own text. These fixtures carry .leerness/LANGUAGE=en without a manifest, which that rule reads as Korean, so the
-// English expectations run with LEERNESS_LANG=en.
+ 
+ 
+ 
 function call(f, opts = {}) {
   const r = cp.spawnSync(process.execPath, [...(opts.mode ? ['--require', hook] : []), cli, 'session', 'close', '--path', f.dir, ...(opts.human ? [] : ['--json']), '--no-suggest', '--no-record', ...(opts.flags || [])], { cwd: f.dir, encoding: 'utf8', timeout: 45000, windowsHide: true,
     env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_LANG: 'en',
@@ -77,9 +77,60 @@ test('owner priority wins over stale first in-progress row without changing auth
   assert.strictEqual(result.nextTask.id, 'T-0002');
   assert.strictEqual(result.nextTask.source, 'owner-priorities');
   assert.strictEqual(result.nextExactStep, 'current next');
-  assert.match(text(f.file('session-handoff.md')), /## Next Exact Step\n- current next\n/);
+  assert.match(text(f.file('session-handoff.md')), /## Next Exact Step\n- T-0002 — current next\n/);
   assert.deepStrictEqual(state(f.file('rules.md')), before);
 });
+test('curated current handoff retains owner sections while canonical Next Exact Step changes', () => {
+  const rows = tracker + '| T-0002 | in-progress | owner work | evidence | owner next | 2026-11-03 |\n' +
+    '| T-0003 | done | shipped work | focused tests | none | 2026-11-02 |\n';
+  const plan = '<!-- leerness:owner-priorities:start -->\n1. Owner work - T-0002\n<!-- leerness:owner-priorities:end -->\n';
+  const curated = [
+    '<!-- leerness:current-handoff:start -->', '# Session Handoff', '',
+    '## Completed', '- T-0003 (done) — LEAN-01B owner evidence', '',
+    '## Recommended Direction', '- Keep owner-authored priorities and rationale', '',
+    '## Next Exact Step', '- T-0001 — superseded next action',
+    '<!-- leerness:current-handoff:end -->', '',
+    '## Historical handoff (not current instructions)', '- Keep these original notes', ''
+  ].join('\n');
+  const f = fixture({ 'progress-tracker.md': rows, 'plan.md': plan, 'session-handoff.md': curated });
+  success(call(f));
+  const after = text(f.file('session-handoff.md'));
+  assert(after.includes('## Completed\n- T-0003 (done) — LEAN-01B owner evidence'));
+  assert(after.includes('## Recommended Direction\n- Keep owner-authored priorities and rationale'));
+  assert(after.includes('## Next Exact Step\n- T-0002 — owner next\n'));
+  assert(!after.includes('superseded next action'));
+  assert(after.endsWith('## Historical handoff (not current instructions)\n- Keep these original notes\n'));
+  success(call(f));
+  assert.strictEqual(text(f.file('session-handoff.md')), after);
+});
+test('curated handoff with an already canonical action is unchanged', () => {
+  const rows = tracker + '| T-0002 | in-progress | owner work | evidence | owner next | 2026-11-03 |\n';
+  const plan = '<!-- leerness:owner-priorities:start -->\n1. Owner work - T-0002\n<!-- leerness:owner-priorities:end -->\n';
+  const curated = '<!-- leerness:current-handoff:start -->\n# Session Handoff\n\n## Completed\n- LEAN-01B owner details\n\n## Next Exact Step\n- T-0002 — owner next\n<!-- leerness:current-handoff:end -->\n';
+  const f = fixture({ 'progress-tracker.md': rows, 'plan.md': plan, 'session-handoff.md': curated });
+  success(call(f));
+  assert.strictEqual(text(f.file('session-handoff.md')), curated);
+});
+test('curated handoff with no Next Exact Step gains one without losing authored notes', () => {
+  const curated = '<!-- leerness:current-handoff:start -->\n# Session Handoff\n\n## Completed\n- LEAN-01B owner notes\n<!-- leerness:current-handoff:end -->\n';
+  const f = fixture({ 'session-handoff.md': curated });
+  success(call(f));
+  const result = text(f.file('session-handoff.md'));
+  assert(result.includes('## Completed\n- LEAN-01B owner notes'));
+  assert(result.includes('## Next Exact Step\n- T-0001 — next ' + sample));
+});
+test('generated graph excludes the local absolute project path', () => {
+  const f = fixture();
+  const graph = require('../lib/graph');
+  const deps = { quiet: true, _roadmapData: () => ({ project: 'fixture', version: 'test' }) };
+  const data = graph.buildGraphData(f.dir, deps);
+  assert.strictEqual(Object.hasOwn(data, 'root'), false);
+  const file = path.join(f.dir, 'leerness.html');
+  graph.graphHtmlCmd(f.dir, deps, file);
+  const html = text(file);
+  assert(!html.includes(JSON.stringify(f.dir).slice(1, -1)), 'HTML must not disclose the local root');
+});
+
 test('explicit close task wins over owner priority and invalid selection fails before writes', () => {
   const rows = tracker + '| T-0002 | in-progress | owner work | evidence | owner next | 2026-09-22 |\n';
   const plan = '<!-- leerness:owner-priorities:start -->\n1. Owner work - T-0002\n<!-- leerness:owner-priorities:end -->\n';

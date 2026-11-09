@@ -1,8 +1,8 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0343: lib/copy-tree.js copyTreeSync, the fs.cpSync replacement used for fixture and selftest copies.
-// It must copy nested directories and file bytes exactly, copy into an existing directory, never overwrite a file,
-// and work with non-ASCII paths on every supported Node (fs.cpSync crashes on them in Node 22.23.3 on Windows).
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), os = require('os'), path = require('path');
 const { copyTreeSync } = require('../lib/copy-tree');
 const { removeTree } = require('./temp-cleanup');
@@ -51,8 +51,8 @@ try {
     assert.throws(() => copyTreeSync(from, to), error => error.code === 'EEXIST');
     assert.strictEqual(fs.readFileSync(path.join(to, 'bytes.bin'), 'utf8'), 'kept');
   });
-  // T-0347: a relative directory link must still name its sibling inside the copy. On Windows the copy is a junction,
-  // whose target must be absolute; Node resolved the relative one against the process cwd.
+   
+   
   {
     const from = path.join(arena, 'src-relative-link'), to = path.join(arena, 'dst-relative-link');
     fs.mkdirSync(path.join(from, 'sibling'), { recursive: true });

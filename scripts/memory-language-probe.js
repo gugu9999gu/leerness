@@ -1,10 +1,10 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0318: decision add / lesson add re-render decisions.md and lessons.md behind a generated header. The header
-// was Korean in every project; it now follows the harness authoring language (explicit choice, else the stored
-// project language). Existing files keep working: every known header variant is accepted as the generated one and
-// replaced on the next write, records and appended text still have to match exactly, and Korean projects are
-// written byte for byte as before.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const P = require('../lib/pure-utils');
@@ -38,8 +38,8 @@ const rows = (dir, surface) => JSON.parse(text(file(dir, surface + '.json')));
 const row = surface => surface === 'decisions'
   ? { date: '2026-09-01', title: 'Existing choice', decision: 'kept', reason: null, alternatives: null, impact: null }
   : { date: '2026-09-01', text: 'Existing lesson', tag: null };
-// A project whose memory files were written before this change (or before a language switch): canonical JSON plus
-// a projection with the given header and an appended note the writer must keep.
+ 
+ 
 const seeded = (lang, surface, headerLang, note = '\nNOTE appended by hand 사용자 메모\n') => {
   const dir = project(lang);
   fs.writeFileSync(file(dir, surface + '.json'), JSON.stringify([row(surface)], null, 2) + '\n');
@@ -61,7 +61,7 @@ for (const surface of ['decisions', 'lessons']) {
   test(`${surface}: a Korean project is written exactly as before, whatever the UI language`, () => {
     const dir = project('ko'), md = file(dir, surface + '.md'), before = fs.existsSync(md) ? text(md) : '';
     must(add(dir, surface, 'Use JSON storage', { LEERNESS_LANG: 'en' }), 'add with an English UI');
-    // First write: the Korean header plus the records, then any init template kept whole as the appended part.
+     
     assert.strictEqual(text(md), render(surface, rows(dir, surface), 'ko') + before);
   });
 
@@ -111,9 +111,9 @@ for (const surface of ['decisions', 'lessons']) {
   });
 
   test(`${surface}: the source budget is measured with the project's header at the exact limit`, () => {
-    // Cross-model review 2026-09-30: the source phase measured every projection with the Korean header, so an
-    // English decisions file (2 bytes shorter) was refused at its exact size and an English lessons file (18 bytes
-    // longer) passed a limit it exceeded.
+     
+     
+     
     const arrays = size => ({ maxInputBytes: 65536, maxItems: 100, maxItemBytes: 16384, maxCanonicalBytes: 65536, maxProjectionBytes: size, maxDepth: 16, maxNodes: 10000 });
     const limits = size => ({ observation: { maxFileBytes: 65536, maxTotalFileBytes: 262144, maxRecoveryEntries: 100, maxRecoveryDepth: 8, maxRecoveryBytes: 10000 },
       source: arrays(size), candidate: arrays(65536), operation: { maxArchiveInputBytes: 65536, maxArchiveBytes: 131072, maxProjectionBytes: 131072,
@@ -127,7 +127,7 @@ for (const surface of ['decisions', 'lessons']) {
       const under = inspect(size - 1);
       assert.strictEqual(under.ok, false, `${lang}: accepted one byte under its size ${size}`);
       assert.strictEqual(under.error.code, 'projection_bytes_exceeded');
-      // The write admission path measures the same source.
+       
       const big = 1 << 22, policy = limit => JSON.stringify({ limits: limits(limit), mode: 'within-target',
         targets: { items: 1000, canonicalBytes: big, projectionBytes: big, archiveBytes: big, totalPathBytes: big } });
       assert.doesNotThrow(() => captureMemoryWriteAdmission(dir, surface, policy(size)), `${lang}: admission refused its exact size ${size}`);
@@ -141,7 +141,7 @@ test('the header language is the authoring language, not the UI language', () =>
   assert.strictEqual(memoryDocumentLanguage(dir), 'en');
   must(add(dir, 'decisions', 'Use JSON storage'), 'add');
   assert.ok(text(file(dir, 'decisions.md')).startsWith(render('decisions', rows(dir, 'decisions'), 'en')));
-  // A stored LANGUAGE file answers when the manifest has no language; nothing readable keeps the Korean default.
+   
   const bare = path.join(arena, 'bare'); fs.mkdirSync(path.join(bare, '.leerness'), { recursive: true });
   assert.strictEqual(memoryDocumentLanguage(bare), 'ko');
   fs.writeFileSync(path.join(bare, '.leerness', 'LANGUAGE'), 'en\n');

@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -215,11 +215,11 @@ async function main() {
     assert.equal(G.readRef(target(s)), null); assert.deepEqual(F.snapshot(s.root), before);
   }, true, false, true);
   await test('when only the observation ref is past the Windows path limit, its publication is refused with git_long_paths_required and a later GET publishes it once long paths are on', async () => {
-    // T-0326: with a 79-character Git directory path the observation ref (provider-observations, the longest family)
-    // has a 261-character lock path and every other ref of the run at most 259. Git for Windows without core.longpaths
-    // cannot lock it, so the check refuses the publication before Git runs, and the catch that turns publication errors
-    // into publication_uncertain keeps that code. Lengths are taken from the real path. Host Git configuration is off.
-    // Other platforms have no such limit and run the same flow without placing the project.
+     
+     
+     
+     
+     
     const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM, GIT_DEFAULT_REF_FORMAT: process.env.GIT_DEFAULT_REF_FORMAT };
     const empty = path.join(arena, 'empty.gitconfig'); fs.writeFileSync(empty, '');
     process.env.GIT_CONFIG_GLOBAL = empty; process.env.GIT_CONFIG_NOSYSTEM = '1'; process.env.GIT_DEFAULT_REF_FORMAT = 'files';

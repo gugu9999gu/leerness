@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const S = require('./memory-migration-test-support');
 const { assert, fs, path, test, project, snapshot, command, privateMetadata, legacy } = S;
 const adapter = require('../lib/memory-migration-transport');

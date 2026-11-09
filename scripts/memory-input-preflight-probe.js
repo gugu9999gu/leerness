@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Actual CLI regression coverage for canonical array-root admission and preparation
-// before domain writes. Not a full item schema, UTF-8/size gate, transaction, or
-// lossless archive/restore contract. Fixtures and evidence are retained in owned Temp.
+ 
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -96,8 +96,8 @@ function rejectWithoutWrites(entry, root, args, expectedCode, expectedMessage) {
   assert.strictEqual(payload.ok, false);
   if (expectedCode) assert.strictEqual(payload.code, expectedCode);
   if (expectedMessage) assert(expectedMessage.test(String(payload.error || '')), `wrong error: ${payload.error}`);
-  // Existing unwrapped renderer errors may also print their message to stderr;
-  // this probe does not introduce a new renderer error-output contract.
+   
+   
   if (expectedCode) assert.strictEqual(result.stderr, '');
   assert.deepStrictEqual(after, before, `domain changed: ${entry.changedFiles.join(', ')}`);
 }
@@ -115,7 +115,7 @@ try {
   requireSuccess(run(seed, ['init', seed, '--yes', '--language', 'en', '--no-stale-check']));
   requireSuccess(run(seed, ['decision', 'add', 'active']));
   requireSuccess(run(seed, ['lesson', 'save', 'active']));
-  // Both surfaces are completely seeded before any case is copied.
+   
   for (const surface of ['decisions', 'lessons']) {
     const body = surface === 'decisions'
       ? '### 2026-01-01 — archived\n- Decision: archived\n- Reason: retained\n'
@@ -155,7 +155,7 @@ try {
       const root = fixture();
       const current = items(root, surface);
       const survivor = decoratedEntries(surface)[0];
-      // Selector fields stay normal; item preflight now rejects before rendering.
+       
       survivor[surface === 'decisions' ? 'reason' : 'tag'] = { toString: null, valueOf: null };
       fs.writeFileSync(canonical(root, surface), JSON.stringify([...current, survivor]));
       rejectWithoutWrites(entry, root, [singular, 'drop', 'active'], 'store_item_unsupported');
@@ -206,14 +206,14 @@ try {
     });
     check(`${surface} missing canonical retains legacy fallback`, () => {
       const root = fixture();
-      fs.unlinkSync(canonical(root, surface)); // Single file in this probe's owned fixture.
+      fs.unlinkSync(canonical(root, surface));  
       requireSuccess(run(root, [singular, add, 'new']));
       assert.deepStrictEqual(items(root, surface).map(item => item[identity]), ['active', 'new']);
     });
     check(`${surface} migrate apply backfills missing canonical`, () => {
       const root = fixture();
       const expected = items(root, surface)[0][identity];
-      fs.unlinkSync(canonical(root, surface)); // Single file in this probe's owned fixture.
+      fs.unlinkSync(canonical(root, surface));  
       const result = run(root, ['migrate', 'apply', '--yes']);
       requireSuccess(result);
       assert.strictEqual(JSON.parse(result.stdout).appliedCount, 1);

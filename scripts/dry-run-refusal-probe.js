@@ -1,20 +1,20 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0339: commands whose edits need a state lock refuse --dry-run with the dry-run refusal. Under --dry-run the CLI
-// takes no state lock (it would leave lock metadata), so lib/managed-text.js refused every edit with "Managed text
-// requires its existing state lock" (E_TEXT_LOCK) before its first write could meet the dry-run guard (task add, drop
-// and sync, plan add and remove, memory restore plan, register-pending, feature add), and `state start|record|verify|
-// handoff` called itself through the lock wrapper until the stack ran out. Now the managed-text check refuses as the
-// guard does (E_DRY_RUN_WRITE, which the CLI reports as dry_run_unsupported) and state runs as the lock wrapper does
-// under --dry-run. Every case runs on its own copy of a prepared project and checks that no file changed; controls run
-// the same commands without --dry-run.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process'), crypto = require('crypto');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 
 const directAt = process.argv.indexOf('--direct');
 if (directAt >= 0) {
-  // managed-text's lock check with and without the dry-run guard, outside the CLI.
+   
   const dir = process.argv[directAt + 1], io = require('../lib/io'), mt = require('../lib/managed-text');
   const file = path.join(dir, 'managed.md');
   fs.writeFileSync(file, 'text\n');
@@ -33,7 +33,8 @@ const filter = process.argv.includes('--match') ? process.argv[process.argv.inde
 if (process.argv.includes('--match') && !filter) { console.error('--match needs a test name substring'); process.exit(1); }
 const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dry-run-refusal-'));
 const env = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1',
-  LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_BANNER: '1', LEERNESS_HOOK: '', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_SKILL_HISTORY: '1' };
+  LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_BANNER: '1', LEERNESS_HOOK: '', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_SKILL_HISTORY: '1',
+  LEERNESS_SESSION_ID: 'dry-run-refusal-fixture' };
 for (const key of ['LEERNESS_LANG', 'LEERNESS_OLLAMA_BASE_URL', 'LEERNESS_ENFORCE_POLICY']) delete env[key];
 for (const key of ['HOME', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'TMPDIR']) { env[key] = path.join(arena, 'env-' + key.toLowerCase()); fs.mkdirSync(env[key]); }
 let passed = 0, failed = 0, ran = 0;
@@ -48,7 +49,7 @@ const REFUSAL = {
 };
 const GUARD = { en: f => `--dry-run was given, but a write was attempted: ${f}`, ko: f => `--dry-run 인데 쓰려고 했습니다: ${f}` };
 
-// A seed per language: one task row, one milestone, one archived milestone and a state run, made through the product.
+ 
 const seeds = {};
 const seed = lang => {
   if (seeds[lang]) return seeds[lang];
@@ -61,11 +62,11 @@ const seed = lang => {
   return (seeds[lang] = P);
 };
 let copies = 0;
-// T-0343: the fixture folders have Korean names, and Node 22.23.3's fs.cpSync crashes on non-ASCII paths on Windows.
+ 
 const { copyTreeSync } = require('../lib/copy-tree');
 const fresh = lang => { const P = path.join(arena, 'p' + (++copies) + ' 한글'); copyTreeSync(seed(lang), P); return P; };
-// Review round 1: the project's files with their modification times, its directory entries, and the redirected home,
-// app data and temp folders the CLI could write to outside the project.
+ 
+ 
 const snapshot = P => {
   const h = {};
   const walk = (root, d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name), key = path.relative(arena, p);
@@ -76,7 +77,7 @@ const snapshot = P => {
 };
 const tracker = P => path.join(P, '.leerness', 'progress-tracker.md');
 const taskId = P => { const r = succeed(['task', 'list', '--all', '--path', P, '--json']); return JSON.parse(r.stdout).tasks.find(t => t.request === 'Probe task').id; };
-// [label, args after the project is made, the file the refusal names]
+ 
 const CASES = P => [
   ['task add', ['task', 'add', 'Dry task'], tracker(P)],
   ['task drop', ['task', 'drop', taskId(P)], tracker(P)],
@@ -90,6 +91,11 @@ const CASES = P => [
   ['state verify', ['state', 'verify', '--result', 'pass'], path.join(P, '.leerness', 'runs', '_')],
   ['state handoff', ['state', 'handoff', 'dry handoff'], path.join(P, '.leerness', 'runs', '_')],
 ];
+const prepare = (P, label) => {
+  // The seed owns an open run. Close it only for the start case so a stable session
+  // (including a Codex caller) reaches the write guard, not run_already_open.
+  if (label === 'state start') succeed(['state', 'handoff', 'Seed complete before start', '--path', P]);
+};
 const refused = (label, P, args, want) => {
   const before = snapshot(P), r = run([...args, '--path', P, '--dry-run', '--json']);
   let doc = null;
@@ -103,7 +109,7 @@ test('direct: managed text refuses an unlocked edit as the dry-run guard does un
   const r = cp.spawnSync(process.execPath, [__filename, '--direct', dir], { cwd: arena, encoding: 'utf8', timeout: 120000, windowsHide: true, env });
   assert.strictEqual(r.status, 0, show(r));
   const got = JSON.parse(r.stdout);
-  // No language is registered outside the CLI, so the guard keeps its original (Korean) text.
+   
   assert.deepStrictEqual(got, { unguarded: { code: 'E_TEXT_LOCK', message: `Managed text requires its existing state lock: ${got.file}. Preserve the original and retry after checking it.` },
     guarded: { code: 'E_DRY_RUN_WRITE', message: GUARD.ko(got.file) }, file: got.file, unchanged: true });
 });
@@ -113,6 +119,7 @@ test('every command in the class refuses --dry-run with dry_run_unsupported, nam
   assert.strictEqual(labels.length, 11);
   for (const label of labels) {
     const P = fresh('en');
+    prepare(P, label);
     fs.writeFileSync(path.join(P, 'todo.json'), JSON.stringify([{ content: 'Synced item', status: 'pending' }]));
     const [, args, file] = CASES(P).find(c => c[0] === label);
     refused(label, P, args, { ok: false, error: REFUSAL.en(file), code: 'dry_run_unsupported' });
@@ -140,7 +147,7 @@ test('feature add keeps its own error report: the dry-run guard\'s refusal (E_DR
   assert.deepStrictEqual(snapshot(P), before, 'a file changed under --dry-run');
 });
 
-// What each command stores when it runs without --dry-run (review round 1: an exit 0 alone could be a no-op).
+ 
 const read = (P, name) => fs.readFileSync(path.join(P, '.leerness', name), 'utf8');
 const runs = P => fs.readdirSync(path.join(P, '.leerness', 'runs')).filter(n => n.endsWith('.json')).map(n => JSON.parse(read(P, path.join('runs', n))));
 const rows = P => read(P, 'progress-tracker.md').split(/\r?\n/);
@@ -152,7 +159,7 @@ const STORED = {
   'plan remove': P => !read(P, 'plan.md').includes('Probe milestone') && read(P, 'plan.archive.md').includes('Probe milestone'),
   'memory restore plan': P => read(P, 'plan.md').includes('Archived milestone'),
   'register-pending': P => rows(P).some(l => l.includes('Dry pending')),
-  // Review round 2: the run records' own fields, not text anywhere in them.
+   
   'state start': P => runs(P).some(r => r.goal === 'Dry goal'),
   'state record': P => runs(P).some(r => Array.isArray(r.files_changed) && r.files_changed.includes('dry-file.js')),
   'state verify': P => runs(P).some(r => r.verification_result === 'pass'),
@@ -163,6 +170,7 @@ test('controls: the same commands without --dry-run store their result', () => {
   assert.deepStrictEqual(Object.keys(STORED).sort(), [...labels].sort());
   for (const label of labels) {
     const P = fresh('en');
+    prepare(P, label);
     fs.writeFileSync(path.join(P, 'todo.json'), JSON.stringify([{ content: 'Synced item', status: 'pending' }]));
     const [, args] = CASES(P).find(c => c[0] === label);
     assert.ok(!STORED[label](P), `${label}: already stored before the run`);

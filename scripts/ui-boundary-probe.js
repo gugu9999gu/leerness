@@ -30,8 +30,8 @@ function noAuthority(result) {
   assert.equal(result.assessmentBasis, 'caller-declared-metadata');
 }
 
-// Human-labelled controls. Sample strings describe the intended fixture; the
-// API only receives the declarations. These are not semantic/scanner scores.
+ 
+ 
 const controls = [
   ['save action', '저장', {}, 'eligible-copy', null],
   ['required recovery action', '다시 시도', { intent: 'clearly-required' }, 'eligible-copy', null],

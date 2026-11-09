@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { createHash } = require('crypto');
 const { removeTree } = require('./temp-cleanup');
@@ -54,9 +54,9 @@ const open=fs.openSync.bind(fs);fs.openSync=function(p,flags,...args){if(mode===
 const spawn=cp.spawnSync.bind(cp);cp.spawnSync=function(a,b,o){if(o?.env?.LEERNESS_REPLACE_TO===target){if(mode==='publication')inject(target);const r=spawn(a,b,o);if(mode==='after-publication'&&r.status===0)inject(target);return r;}return spawn(a,b,o);};
 const link=fs.linkSync.bind(fs);fs.linkSync=function(a,b){if(mode==='publication')inject(b);const r=link(a,b);if(mode==='after-publication')inject(b);return r;};
 `);
-// T-0337: the partial-save notes and the memory input and output errors follow the project language of the commands'
-// own text. These fixtures carry .leerness/LANGUAGE=en without a manifest, which that rule reads as Korean, so the
-// English expectations run with LEERNESS_LANG=en.
+ 
+ 
+ 
 function call(f, args, opts = {}) {
   const r = cp.spawnSync(process.execPath, [...(opts.mode ? ['--require', hook] : []), cli, ...args, '--path', f.dir, ...(opts.human ? [] : ['--json'])], { cwd: f.dir, encoding: 'utf8', timeout: 45000, windowsHide: true,
     env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_LANG: 'en',
@@ -189,7 +189,7 @@ const children=[];const wait=async file=>{const end=Date.now()+12000;while(!fs.e
 const launch=(mode,direction)=>{const c=cp.spawn(process.execPath,['--require',hook,cli,'brief','update','--direction',direction,'--path',dir,'--json'],{windowsHide:true,env:{...process.env,LEERNESS_INTERNAL:'1',LEERNESS_OFFLINE:'1',LEERNESS_NO_AUTOCHCP:'1',LEERNESS_NO_STALE_CHECK:'1',BRIEF_LIB:lib,BRIEF_MODE:mode,BRIEF_TARGET:path.join(dir,'.leerness','project-brief.md'),BRIEF_WINNER:'',BRIEF_READY:ready,BRIEF_GO:go,BRIEF_STARTED:mode==='peer'?started:''}});children.push(c);let output='';c.stdout.on('data',d=>output+=d);c.stderr.on('data',d=>output+=d);return new Promise((resolve,reject)=>{c.on('error',reject);c.on('close',code=>resolve({code,output}));});};
 (async()=>{try{const first=launch('hold','first');await wait(ready);const second=launch('peer','second');await wait(started);fs.writeFileSync(go,'go');const results=await Promise.all([first,second]);if(results.some(r=>r.code!==0))throw Error(JSON.stringify(results));console.log('both updates completed');}finally{fs.writeFileSync(go,'go');for(const c of children)if(c.exitCode===null)c.kill();}})().catch(e=>{console.error(e);process.exitCode=1;});
 `);
-  const r = cp.spawnSync(process.execPath, [runner, cli, hook, f.dir, path.resolve(__dirname, '../lib')], { encoding: 'utf8', timeout: 35000, windowsHide: true });assert.ifError(r.error);success(r);
+  const r = cp.spawnSync(process.execPath, [runner, cli, hook, f.dir, path.resolve(__dirname, '../lib')], { cwd: arena, encoding: 'utf8', timeout: 35000, windowsHide: true });assert.ifError(r.error);success(r);
   const b = JSON.parse(call(f, ['brief', 'show']).stdout);assert.strictEqual(b.directionHistory.length, 3);assert.ok(b.directionHistory.some(x => x.endsWith(': first')) && b.directionHistory.some(x => x.endsWith(': second')));assert.ok(text(f.readme).includes(': first') && text(f.readme).includes(': second'));
 });
 test('dry-run writes remain unsupported and preserve all fixture files', () => {

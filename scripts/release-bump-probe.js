@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const cp = require('child_process');
 const fs = require('fs');
@@ -32,8 +32,8 @@ function runProbe(root) {
   const before = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
   const expected = nextPatch(before);
   const cli = path.join(root, 'bin', 'leerness.js');
-  // Windows는 대소문자를 구별하지 않지만 path.resolve는 문자열 대소문자를 보존한다.
-  // 실제 사용자가 소문자 드라이브 문자로 넘긴 경우도 자체 패키지 판별이 유지돼야 한다.
+   
+   
   const rootArg = process.platform === 'win32' ? root.slice(0, 1).toLowerCase() + root.slice(1) : root;
   const run = cp.spawnSync(process.execPath, [cli, 'release', 'bump', '--patch', '--path', rootArg], {
     cwd: root,
@@ -70,7 +70,7 @@ function runPreflightFailureProbe(root) {
   copyFixture(root);
   const cli = path.join(root, 'bin', 'leerness.js');
   const source = fs.readFileSync(cli, 'utf8');
-  // 유효한 JS이지만 release preflight가 요구하는 단일 선언 표면은 의도적으로 깨뜨린다.
+   
   fs.writeFileSync(cli, source.replace(/^const VERSION = '([^']+)';$/m, "const VERSION = String('$1');"));
   const targets = [
     path.join(root, 'package.json'),
@@ -101,13 +101,13 @@ function runPartialRollbackProbe(root) {
   const before = new Map(targets.map(file => [file, fs.readFileSync(file)]));
   const api = require(cli);
   const snapshots = targets.map(api._releaseFileSnapshot);
-  const transaction = api._runReleaseTransaction(snapshots, () => {
-    // 실제 release 순서와 같이 package → harness → bin까지 일부 변경한 뒤 실패를 주입한다.
+  const transaction = api._runReleaseTransaction(snapshots, publish => {
+     
     const pkg = JSON.parse(fs.readFileSync(targets[0], 'utf8'));
     pkg.version = '9.9.9';
-    fs.writeFileSync(targets[0], JSON.stringify(pkg, null, 2) + '\n');
-    fs.writeFileSync(targets[1], '9.9.9\n');
-    fs.writeFileSync(targets[2], fs.readFileSync(targets[2], 'utf8')
+    publish(targets[0], JSON.stringify(pkg, null, 2) + '\n');
+    publish(targets[1], '9.9.9\n');
+    publish(targets[2], fs.readFileSync(targets[2], 'utf8')
       .replace(/^const VERSION = '[^']+';$/m, "const VERSION = '9.9.9';"));
     throw new Error('injected after partial release writes');
   });

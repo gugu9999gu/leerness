@@ -1,12 +1,12 @@
-// 마이그레이션 사냥 v2 — 기록된 실패 모드를 정확히 겨냥한다.
-//  (a) **반복** 마이그레이션 (1.36.28 사고: "2번째부터 사라졌다")
-//  (b) 언어 전환 (1.36.60 사고: 구 언어 템플릿이 커스텀으로 오인돼 이월)
-//  (c) 연쇄 업그레이드 (구버전 → 중간 → 현재)
-//  (d) 사용자가 **템플릿과 같은 문장**을 의도적으로 쓴 경우(차감이 지우면 안 된다)
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+ 
+ 
+ 
+ 
+ 
+require('./temp-cleanup').trackTemp(module);  
 const fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { spawnNpmSync } = require('../lib/npm-process');
-const CUR = require('path').join(__dirname, '..', 'bin', 'leerness.js');   // 저장소 어디에 있든 동작
+const CUR = require('path').join(__dirname, '..', 'bin', 'leerness.js');    
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mh2-'));
 const E = (sb) => Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1', TMPDIR: sb, TEMP: sb, TMP: sb });
 let bad = 0;
@@ -42,7 +42,7 @@ console.log('■ (a) 반복 마이그레이션 — 기록된 사고는 "2번째�
       console.log(`   ${i}회차: 본문 생존 ${live.length}/${planted.length} · 완전손실 ${gone.length}` + (gone.length ? ' → ' + gone.join(', ') : ''));
       if (i === 4) { t('반복 4회 후 완전손실 0', gone.length === 0); t('반복 4회 후 본문 생존 전부', live.length === planted.length, live.length + '/' + planted.length); }
     }
-    // 파일 크기 폭주도 함께 본다 (이월이 무한히 자라면 그것도 결함)
+     
     const sz = fs.statSync(path.join(s.proj, 'CLAUDE.md')).size;
     t('반복해도 CLAUDE.md 가 폭주하지 않음', sz < 30000, sz + ' B');
   }

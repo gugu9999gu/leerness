@@ -1,13 +1,13 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
-// T-0343: the native real path, as the product resolves memory parents (lib/memory-parent.js). fs.realpathSync keeps an
-// 8.3 short name such as GitHub's C:\Users\RUNNER~1\..., and hooks that compare a renamed path by text then never fire.
+ 
+ 
 const arena = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'leerness-ml02-'));
 const entry = path.resolve(__dirname, '../bin/leerness.js');
 const PRIVATE = 'SYNTHETIC_PRIVATE_ML02';
@@ -55,25 +55,26 @@ function privateMetadata(result) {
 const legacy = surface => surface === 'decisions'
   ? `# Personal notes\n### 2026-09-12 — Example\n- Decision: ${PRIVATE}\n- Reason: test\n`
   : `# Personal notes\n### 2026-09-12\n- Lesson: ${PRIVATE}\n- Tag: fixture\n`;
-// T-0354: a run with no failures removes its arena; nothing did before, and every run of a memory probe left one in
-// the temp directory (1,206 were found). A failed run keeps it for inspection. Links inside the arena are removed
-// first, as links, so the removal never walks into a link's target, wherever that points. The arena itself must
-// still be the folder made above (same file identity, not a link): a test that renamed it away and put a link in its
-// place would otherwise have the walk run inside the link's target (review round 1). Review round 2: a folder can
-// also be replaced by a link after its lstat, and the arena right after the identity check, so each folder must still
-// resolve inside the arena just before it is listed and before a link in it is removed. finish() runs after the
-// tests, so nothing else changes the arena then; a process that kept swapping folders during finish() could still
-// race these checks. T-0357 moved these checks to scripts/temp-cleanup.js (ownTree, removeOwnedTree) for every probe.
-// finish() reports its own removal attempt. Under the test runner the tracker (line 2) also records the arena: the
-// runner keeps it after a failed run, and after a clean run in which finish() could not remove it, tries once more with
-// the same checks.
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const ownedArena = require('./temp-cleanup').ownTree(arena);
 function finish(label) {
   let kept = '';
   if (failed) { process.exitCode = 1; kept = ' (kept)'; }
   else {
     try {
-      require('./temp-cleanup').removeOwnedTree(ownedArena, { code: 'E_ARENA_REPLACED' }); kept = ' (removed)';
+      const outcome = require('./temp-cleanup').removeOwnedTree(ownedArena);
+      kept = outcome.removed ? ' (removed)' : ` (retained: ${outcome.reason})`;
     }
     catch (error) { kept = ` (not removed: ${error.code || error.message})`; }
   }

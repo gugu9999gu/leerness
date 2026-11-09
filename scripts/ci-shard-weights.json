@@ -1,5 +1,5 @@
 {
- "_about": "Seconds per unit, for scripts/ci-shard.js. e2e: per case of scripts/e2e.js, from the result-line timestamps of the Windows Node 18 gate job of public CI run 38193803239 (1.36.299); kept in 1.36.302 because no weighting from the first sharded run (38481240201) lowered the slowest Windows e2e shard (Node 18, 60.5 min) and most raised it (T-0360). npm: per leaf of test:commands and test:fast, the median of the Windows fast and gate commands jobs of public CI run 38481240201 (1.36.301; ci-shard: lines). Weights only balance the shards; a missing or stale weight cannot drop a unit. Refresh: node ./scripts/ci-shard.js weights.",
+ "_about": "Seconds per unit, for scripts/ci-shard.js. e2e: per case of scripts/e2e.js, from the result-line timestamps of the Windows Node 18 gate job of public CI run 38193803239 (1.36.299); kept in 1.36.302 because no weighting from the first sharded run (38481240201) lowered the slowest Windows e2e shard (Node 18, 60.5 min) and most raised it (T-0360). npm: per leaf of test:commands and test:fast, the median of the Windows fast and gate commands jobs of public CI run 38481240201 (1.36.301; ci-shard: lines). Four leaves added for T-0372 were timed on one Windows 11 PC with Node 26.3.0 on 2026-10-31 while GitHub Actions was paused, so they are not runner times. Weights only balance the shards; a missing or stale weight cannot drop a unit. Refresh: node ./scripts/ci-shard.js weights.",
  "e2e": {
   "--help: 제거된 설정 명령 없음": 0.2,
   "A(1.36.103)": 16.2,
@@ -424,6 +424,8 @@
   "제거된 setup-agents 명령은 설정을 변경하지 않음": 0.2
  },
  "npm": {
+  "node --test ./scripts/environment-budget-probe.js": 53.4,
+  "node --test ./scripts/windows-locator-unicode-probe.js": 0.8,
   "node ./scripts/agents-bench-output-probe.js": 7,
   "node ./scripts/api-skill-match-probe.js": 213,
   "node ./scripts/auto-update-hooks-probe.js": 24.1,
@@ -542,6 +544,8 @@
   "node ./scripts/runtime-repl-probe.js": 5.5,
   "node ./scripts/runtime-replacement-probe.js": 18.3,
   "node ./scripts/runtime-write-probe.js": 32.1,
+  "node ./scripts/safe-remove-probe.js": 21.6,
+  "node ./scripts/secret-assign-probe.js": 0.1,
   "node ./scripts/secret-scan-scope-probe.js": 1.6,
   "node ./scripts/selftest-cleanup-probe.js": 17.7,
   "node ./scripts/shared-state-lock-probe.js": 4.5,

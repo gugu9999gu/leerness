@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const fs = require('fs');
 const os = require('os');
@@ -183,8 +183,8 @@ try {
     "process.stdin.on('data', chunk => { stdin += chunk; });",
     `process.stdin.on('end', () => process.stdout.write(${JSON.stringify(fakeAgentPrefix)} + JSON.stringify({ argv: process.argv.slice(2), stdin })));`,
   ].join('\n') + '\n');
-  // 실제 npm Windows shim 형태. 이 파일이 실행되면 marker를 남기므로 portable runner가
-  // cmd.exe로 폴백했는지(= %ENV% 확장/BatBadBut 표면이 다시 열렸는지) 함께 검출한다.
+   
+   
   fs.writeFileSync(fakeAgentCmd, [
     '@ECHO off',
     `echo unsafe>"${fakeAgentMarker}"`,
@@ -209,8 +209,8 @@ try {
     catch { fs.copyFileSync(whereExe, cwdShadowGit); }
     try { fs.linkSync(process.execPath, cwdOnlyPortable); }
     catch { fs.copyFileSync(process.execPath, cwdOnlyPortable); }
-    // mountvol with an arbitrary token exits 0, so the old bare `where` locator
-    // falsely reported a deliberately missing package-script dependency as present.
+     
+     
     try { fs.linkSync(mountvolExe, cwdShadowWhere); }
     catch { fs.copyFileSync(mountvolExe, cwdShadowWhere); }
     try { fs.linkSync(process.execPath, cwdShadowChcp); }
@@ -225,7 +225,7 @@ try {
       `echo unsafe>"${cwdShadowNpmMarker}"`,
       'echo C:\\definitely-missing-leerness-global-root',
     ].join('\r\n') + '\r\n');
-    // Claude Code의 실제 npm shim처럼 Node가 아니라 PE .exe를 가리키는 변형.
+     
     fs.writeFileSync(fakeNativeCmd, [
       '@ECHO off',
       `echo unsafe>"${fakeNativeMarker}"`,
@@ -464,16 +464,16 @@ try {
   const benchMatrixWorkspaceLedgerBefore = fs.existsSync(benchMatrixWorkspaceLedger)
     ? fs.readFileSync(benchMatrixWorkspaceLedger) : null;
   const benchMatrixChild = cp.spawnSync(process.execPath, ['--trace-deprecation', '-e', benchMatrixChildScript], {
-    // The bench path now writes execution provenance. Run the synthetic matrix in
-    // the probe sandbox so a release check never appends fake model calls to the
-    // developer's real workspace ledger.
+     
+     
+     
     cwd: sandbox, encoding: 'utf8', timeout: 60000,
   });
   let benchMatrix = null;
   try { benchMatrix = JSON.parse(String(benchMatrixChild.stdout || '')); } catch {}
-  // The matrix deliberately includes Ollama without an explicit model. That
-  // case must return an unsupported result and set the child exit code to 1;
-  // successful supported calls and every provenance write are checked below.
+   
+   
+   
   if (benchMatrixChild.status !== 1 || !Array.isArray(benchMatrix) || benchMatrix.length !== EXTERNAL_AGENTS.length) {
     failures.push(`agents bench 10-provider settled matrix 실행 실패: ${JSON.stringify({
       exit: benchMatrixChild.status, signal: benchMatrixChild.signal,
@@ -520,7 +520,10 @@ try {
       failures.push(`CLI startup이 cwd chcp/npm shadow를 실행함: ${JSON.stringify({ status: startupVersion.status, stdout: String(startupVersion.stdout || '').trim(), chcp: fs.existsSync(cwdShadowChcpMarker), npm: fs.existsSync(cwdShadowNpmMarker), stderr: String(startupVersion.stderr || '').slice(0, 300) })}`);
     }
 
-    const envDetect = runCli(['env', 'detect', '--path', sandbox, '--json', '--no-write'], startupEnv);
+    const envDetectEnv = overrideEnvCaseInsensitive(startupEnv, {
+      PATH: path.dirname(process.execPath),
+    });
+    const envDetect = runCli(['env', 'detect', '--path', sandbox, '--json', '--no-write'], envDetectEnv);
     let envReport = null;
     try { envReport = JSON.parse(String(envDetect.stdout || '')); } catch {}
     const missingDep = envReport && envReport.snapshot && envReport.snapshot.scriptDependencies
@@ -528,7 +531,7 @@ try {
     if (envDetect.status !== 1 || !missingDep || missingDep.foundInPath !== false
         || !envReport.snapshot.tools.npm || !/^\d+\.\d+\.\d+/.test(envReport.snapshot.tools.npm.version)
         || fs.existsSync(cwdShadowChcpMarker) || fs.existsSync(cwdShadowNpmMarker)) {
-      failures.push(`handoff/env detect PATH-only locator 또는 npm tool 감지 실패: ${JSON.stringify({ status: envDetect.status, missingDep, npm: envReport && envReport.snapshot && envReport.snapshot.tools.npm, chcp: fs.existsSync(cwdShadowChcpMarker), startupNpm: fs.existsSync(cwdShadowNpmMarker), stderr: String(envDetect.stderr || '').slice(0, 300) })}`);
+      failures.push(`handoff/env detect PATH-only locator 또는 npm tool 감지 실패: ${JSON.stringify({ status: envDetect.status, code: envReport && envReport.code, inspection: envReport && envReport.inspection, missingDep, npm: envReport && envReport.snapshot && envReport.snapshot.tools.npm, chcp: fs.existsSync(cwdShadowChcpMarker), startupNpm: fs.existsSync(cwdShadowNpmMarker), stderr: String(envDetect.stderr || '').slice(0, 300) })}`);
     }
 
     const hostilePathValue = "C:\\safe $(Write-Output LEERNESS_PS_INJECTED) `tick 'quote; tail\\";
@@ -698,8 +701,8 @@ try {
     }
     if (fs.existsSync(fakeNativeMarker)) failures.push('Claude형 .exe npm shim이 cmd.exe로 실행됨');
 
-    // public one-shot agent 경로는 runCommandSafe가 scrubbed env를 사용한다. PATHEXT가 빠지면
-    // where.exe가 npm .cmd를 찾지 못해 _checkAgent만 성공하고 실제 프롬프트 호출은 ENOENT가 된다.
+     
+     
     const agentProject = path.join(sandbox, 'agent-one-shot-project');
     const agentEnv = overrideEnvCaseInsensitive(portableEnv, {
       LEERNESS_ENABLE_CLAUDE: '1',
@@ -757,9 +760,9 @@ try {
 
   const { resolveNpmCliPath, spawnNpmSync } = require(npmProcessPath);
   const fakeEnv = overrideEnvCaseInsensitive(process.env, {
-    // test:fast deliberately runs the product offline. These cases exercise the
-    // real npm-backed release paths with a local fake CLI, so keep that parent
-    // policy from short-circuiting the behavior under test.
+     
+     
+     
     LEERNESS_OFFLINE: '0',
     npm_execpath: fakeNpmCli,
     LEERNESS_NPM_PROBE_LOG: fakeNpmLog,
@@ -838,9 +841,9 @@ try {
     failures.push(`release channel npm view 실패 폴백 오류: exit=${channelFailure.status}`);
   }
 
-  // Explicit release publish must reuse the same token-safe path as sync-main.
-  // A project .env token is passed only through a short-lived userconfig, while
-  // an already-authenticated npm user remains supported when no token is set.
+   
+   
+   
   const publishToken = 'npm_probe_token_must_never_be_logged';
   const npmAuthProbe = 'c3ludGhldGljOnBhc3M=';
   const npmOtpProbe = '654321';
@@ -889,8 +892,8 @@ try {
     failures.push(`release publish token-safe/exact-artifact 공유 경로 오류: ${JSON.stringify({ status: securePublish.status, calls: secureCalls, call: securePublishCall, lifecycleUserconfigs, lifecycleConfigsGone: lifecycleUserconfigs.every(file => file && !fs.existsSync(file)), artifact: publishedArtifact, artifactExists: !!(publishedArtifact && fs.existsSync(publishedArtifact)), postpackRemoved: !fs.existsSync(postpackArtifact), tempGone: temporaryUserconfig ? !fs.existsSync(temporaryUserconfig) : false, tokenLeaked: secureOutput.includes(publishToken), stdout: String(securePublish.stdout || '').slice(0, 1200), stderr: String(securePublish.stderr || '').slice(0, 600) })}`);
   }
 
-  // npm 자체가 --userconfig 값을 lifecycle의 npm_config_userconfig로 다시 주입한다.
-  // 실제 npm을 한 번 실행해 그 값이 우리가 만든 빈 파일이며 인증 내용이 0B인지 고정한다.
+   
+   
   const actualLifecycleDir = path.join(sandbox, 'actual-npm-lifecycle-fixture');
   const actualEmptyDir = path.join(sandbox, 'actual-npm-empty-config');
   const actualEmptyConfig = path.join(actualEmptyDir, '.npmrc');
@@ -1076,7 +1079,7 @@ try {
       || !/name:\s*release runtime \(shell-free npm\)/.test(workflow)) {
     failures.push('CI가 전체 게이트와 Node 24/26 매트릭스에서 릴리스 런타임 프로브를 실행하지 않음');
   }
-  // T-0359: the full E2E runs in shards; Windows Node 24 must list every shard (1..k) of the e2e job.
+   
   const ciJobs = require('./ci-shard').workflowJobs(workflow);
   const e2eJob = ciJobs.test || { entries: [], runs: [], lines: [] };
   const win24 = e2eJob.entries.filter(e => e.os === 'windows-latest' && e.node === '24');
@@ -1103,6 +1106,7 @@ try {
 
   const cliSource = fs.readFileSync(path.join(root, 'bin', 'leerness.js'), 'utf8');
   const agentsSource = fs.readFileSync(path.join(root, 'lib', 'agents.js'), 'utf8');
+  const envProbeSource = ['env-tool-probe.js', 'env-probe-worker.js'].map(name => fs.readFileSync(path.join(root, 'lib', name), 'utf8')).join('\n');
   const portableSource = fs.readFileSync(portableProcessPath, 'utf8');
   const npmSource = fs.readFileSync(npmProcessPath, 'utf8');
   const gitSource = fs.readFileSync(gitProcessPath, 'utf8');
@@ -1126,9 +1130,46 @@ try {
     'cp.spawnSync(cmd, versionArgs,',
     "cp.spawnSync('npm',",
     "cp.spawnSync('npx',",
-  ].filter(shape => cliSource.includes(shape) || agentsSource.includes(shape));
+  ].filter(shape => cliSource.includes(shape) || agentsSource.includes(shape) || envProbeSource.includes(shape));
   if (deprecatedAgentShapes.length) {
     failures.push(`비릴리스 CLI 경로에 shell+argv 후보가 남음: ${deprecatedAgentShapes.join(', ')}`);
+  }
+  if (/shell\s*:\s*true/.test(envProbeSource) || !envProbeSource.includes('deps.spawnNpmSync(versionArgs, probe)')) {
+    failures.push('환경 도구 점검이 공용 portable/npm 실행기를 우회함');
+  }
+  try {
+    const assert = require('node:assert/strict');
+    const { performance } = require('node:perf_hooks');
+    const { probeTool } = require('../lib/env-tool-probe');
+    for (const cmd of ['node', 'npm']) {
+      const calls = [];
+      const capture = kind => (...args) => {
+        calls.push({ kind, args });
+        return { error: Object.assign(new Error('controlled missing tool'), { code: 'ENOENT' }) };
+      };
+      const deps = { spawnPortableSync: capture('portable'), spawnNpmSync: capture('npm') };
+      const versionArgs = ['--version', 'literal argument & value'];
+      const deadlineAt = performance.now() + 2000;
+      assert.equal(probeTool(cmd, versionArgs, { cwd: sandbox, deadlineAt }, deps), null);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].kind, cmd === 'npm' ? 'npm' : 'portable');
+      assert.deepEqual(calls[0].args.slice(0, -1), cmd === 'npm' ? [versionArgs] : [cmd, versionArgs]);
+      const options = calls[0].args[calls[0].args.length - 1];
+      assert.equal(options.cwd, sandbox);
+      assert.equal(options.deadlineAt, deadlineAt);
+      assert.equal(options.encoding, 'utf8');
+      assert.equal(options.timeout, 2000);
+      assert.equal(options.maxBuffer, 64 * 1024);
+      assert.ok(options.shell === undefined || options.shell === false);
+      const literalLookup = cmd !== 'npm' && process.platform === 'win32';
+      assert.equal(Object.hasOwn(options, 'literalPathLookup'), literalLookup);
+      if (literalLookup) assert.equal(options.literalPathLookup, true);
+      calls.length = 0;
+      assert.throws(() => probeTool(cmd, versionArgs, { cwd: sandbox, deadlineAt: performance.now() - 1 }, deps), { code: 'ETIMEDOUT' });
+      assert.equal(calls.length, 0);
+    }
+  } catch (error) {
+    failures.push(`환경 도구 점검 probeTool 계약 실패: ${String(error && (error.stack || error.message) || error)}`);
   }
   if (!cliSource.includes('spawnPortableSync(bin, finalArgs, spawnOpts)')
       || !agentsSource.includes('_spawnPortable(spec.file, spec.args')

@@ -1,6 +1,6 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// Exercise actual generation, migration and handoff; never filter user Unicode.
+require('./temp-cleanup').trackTemp(module);  
+ 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -39,14 +39,17 @@ try {
     const root = path.join(arena, lang + '-프로젝트 🐝');fs.mkdirSync(root);
     run(root, ['init', root, '--yes', '--language', lang, '--no-setup-agents']);
     test(lang + ' generated instructions omit decoration and retain the workflow', () => {
-      // Unicode classifies the bidirectional relation arrow as pictographic too;
-      // it conveys meaning in the workflow and must not be treated as decoration.
+       
+       
       for (const name of files) assert.doesNotMatch(read(root, name).replace(/↔/g, ''), /\p{Extended_Pictographic}/u, name);
       assert.ok(read(root, '.leerness/session-workflow.md').includes('↔'));
       for (const name of ['AGENTS.md', 'CLAUDE.md']) {
         const doc = read(root, name);assert.match(doc, /leerness:managed/);
-        const check = name === 'AGENTS.md' ? 'leerness check' : 'leerness verify-claim';
-        for (const cmd of ['leerness handoff', check, 'leerness session close']) assert.ok(doc.includes(cmd), name + ': ' + cmd);
+        for (const cmd of ['leerness handoff', 'leerness session close']) assert.ok(doc.includes(cmd), name + ': ' + cmd);
+        if (name === 'AGENTS.md') {
+          assert.match(doc, lang === 'en' ? /Completion claims require actual evidence/ : /완료 주장에는 실제 근거가 필요/);
+          assert.match(doc, lang === 'en' ? /verify-claim is an optional helper unless an explicit project rule requires it/ : /verify-claim은 명시적 프로젝트 규칙이 없는 한 선택 도구/);
+        } else assert.ok(doc.includes('leerness verify-claim'), name + ': leerness verify-claim');
       }
       assert.match(read(root, '.leerness/session-workflow.md'), /CRITICAL/);
       assert.match(read(root, '.leerness/language-policy.md'), new RegExp('Selected language: ' + lang));
@@ -83,7 +86,7 @@ try {
     });
     test(lang + ' migrate preserves custom Unicode and generates undecorated current sections', () => {
       const old = snapshot(root, [note]);
-      // Simulate the decorated heading used by older Leerness releases.
+       
       const agents = read(root, 'AGENTS.md').replace('## ' + (lang === 'en' ? 'First action every session' : '매 세션 첫 행동'), '## ⭐ ' + (lang === 'en' ? 'First action every session' : '매 세션 첫 행동'));
       fs.writeFileSync(path.join(root, 'AGENTS.md'), agents);
       run(root, ['migrate', root, '--force']);

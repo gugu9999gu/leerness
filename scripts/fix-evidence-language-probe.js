@@ -1,16 +1,16 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0333: `task fix-evidence` speaks the project's language. It printed Korean everywhere: in an English project the
-// header, the guidance, the per-row lines, the suggested evidence and the results of `--set` and of an empty list were
-// Korean. English projects now get English; Korean output stays byte for byte (every expected line below is the text
-// the command printed before). The language is chosen as for other commands (`--language`, LEERNESS_LANG, then the
-// project's manifest). Rows are made through the product. Every test works on its own copy of an initialized seed.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert'), fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const { removeTree } = require('./temp-cleanup');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const filter = process.argv.includes('--match') ? process.argv[process.argv.indexOf('--match') + 1] : '';
-// A filter must name something: a missing value or one that selects no test is a failure, not "0/0 passed".
-// Checked before any temporary folder exists, so this exit leaves nothing behind.
+ 
+ 
 if (process.argv.includes('--match') && !filter) { console.error('--match needs a test name substring'); process.exit(1); }
 const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fix-evidence-language-'));
 const env = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_OFFLINE: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_PATH_CHECK: '1',
@@ -43,8 +43,8 @@ const addDone = (dir, title, evidence) => {
   assert.strictEqual(u.status, 0, show(u));
   return id;
 };
-// Two placeholder rows (one a bare plan link), one done row with real evidence and one open row: only the first two
-// are candidates.
+ 
+ 
 const project = lang => {
   const P = fresh(lang);
   const A = addDone(P, 'row a', 'user-request'), B = addDone(P, 'row b', 'plan:M-0002');
@@ -56,8 +56,8 @@ const lines = out => String(out || '').replace(/\r\n/g, '\n').split('\n');
 const TEXT = {
   en: {
     header: n => `# task fix-evidence — ${n} candidate(s)`,
-    // Review round 1: the English names the rows the filter takes (the Korean says "no verification keyword") and
-    // counts the plan links --set appended (a link already in the new text is kept but not counted).
+     
+     
     intro: ['These done rows have empty or placeholder evidence (user-request, -, or only a plan link).', 'Update each with the command below, or all at once with --set "<common text>".', ''],
     row: (id, request, evidence) => [`leerness task update ${id} --evidence "verification result (e.g., npm test passed)"`, `  Request: ${request}`, `  Current evidence: "${evidence}"`, ''],
     none: '✓ No candidates to update (no done row has empty or placeholder evidence)',
@@ -80,7 +80,7 @@ for (const lang of ['en', 'ko']) {
     assert.strictEqual(r.status, 0, show(r));
     assert.deepStrictEqual(lines(r.stdout), listing(lang, P, A, B));
     if (lang === 'en') assert.ok(!HANGUL.test(r.stdout + r.stderr), 'Hangul in an English project:\n' + r.stdout + r.stderr);
-    // --fail-on-candidates prints the same list and exits 1.
+     
     const f = runIn(P, ['task', 'fix-evidence', '--path', P, '--fail-on-candidates']);
     assert.deepStrictEqual([f.status, lines(f.stdout)], [1, listing(lang, P, A, B)], show(f));
   });
@@ -92,21 +92,21 @@ for (const lang of ['en', 'ko']) {
     assert.deepStrictEqual([s.status, lines(s.stdout)], [0, [TEXT[lang].set(2, 1), '']], show(s));
     const md = fs.readFileSync(tracker, 'utf8');
     assert.ok(md.includes(`| ${A} | done | row a | checked by hand |`) && md.includes(`| ${B} | done | row b | checked by hand (plan:M-0002) |`), md);
-    // Nothing left to update.
+     
     const e = runIn(P, ['task', 'fix-evidence', '--path', P]);
     assert.deepStrictEqual([e.status, lines(e.stdout)], [0, [TEXT[lang].none, '']], show(e));
     if (lang === 'en') assert.ok(!HANGUL.test(s.stdout + s.stderr + e.stdout + e.stderr), 'Hangul in an English project:\n' + s.stdout + e.stdout);
     const Q = project(lang);
     const n = runIn(Q.P, ['task', 'fix-evidence', '--set', 'checked by hand', '--no-preserve-link', '--path', Q.P]);
     assert.deepStrictEqual([n.status, lines(n.stdout)], [0, [TEXT[lang].set(2, null), '']], show(n));
-    // Review round 1: what --no-preserve-link writes, not only what it prints: the plan link is not carried over.
+     
     const qmd = fs.readFileSync(path.join(Q.P, '.leerness', 'progress-tracker.md'), 'utf8');
     assert.ok(qmd.includes(`| ${Q.A} | done | row a | checked by hand |`) && qmd.includes(`| ${Q.B} | done | row b | checked by hand |`) && !qmd.includes('M-0002'), qmd);
   });
 }
 
 test('the language is chosen as for other commands: --language, then LEERNESS_LANG, then the manifest', () => {
-  // Review round 1: each override against the other source, in both directions, with the exit status.
+   
   const ko = project('ko'), en = project('en');
   const cases = [
     ['a Korean project, LEERNESS_LANG=en', ko, [], { LEERNESS_LANG: 'en' }, 'en'],

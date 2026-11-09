@@ -1,10 +1,10 @@
 'use strict';
-// T-0335: decision fences are found in one pass. Two readers matched fenced code with expressions that searched to the
-// end of the text again from every opening that never closes: _decisionBlocksWithOffset (decisions.md with line
-// numbers, /^```[^\n]*\n[\s\S]*?\n```[ \t]*$/gm, masked in place) and _stripDecisionFences (the decisions archive
-// reader, decisions.md parsing and the dated-block count, /^```[^\n]*\n[\s\S]*?\n```\s*$/gm, removed). T-0331 had
-// bounded the second by the last closing, which still left openings separated by \r, U+2028 or U+2029 quadratic with a
-// closing at the very end (review round 1). Both now use one scanner; the results are the same as the expressions'.
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const pu = require('../lib/pure-utils');
 
@@ -13,7 +13,7 @@ if (process.argv.includes('--match') && !filter) { console.error('--match needs 
 let passed = 0, failed = 0, ran = 0;
 const test = (name, fn) => { if (filter && !name.includes(filter)) return; ran++; try { fn(); passed++; console.log('PASS ' + name); } catch (e) { failed++; console.error('FAIL ' + name + ': ' + (e && e.stack || e)); } };
 
-// The two readers as they were before T-0331 and T-0335, from the same helpers.
+ 
 const ORIGINAL_STRIP = text => String(text || '').replace(/^```[^\n]*\n[\s\S]*?\n```\s*$/gm, '');
 const ORIGINAL_OFFSETS = text => {
   const raw = String(text || '');
@@ -26,7 +26,7 @@ const PARTS = ['`', '```', '````', '\n', '\n', '\r', '\r\n', ' ', ' ', C(9), 'a'
   C(0xa0), C(0x2028), C(0x2029), C(0xfeff), C(0x0b), '\n```', '```md\n', '```md\r', '\n``` ', '\n```' + C(9) + '\n', '\n```\r'];
 
 test('the same results as both expressions on random texts', () => {
-  // xorshift32: the multiply-and-mask generator used before drew only 1,193 distinct texts of 30,000 (review round 1).
+   
   let x = 88172645, differStrip = 0, differOffsets = 0, first = null;
   const rnd = n => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) % n; };
   const seen = new Set();
@@ -56,9 +56,9 @@ test('many unclosed openings are read in linear time, by every fence reader', ()
     ['one closing, then openings', '### 2026-01-01 — d\n```a\nb\n```\n' + openings, 1],
     ['openings, then one closing', '### 2026-01-01 — d\n' + openings + '\n```\n### 2026-01-02 — e\n', 2],
     ['closing lines with text after them', '### 2026-01-01 — d\n' + '```md\nx\n``` y\n'.repeat(N / 4), 1],
-    // Not a closing for the offsets expression (only spaces or tabs may follow the backticks).
+     
     ['openings, then backticks with a no-break space after them', '### 2026-01-01 — d\n' + openings + '\n```' + C(0xa0) + '\n', 1],
-    // Review round 1: openings that share one \n, with a closing at the very end.
+     
     ['openings separated by CR, a closing at the end', '### 2026-01-01 — d\n' + '```md\r'.repeat(N) + '\n```', 1],
     ['openings separated by U+2028, a closing at the end', '### 2026-01-01 — d\n' + ('```md' + C(0x2028)).repeat(N) + '\n```', 1],
     ['openings separated by U+2029, a closing at the end', '### 2026-01-01 — d\n' + ('```md' + C(0x2029)).repeat(N) + '\n```', 1],

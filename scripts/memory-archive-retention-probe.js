@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0193: real CLI coverage for fail-closed legacy archive retention plus
-// operation-local checked-file snapshot primitives used by restore.
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -61,18 +61,18 @@ function rejectedUnchanged(surface, entry, expectedCode = 'archive_lossy') {
   assert.strictEqual(payload.code, expectedCode);
   assert.deepStrictEqual(f.before(), before, 'rejected drop changed memory-domain files');
 }
-// T-0328: characters the exact line must never carry raw (they break or forge lines in viewers and terminals).
+ 
 const RAW_FORBIDDEN = [0x85, 0x7f, 0x2028, 0x2029].map(code => String.fromCharCode(code));
 function archiveDate(f) {
   const m = fs.readFileSync(f.archive, 'utf8').match(/## 제거 (\d{4}-\d{2}-\d{2})/);
   assert(m, 'the archive has no drop header');
   return m[1];
 }
-// T-0331: a drop now starts each block with an integrity record ("- Archive check: ..."), which refuses any edit before
-// the structural checks run. The tests that edit an archive by hand check those structural checks, which still read
-// blocks without a record (older drops, or a record deleted on purpose), so they delete the record first.
+ 
+ 
+ 
 function withoutRecord(f) { fs.writeFileSync(f.archive, fs.readFileSync(f.archive, 'utf8').replace(/^- Archive check: [^\n]*\n/gm, '')); }
-// Drop by `target` (the entry's own text by default), check the exact line, restore by the drop date, compare.
+ 
 function dropRestoresExactly(surface, entry, target) {
   const f = fixture(surface, entry);
   success(run(f.project, [surface === 'decisions' ? 'decision' : 'lesson', 'drop', target === undefined ? f.target : target]));
@@ -104,7 +104,7 @@ try {
     date: '2026-09-11', title: 'decision-extra', decision: 'decision-extra', reason: 'reason', alternatives: null, impact: null,
     extension: { nested: [1, null, { keep: true }] },
   }));
-  // T-0328 (owner's choice): multi-line values used to be refused here; the exact line now carries them.
+   
   check('decision drop archives multiline values exactly and restore brings them back', () => dropRestoresExactly('decisions', {
     date: '2026-09-11', title: 'decision-multiline', decision: 'decision-multiline', reason: 'line1\nline2', alternatives: null, impact: null,
   }));
@@ -131,7 +131,7 @@ try {
     });
   }
 
-  // T-0328: text fields the plain archive lines cannot carry exactly get an exact line; nothing else changes.
+   
   check('archive round-trip carries exact text fields and still refuses unknown fields and non-string values', () => {
     const [NEL, DEL, LS] = RAW_FORBIDDEN;
     const exact = [
@@ -154,7 +154,7 @@ try {
       ['lessons', { date: '2026-09-11', text: 'extra', tag: null, extension: { keep: true } }],
       ['decisions', { date: '2026-09-11', title: 'n', decision: 'n', reason: 5, alternatives: null, impact: null }],
     ]) assert.strictEqual(inspectArchiveEntry(surface, entry).lossless, false, JSON.stringify(entry));
-    // An entry the plain lines carry gets no exact line, so archives of such entries keep their bytes.
+     
     for (const [surface, entry] of [['lessons', { date: '2026-09-11', text: 'ordinary', tag: 'tag' }],
       ['decisions', { date: '2026-09-11', title: 't', decision: 'd', reason: null, alternatives: null, impact: null }]]) {
       assert(!inspectArchiveEntry(surface, entry).text.includes('Exact'), JSON.stringify(entry));
@@ -198,8 +198,8 @@ try {
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(f.json, 'utf8')).map(l => l.text).sort(), [' dup ', 'dup']);
   });
   check('restore refuses an archive whose exact line is damaged or cut off, without writes', () => {
-    // Review round 1: a payload cut off at the marker (then trimmed with the selected block), or a lost colon, must
-    // still count as an exact line and refuse, not restore the normalized plain text.
+     
+     
     for (const damage of ['- Exact JSON: {not json', '- Exact JSON: {"text":" x ","extra":"y"}', '- Exact JSON: {"text":5}',
       '- Exact JSON: []', '- Exact JSON: {}', '- Exact JSON: ', '- Exact JSON:', '- Exact JSON', '- Exact JSON {"text":" damaged exact "}']) {
       const f = fixture('lessons', { date: '2026-09-11', text: ' damaged exact ', tag: null });
@@ -229,17 +229,17 @@ try {
     assert.strictEqual(JSON.parse(r.stdout).code, 'archive_entry_invalid');
     assert.deepStrictEqual(f.before(), before, 'a refused restore changed memory-domain files');
   });
-  // Review round 1: what a restore reads is the archive as stored (UTF-8) and the selected drop block trimmed.
+   
   const writeBoth = (f, rows) => { fs.writeFileSync(f.json, JSON.stringify(rows, null, 2) + '\n'); fs.writeFileSync(f.md, _renderLessonsMd(rows)); };
   check('a lone surrogate survives through the exact line instead of turning into U+FFFD', () => {
-    // The second entry needs the exact line only because of the lone surrogate: compared as JavaScript strings its
-    // plain lines look lossless, but the archive is stored in UTF-8.
+     
+     
     for (const entry of [{ date: '2026-09-11', text: ' x ', tag: 'tag' + String.fromCharCode(0xd800) },
       { date: '2026-09-11', text: 'plain x', tag: 'tag' + String.fromCharCode(0xd800) }]) {
       const inspected = inspectArchiveEntry('lessons', entry);
       assert.strictEqual(inspected.lossless, true, JSON.stringify(entry));
       assert(inspected.text.includes(String.fromCharCode(92) + 'ud800'), 'the exact line does not escape the lone surrogate: ' + JSON.stringify(entry));
-      // Without lessons.md the drop goes through (with it, the projection guard refuses such an entry first).
+       
       const f = fixture('lessons', entry);
       fs.unlinkSync(f.md);
       success(run(f.project, ['lesson', 'drop', entry.text]));
@@ -284,8 +284,8 @@ try {
     assert.deepStrictEqual(f.before(), before, 'a refused restore changed memory-domain files');
   });
   check('an archive cut off inside an exact entry is refused before the exact line and restored exactly after it', () => {
-    // The exact line comes right after the heading and holds every field: a cut that removes it takes the plain lines
-    // with it (the entry cannot be read, so the restore refuses); a cut after it leaves enough to restore exactly.
+     
+     
     const rows = [{ date: '2026-09-11', text: ' first ', tag: 'kept tag' }, { date: '2026-09-11', text: ' last ', tag: 'cut tag' }];
     for (const where of ['after the heading', 'after the exact line', 'the last line removed']) {
       const f = fixture('lessons', rows[0]); writeBoth(f, rows);
@@ -294,7 +294,7 @@ try {
       const lastHeading = archived.lastIndexOf('\n### ');
       const exactAt = archived.indexOf('\n- Exact JSON: ', lastHeading);
       assert(lastHeading > 0 && exactAt > lastHeading, 'the last entry has no exact line');
-      // 'the last line removed' drops the archive's last non-empty line, whatever it is.
+       
       const body = archived.replace(/\n+$/, '');
       const cut = where === 'after the heading' ? archived.indexOf('\n', lastHeading + 1) + 1
         : where === 'after the exact line' ? archived.indexOf('\n', exactAt + 1) + 1
@@ -323,9 +323,9 @@ try {
     }
   });
   check('a whitespace-only lesson whose tag holds "- Lesson: X" restores without a false conflict', () => {
-    // The exact line holds `- Lesson: X "}`; an active lesson with exactly that text must not count as the same lesson.
-    // (The plain lesson line always comes first and is what identities read; restore also reads them from the plain
-    // lines only, which no rendered archive needs but a hand-edited one could.)
+     
+     
+     
     const f = fixture('lessons', { date: '2026-09-11', text: '   ', tag: ' - Lesson: X ' });
     success(run(f.project, ['lesson', 'drop', '   ']));
     assert(fs.readFileSync(f.archive, 'utf8').includes('- Lesson: X "}'), 'the exact line does not hold the decoy');
@@ -333,7 +333,7 @@ try {
     success(run(f.project, ['memory', 'restore', 'lessons', archiveDate(f)]));
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(f.json, 'utf8')).map(l => l.text).sort(), ['   ', 'X "}']);
   });
-  // Review round 2.
+   
   const writeDecisions = (f, rows) => { fs.writeFileSync(f.json, JSON.stringify(rows, null, 2) + '\n'); fs.writeFileSync(f.md, _renderDecisionsMd(rows)); };
   const refusedUnchanged = (f, label) => {
     const before = f.before();
@@ -343,8 +343,8 @@ try {
     assert.deepStrictEqual(f.before(), before, label + ': a refused restore changed memory-domain files');
   };
   check('a duplicate is found from the exact line alone, and --force still restores (both surfaces)', () => {
-    // The conflict check read the archive's plain lines, so an archive cut right after the exact line let a duplicate
-    // through without --force and consumed its block.
+     
+     
     for (const surface of ['lessons', 'decisions']) {
       const entry = surface === 'lessons' ? { date: '2026-09-11', text: ' dup ', tag: 'tag' }
         : { date: '2026-09-11', title: ' dupd ', decision: 'd', reason: 'r', alternatives: null, impact: null };
@@ -386,8 +386,8 @@ try {
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(f.json, 'utf8')), rows);
   });
   check('a decision block renamed to "Template" is refused when it has an exact line; a plain one is skipped as before', () => {
-    // Round 2 restored the renamed exact block from its line; round 3: an exact section must match what the writer
-    // wrote for its entry, so an edited heading refuses instead of being ignored.
+     
+     
     const rows = [{ date: '2026-09-11', title: 'tmpl first', decision: 'd1', reason: null, alternatives: null, impact: null },
       { date: null, title: ' tmpl second ', decision: 'd2', reason: null, alternatives: null, impact: null }];
     for (const which of ['exact', 'plain']) {
@@ -403,7 +403,7 @@ try {
       assert.deepStrictEqual(JSON.parse(fs.readFileSync(f.json, 'utf8')), [rows[1]], which);
     }
   });
-  // Review round 3.
+   
   const dropBoth = (surface, rows, target) => {
     const f = fixture(surface, rows[0]); (surface === 'decisions' ? writeDecisions : writeBoth)(f, rows); f.surface = surface;
     success(run(f.project, [surface === 'decisions' ? 'decision' : 'lesson', 'drop', target]));
@@ -439,7 +439,7 @@ try {
     refusedUnchanged(f, 'merged plain entries');
   });
   check('an undated "Template x" decision drops through its exact line and still conflicts with an active "Template x"', () => {
-    // The decisions Markdown skips a "### Template" block; the conflict check must not (round 3: the duplicate went through).
+     
     const entry = { date: null, title: 'Template x', decision: 'd', reason: null, alternatives: null, impact: null };
     const f = fixture('decisions', entry);
     success(run(f.project, ['decision', 'drop', 'Template x']));
@@ -454,8 +454,8 @@ try {
     assert.deepStrictEqual([rows.length, rows[1]], [2, entry]);
   });
   check('an archive turned to CRLF with trailing spaces stripped still restores exact and plain entries exactly', () => {
-    // An exact section is compared with what the writer wrote, ignoring line endings (git can convert them) and trailing
-    // spaces (editors strip them), so neither turns a good entry into a refusal.
+     
+     
     const rows = [{ date: null, text: ' es padded ', tag: null }, { date: '2026-09-11', text: 'es plain', tag: 'tag' }];
     const f = fixture('lessons', rows[0]); writeBoth(f, rows);
     success(run(f.project, ['lesson', 'drop', 'es ']));
@@ -466,8 +466,8 @@ try {
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(f.json, 'utf8')), rows);
   });
   check('untouched drops of several entries restore exactly when a field ends with a Unicode space', () => {
-    // Review round 4: the writer's text was trimmed before the comparison, so an exact entry whose last line ends with an
-    // NBSP (or another space JavaScript trims) was refused when another entry followed it, with no edit to the archive.
+     
+     
     for (const code of [0xa0, 0x2003, 0x3000, 0xfeff]) {
       const ws = String.fromCharCode(code);
       for (const surface of ['lessons', 'decisions']) {
@@ -481,7 +481,7 @@ try {
     }
   });
   check('a drop made by a target with a tab is selected by the target as the header wrote it, not by the original', () => {
-    // The drop header holds the target on one line (control characters made spaces); restore matches that header.
+     
     const entry = { date: '2026-09-11', text: 'tab' + String.fromCharCode(9) + 'here', tag: null };
     const f = fixture('lessons', entry);
     success(run(f.project, ['lesson', 'drop', entry.text]));
@@ -512,8 +512,8 @@ try {
     refusedUnchanged(f, 'exact line without heading');
   });
   check('fenced code inside a decisions drop block is not read as an entry, as the decisions Markdown reads it', () => {
-    // The writer never puts a fence in an archive, but an older archive kept raw blocks and an archive can be edited by
-    // hand; a `### ` line inside a fence must not start a decision (the ablation found no test for this).
+     
+     
     const entry = { date: '2026-09-11', title: 'fenced decision', decision: 'd', reason: null, alternatives: null, impact: null };
     const f = fixture('decisions', entry);
     success(run(f.project, ['decision', 'drop', entry.title]));
@@ -531,7 +531,7 @@ try {
     assert.deepStrictEqual(list.lessons.map(e => e.target), [entry.text]);
     assert.strictEqual(JSON.parse(run(f.project, ['memory', 'status']).stdout).archive.lessons, 1);
   });
-  // Admission refuses a non-string field before the archive is reached; the archive refuses it too (checked above).
+   
   check('lesson drop still refuses a non-string tag without writes', () => rejectedUnchanged('lessons', {
     date: '2026-09-11', text: 'numeric-tag', tag: 7,
   }, 'store_item_unsupported'));

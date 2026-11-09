@@ -48,12 +48,34 @@ rolls back new work. If preparation stopped before the artifacts were complete,
 the unchanged original files can reconstruct them. Unknown states, malformed
 records and missing required originals produce a conflict with a recovery path.
 
-An abrupt process termination can also retain the shared progress lock. The
-existing lock deliberately does not treat a PID check or elapsed time as fencing
-proof. Status reports that blocker, and recovery refuses to remove the owner
-lock automatically. First establish that every prior writer has ended, preserve
-the lock record through the project's manual lock-recovery procedure, and request
-a fresh recovery preview. This feature does not add a general lock takeover API.
+An abrupt process termination can also retain the shared progress lock. The lock
+stays only while the history journal is pending: a kill with no journal, or with a
+complete one, is reclaimed by the next writer once its owner is proven dead (see
+[state-store-locking](state-store-locking.md)). With a pending journal, status
+reports the blocker and recovery refuses to remove the lock itself. Stop all
+writers, including writers on other computers, and independently establish that
+the recorded owner has ended. Preserve the pending journal, original manifest and
+artifacts, and the exact lock owner record. An old timestamp or PID alone is not
+proof; unknown ownership, links or changed recovery material require a stop.
+
+For an explicitly approved recovery, retain the whole confirmed-ended
+`.leerness/progress-tracker.md.lock` directory by moving it to a unique, previously
+absent location on the same filesystem. Verify both absolute paths, refuse an
+existing destination, and compare the retained owner bytes and filesystem identity.
+Do not delete the lock or recovery evidence. Request a fresh `preview-recover` for
+the original operation ID, then run `recover` with that exact digest. The existing
+checks refuse unknown current states and changes since the preview rather than
+overwriting later work. Keep writers stopped throughout: the observations and
+manual move are not atomic. This feature does not add a lock takeover API.
+
+The same kill can leave a retained file, such as `history-operation.json`, with a
+second name, because a publish links the new file into place before it removes its
+temporary name. The reader refuses a file with two hard links. When a name
+`.<name>.publish-<pid>-<24 hex>` beside it is the same file, `status` and
+`preview-recover` say so and name it: deleting that name is safe and the bytes stay
+under the other one. Both commands only read, and neither removes it. Reclaim does
+this itself for a lock it clears; the message is for the case where a person
+deleted the lock first.
 
 Restoration requires the operation's unchanged post-image. New work is preserved
 by refusing an overlapping restore; automatic merging is not implemented. The

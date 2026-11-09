@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('assert/strict');
 const fs = require('fs');
@@ -319,14 +319,121 @@ try {
     assert.equal(state.progressLockPresent, true);
     refused(root, () => W.previewRecover(root, state.operationId), 'history_lock_recovery_required');
     refused(root, () => W.recover(root, { operationId: state.operationId, expected: 'a'.repeat(64) }), 'history_lock_recovery_required');
-    // This fixture owns and has synchronously waited for that exact child to
-    // terminate. Preserve its lock evidence; production never infers this from PID.
+     
+     
     const lock = tracker(root) + '.lock', retained = path.join(arena, 'confirmed-ended-lock-' + sequence++);
     assert(lock.startsWith(root + path.sep) && path.dirname(retained) === arena && !fs.existsSync(retained));
     fs.renameSync(lock, retained);
     const p = W.previewRecover(root, state.operationId), recovered = W.recover(root, { operationId: state.operationId, expected: p.expected });
     assert.equal(recovered.state, 'retained');const restore = W.previewRestore(root, state.operationId);
     W.restore(root, { operationId: state.operationId, expected: restore.expected });assert(fs.readFileSync(tracker(root)).equals(before));
+  });
+  // A retention whose process really ends. before: ends at the first publication (the journal). after: ends right after
+  // that file is published. nested: the retention runs inside an ordinary task lock, so the owner record has no marker.
+  function killedRetention(root, { before = false, after = null, nested = false }) {
+    const code = `const O=require(${JSON.stringify(require.resolve('../lib/memory-output'))});const W=require(${JSON.stringify(require.resolve('../lib/history-retention-write'))});const L=require(${JSON.stringify(require.resolve('../lib/state-lock'))});
+      const original=O.publishMemoryOutput;O.publishMemoryOutput=function(token,file,bytes){${before ? 'process.exit(73);' : ''}const r=original(token,file,bytes);${after ? `if(file.endsWith(${JSON.stringify(after)}))process.exit(73);` : ''}return r;};
+      const root=process.argv[1],tasks=['T-0002','T-0003'],p=W.preview(root,{tasks}),run=()=>W.apply(root,{tasks,expected:p.expected});
+      ${nested ? 'L.withStateLock(require("path").join(root,".leerness","progress-tracker.md"),run);' : 'run();'}`;
+    const child = spawnSync(process.execPath, ['-e', code, root], { encoding: 'utf8', timeout: 60000, windowsHide: true });
+    assert.equal(child.status, 73, child.stdout + child.stderr);
+  }
+  const ageLock = lock => { const old = new Date(Date.now() - 60000); for (const n of fs.readdirSync(lock)) fs.utimesSync(path.join(lock, n), old, old); fs.utimesSync(lock, old, old); };
+  const lockFailure = fn => { try { fn(); } catch (e) { return e; } return null; };
+  const english = fn => require('../lib/error-language').withErrorLanguage('en', fn);
+  // Like call(), with English messages (task update refuses a --language flag, so the environment carries it).
+  function callEn(root, args) {
+    const r = spawnSync(process.execPath, [cli, ...args, '--path', root, '--json'], { encoding: 'utf8', timeout: 90000, windowsHide: true,
+      env: { ...process.env, LEERNESS_OFFLINE: '1', LEERNESS_INTERNAL: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_LANG: 'en' } });
+    let data; try { data = JSON.parse(r.stdout); } catch {}
+    return { ...r, data };
+  }
+  for (const nested of [false, true]) {
+    test(`a retention killed ${nested ? 'inside an ordinary task lock ' : ''}keeps the progress lock while its journal is pending: writers fail with E_LOCK_TIMEOUT and the tracker stays`, () => {
+      const root = fixture(); killedRetention(root, { nested, after: 'progress-tracker.md' });
+      const state = W.status(root); assert.equal(state.state, 'pending'); assert.equal(state.progressLockPresent, true);
+      const lock = tracker(root) + '.lock', [ownerName] = fs.readdirSync(lock), bytes = fs.readFileSync(tracker(root));
+      assert.equal('keepOnCrash' in JSON.parse(fs.readFileSync(path.join(lock, ownerName), 'utf8')), false, 'the owner record carries no marker, so only the journal can keep this lock');
+      ageLock(lock);   // old enough that the freshness veto is not what keeps it
+      const heldBefore = snapshot(root);
+      const e = lockFailure(() => english(() => withStateLock(tracker(root), () => assert.fail('entered a lock that must stay'), { maxWaitMs: 1500 })));
+      assert(e && e.code === 'E_LOCK_TIMEOUT', e && e.stack); assert.equal(e.lockState, 'kept-for-recovery');
+      assert(/A history operation stopped partway/.test(e.message) && e.message.includes('Lock path: ' + lock), e.message);
+      assert(fs.readFileSync(tracker(root)).equals(bytes)); assert(fs.existsSync(lock)); assert.equal(W.status(root).state, 'pending');
+      // What a person is told to do next: from the read-only status, and from the refusal of preview-recover while the lock exists.
+      assert.equal(W.status(root).next, 'Retain the entire progress lock, owner record, archive and recovery files. Stop all writers and independently confirm the recorded owner has ended. Follow docs/history-retention.md for explicit non-destructive recovery, then request a fresh preview-recover with this operation ID; if ownership or artifacts are uncertain, stop.');
+      const refusal = lockFailure(() => W.previewRecover(root, state.operationId));
+      assert(refusal && refusal.code === 'history_lock_recovery_required', refusal && refusal.stack);
+      assert.equal(refusal.message, 'The progress lock still exists: .leerness/progress-tracker.md.lock. Retain the entire lock, owner record, archive and recovery files. Stop all writers and independently confirm the recorded owner has ended. Follow docs/history-retention.md for explicit non-destructive recovery, then request a fresh preview-recover with this operation ID. If ownership or artifacts are uncertain, stop.');
+      assert.deepEqual(snapshot(root), heldBefore, 'warning/status/preview preserve the lock, owner and recovery files');
+      if (nested) return;
+      const r = callEn(root, ['task', 'update', 'T-0001', '--status', 'completed']);   // the real command waits out its 35 s budget
+      // The command reports every storage failure under the generic code 'error', so the lock failure is read from its message.
+      assert.equal(r.status, 1, r.stdout + r.stderr); assert.equal(r.data.ok, false, r.stdout);
+      assert(/^Lock acquisition failed — stopped to protect the data from concurrent writes: progress-tracker\.md \(timeout\)/.test(r.data.error), r.data.error);
+      assert(/A history operation stopped partway/.test(r.data.error) && r.data.error.includes('Lock path: ' + lock), r.data.error);
+      assert(fs.readFileSync(tracker(root)).equals(bytes), 'a refused task update writes nothing'); assert(fs.existsSync(lock));
+    });
+  }
+  // A kill between a publish's link and its removal of the temporary name leaves the file with two names, and every read refuses a
+  // file with two names. After a kept lock was deleted by hand, nothing removed that name and nothing said how. The refusal now names it.
+  test('a history journal with a second name left by an interrupted publish: the refusal names that name, reading writes nothing, and removing it ends the dead end', () => {
+    const root = fixture(); killedRetention(root, { after: 'progress-tracker.md' });
+    const state = W.status(root), journal = path.join(root, '.leerness', 'history-operation.json'), lock = tracker(root) + '.lock';
+    const alias = path.join(root, '.leerness', `.history-operation.json.publish-${process.pid}-${'ab12'.repeat(6)}`);
+    fs.linkSync(journal, alias); assert.equal(fs.statSync(journal).nlink, 2);
+    const before = snapshot(root), listing = fs.readdirSync(path.join(root, '.leerness')).sort();
+    for (const [lang, safe, kept] of [['en', /Deleting that name is safe and the file's bytes stay/, /Delete it, then retry/], ['ko', /지워도 안전하고 파일 내용은 그대로 남습니다/, /지운 뒤 다시 실행하세요/]]) {
+      const refused = lockFailure(() => require('../lib/error-language').withErrorLanguage(lang, () => W.status(root)));
+      assert(refused && refused.code === 'history_source_invalid' && refused.cause === 'E_STORE_INVALID', `${lang}: ${refused && refused.stack}`);
+      assert(refused.message.includes(alias), `${lang}: the message names the second name: ${refused.message}`);
+      assert(safe.test(refused.message) && kept.test(refused.message), `${lang}: ${refused.message}`); assert.equal(refused.secondName, alias);
+      const preview = lockFailure(() => require('../lib/error-language').withErrorLanguage(lang, () => W.previewRecover(root, state.operationId)));
+      assert(preview && preview.code === 'history_source_invalid' && preview.message.includes(alias), `${lang}: preview-recover says the same: ${preview && preview.message}`);
+    }
+    assert.deepStrictEqual(snapshot(root), before, 'status and preview-recover are read-only: no byte and no time changed');
+    assert.deepStrictEqual(fs.readdirSync(path.join(root, '.leerness')).sort(), listing, 'and no name was removed');
+    // The person deletes that name, as the message says. The journal is readable again; the lock, which is theirs to delete, is still reported.
+    fs.unlinkSync(alias);
+    assert.equal(W.status(root).state, 'pending'); assert.equal(fs.statSync(journal).nlink, 1);
+    const stillLocked = lockFailure(() => W.previewRecover(root, state.operationId));
+    assert(stillLocked && stillLocked.code === 'history_lock_recovery_required', stillLocked && stillLocked.stack);
+    fs.rmSync(lock, { recursive: true, force: true });
+    const plan = W.previewRecover(root, state.operationId); assert.equal(plan.ok, true);
+    W.recover(root, { operationId: state.operationId, expected: plan.expected });
+    assert.equal(W.status(root).state, 'complete');
+  });
+  test('a file with a second name that is not an interrupted publish\'s keeps the plain refusal', () => {
+    const root = fixture(); killedRetention(root, { after: 'progress-tracker.md' });
+    const journal = path.join(root, '.leerness', 'history-operation.json');
+    for (const [label, name] of [['a copy under another name', 'journal-copy.json'], ['the right shape with 23 hex characters', `.history-operation.json.publish-${process.pid}-${'a'.repeat(23)}`],
+      ['a pid of 0', `.history-operation.json.publish-0-${'a'.repeat(24)}`], ['another file\'s name', `.other.json.publish-${process.pid}-${'a'.repeat(24)}`]]) {
+      const alias = path.join(root, '.leerness', name); fs.linkSync(journal, alias);
+      const refused = lockFailure(() => english(() => W.status(root)));
+      assert(refused && refused.code === 'history_source_invalid', `${label}: ${refused && refused.stack}`);
+      assert.equal(refused.secondName, undefined, `${label}: nothing is named`); assert(!/Deleting that name is safe/.test(refused.message), `${label}: ${refused.message}`);
+      assert(/^Retained history cannot be read safely: /.test(refused.message), `${label}: ${refused.message}`);
+      fs.unlinkSync(alias);
+    }
+    // A name of the right shape that is a different file is not named either, even when the file has a second name elsewhere.
+    const copy = path.join(root, '.leerness', 'journal-copy.json'); fs.linkSync(journal, copy);
+    const unrelated = path.join(root, '.leerness', `.history-operation.json.publish-${process.pid}-${'c'.repeat(24)}`); fs.writeFileSync(unrelated, 'not the same file');
+    const refused = lockFailure(() => english(() => W.status(root)));
+    assert(refused && refused.secondName === undefined && !/Deleting that name is safe/.test(refused.message), refused && refused.message);
+  });
+  test('a retention killed before its journal exists leaves a lock that the next writer reclaims', () => {
+    const root = fixture(); killedRetention(root, { before: true });
+    assert.equal(W.status(root).state, 'absent'); const lock = tracker(root) + '.lock', bytes = fs.readFileSync(tracker(root));
+    assert(fs.existsSync(lock)); ageLock(lock);
+    const saved = process.env.LEERNESS_NO_LOCK_WARN; process.env.LEERNESS_NO_LOCK_WARN = '1';
+    try { assert.equal(withStateLock(tracker(root), () => 7, { maxWaitMs: 3000 }), 7); } finally { if (saved === undefined) delete process.env.LEERNESS_NO_LOCK_WARN; else process.env.LEERNESS_NO_LOCK_WARN = saved; }
+    assert(fs.readFileSync(tracker(root)).equals(bytes)); assert.equal(fs.existsSync(lock), false);
+    // The same state through the real command: the next task add reclaims, announces it, and succeeds without waiting out its budget.
+    const other = fixture(); killedRetention(other, { before: true }); ageLock(tracker(other) + '.lock');
+    const r = callEn(other, ['task', 'add', 'after the kill']);
+    assert.equal(r.status, 0, r.stdout + r.stderr); assert(fs.readFileSync(tracker(other), 'utf8').includes('after the kill'));
+    assert(/Cleared a lock left by a stopped process \(pid \d+\): progress-tracker\.md/.test(r.stderr), r.stderr);
+    assert.equal(fs.existsSync(tracker(other) + '.lock'), false);
   });
   test('completed retention with missing history or replaced index never becomes empty trusted history', () => {
     const root = fixture();retain(root);
@@ -363,8 +470,8 @@ try {
         return normal(root);};`);
     const raced = spawnSync(process.execPath, ['-r', hook, cli, 'task', 'list', '--all', '--path', root, '--json'],
       { encoding: 'utf8', timeout: 90000, windowsHide: true,
-        // T-0337: memory input errors follow the project language; this fixture has no manifest (Korean), so the
-        // English text below is asked for with LEERNESS_LANG=en.
+         
+         
         env: { ...process.env, LEERNESS_OFFLINE: '1', LEERNESS_INTERNAL: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_LANG: 'en' } });
     assert.notEqual(raced.status, 0, raced.stdout + raced.stderr);
     assert.match(raced.stdout + raced.stderr, /Memory input changed during operation/);

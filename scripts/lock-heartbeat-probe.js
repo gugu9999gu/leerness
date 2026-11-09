@@ -1,10 +1,10 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// The state-lock heartbeat worker re-checks the admission of the operation that holds the lock.
-// It used to make a new admission on every touch, which ran `git rev-parse` with the project as its
-// working directory: once per lock and once per second while a lock was held (measured on Windows:
-// a project directory could not be deleted for a few hundred ms after the locked call returned).
+ 
+ 
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -39,11 +39,11 @@ function project(name, withGit) {
   fs.writeFileSync(path.join(root, '.leerness/progress-tracker.md'), '# Progress\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n');
   return root;
 }
-// Each lock lifecycle runs in its own process: GIT_TRACE must be set before the heartbeat worker starts.
-function lifecycle(mode, root) {
+ 
+function lifecycle(mode, root, cwd) {
   const trace = path.join(directory, `trace-${mode}-${path.basename(root)}.log`);
   const result = cp.spawnSync(process.execPath, [__filename, '--child', mode, root, trace],
-    { env: { ...env, GIT_TRACE: trace }, encoding: 'utf8', timeout: 60000, windowsHide: true });
+    { cwd, env: { ...env, GIT_TRACE: trace }, encoding: 'utf8', timeout: 60000, windowsHide: true });
   const line = String(result.stdout || '').trim().split('\n').pop();
   let report;
   try { report = JSON.parse(line); } catch { throw new Error(`no report (exit ${result.status}): ${result.stdout}${result.stderr}`); }
@@ -64,16 +64,16 @@ async function child() {
   const held = _withLock(target, () => gate);
   const ownerPath = path.join(target + '.lock', fs.readdirSync(target + '.lock')[0]);
   const created = mtime(ownerPath);
-  const atAcquire = count();   // the holding operation's own admission is already counted
+  const atAcquire = count();    
   const until = async (predicate, timeout) => { const end = Date.now() + timeout; while (!predicate() && Date.now() < end) await pause(20); return predicate(); };
   report.heartbeatHealthy = await until(() => mtime(ownerPath) !== created, 5000);
   if (mode === 'hold') {
-    await pause(2500);   // more than two 1000 ms heartbeat ticks
+    await pause(2500);    
     report.gitCallsWhileHeld = count() - atAcquire;
     report.heartbeatAdvanced = mtime(ownerPath) !== created;
   } else if (mode === 'topology') {
-    // A repository created around the running operation invalidates that operation's admission;
-    // the heartbeat follows the same admission and must stop touching.
+     
+     
     const init = cp.spawnSync('git', ['-C', root, 'init', '-q'], { env: { ...process.env, GIT_TRACE: '' }, windowsHide: true });
     report.gitInit = init.status;
     await pause(300);
@@ -111,6 +111,14 @@ async function child() {
         assert.strictEqual(report.gitCallsWhileHeld, 0, `heartbeat ran git ${report.gitCallsWhileHeld} times`);
       });
     }
+    await test('held lock: the heartbeat runs from a working folder with non-ASCII characters', () => {
+      const root = project('잠금-é', false);
+      const report = lifecycle('hold', root, root);
+      assert.strictEqual(report.heartbeatHealthy, true, 'heartbeat never touched the owner file');
+      assert.strictEqual(report.heartbeatAdvanced, true);
+      // Only an affected Node build and code page crash on the old form, so pin it for every other run.
+      assert.doesNotMatch(fs.readFileSync(path.resolve(__dirname, '../lib/state-lock.js'), 'utf8'), /\brequire\(workerData\./);
+    });
     await test('a repository created under a held lock stops the heartbeat with the holding admission', () => {
       const root = project('grows-repo', false);
       const report = lifecycle('topology', root);

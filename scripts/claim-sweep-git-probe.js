@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0302: count real Git status requests at the CLI boundary, rather than
-// matching the implementation's source text.
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');

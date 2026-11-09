@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// Functional contract checks using only disposable, locally owned fixtures.
+ 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -264,7 +264,7 @@ try {
   });
   console.log(`store-diagnostic probe: ${passed}/${passed} PASS`);
 } finally {
-  // Resolve and check the exact allocated directory before recursive removal.
+   
   const resolved = fs.realpathSync.native(fixture);
   assert.strictEqual(resolved, fixtureIdentity);
   assert.strictEqual(path.dirname(resolved), tempRoot);

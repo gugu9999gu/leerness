@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -130,7 +130,7 @@ async function main() {
     await test('each changed material and changed record bytes fail exact Git target verification', async () => {
       const s = await common(), t = s.descriptor.target;
       for (const file of [...s.request.files.map(f => f.path), t.recordPath]) {
-        // Reset the fixture content via its known original bytes, not a repository reset.
+         
         for (const f of s.request.files) fs.writeFileSync(path.join(s.root, f.path), s.materialBytes[f.path]);
         fs.writeFileSync(path.join(s.root, t.recordPath), s.saved.recordJson);
         fs.appendFileSync(path.join(s.root, file), '\nchanged');

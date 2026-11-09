@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -248,8 +248,8 @@ async function main() {
       const owner = JSON.parse(fs.readFileSync(path.join(lock, names[0]), 'utf8')); assert.equal(owner.pid, killed.killedPid);
       const h = prepare(s); assert.equal(h.terminalPresent, phase !== 'before-terminal');
       const original = terminals(s)[0] || null;
-      // The child exit was observed above. This is an explicit fixture operator
-      // action, not product auto-takeover. Preserve actual ledger/Git bytes.
+       
+       
       removeTree(lock, { recursive: true, force: true });
       const out = await fresh(s); assert.equal(out.ok, true, encode(out)); assert.equal(terminals(s).length, 1);
       if (original) assert.deepEqual(terminals(s)[0], original); assert.equal(calls, n);

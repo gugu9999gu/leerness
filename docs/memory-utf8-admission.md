@@ -8,13 +8,13 @@ The shared memory-array guard is called under the existing canonical operation l
 
 Malformed UTF-8 or invalid JSON produces the existing `store_corrupt` CLI error category. A valid JSON root that is not an array remains `store_invalid`. `--force` does not bypass these checks. A duplicate no-op also rejects a malformed canonical file rather than reporting success.
 
-A valid literal replacement character (U+FFFD), UTF-8 BOM, Korean text, supplementary Unicode and multiline values remain accepted. Canonical absence retains the existing Markdown fallback/empty-initialization behavior. Read-only commands retain their existing permissive behavior; their success is not a certificate of encoding integrity.
+A valid literal replacement character (U+FFFD), UTF-8 BOM, Korean text, supplementary Unicode and multiline values remain accepted. Canonical absence retains the existing Markdown fallback/empty-initialization behavior. The read-only loaders are separate from mutation admission, but the current loaders use checked UTF-8 reads before parsing. Malformed canonical encoding returns `store_corrupt` without replacing bytes or selecting a valid projection instead. Existing read-only fallback for valid-UTF-8 JSON parsing/shape failures and canonical absence is unchanged; success does not certify canonical JSON integrity.
 
 ## Verification
 
 Run `node scripts/memory-utf8-admission-probe.js` or `npm run test:memory-utf8`. The probe is also included in the existing test, core, command and fast chains.
 
-The owned-fixture matrix tests both surfaces, three malformed byte sequences, and six operations: add/save, duplicate no-op, forced duplicate, drop, restore and forced restore. Positive controls cover valid U+FFFD, BOM, Unicode/multiline unknown fields, missing canonical, empty initialization and read-only behavior. Rejected cases compare memory-domain file sets, bytes and modification times; successful cases verify both the requested operation and full surviving canonical values. Source file hashes and modification times are checked separately. Reports retain actual child status, signal and error data.
+The owned-fixture matrix tests both surfaces, three malformed byte sequences, and six operations: add/save, duplicate no-op, forced duplicate, drop, restore and forced restore. Positive controls cover valid U+FFFD, BOM, Unicode/multiline unknown fields, missing canonical and empty initialization. The 83-case probe also requires read-only malformed-encoding refusal with unchanged memory-domain paths, bytes, hashes, sizes and mtimes, and a combined BOM/literal-U+FFFD list control on each surface with the full canonical entries and unknown extension preserved. Rejected cases compare memory-domain file sets, bytes and modification times; successful cases verify both the requested operation and full surviving canonical values. Source file hashes and modification times are checked separately. Reports retain actual child status, signal and error data.
 
 ## Boundaries
 

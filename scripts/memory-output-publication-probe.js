@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0193: actual CLI final-publication race probe.
-// The preload hook simulates a non-cooperating writer at the last pathname
-// publication primitive (rename/link/ReplaceFileW). Desired behavior is never a
-// silent success that discards the injected bytes.
+ 
+ 
+ 
+ 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -179,10 +179,10 @@ function assertNotSilentLoss(r, project, target, competitor) {
   const recoverable = liveEquals || artifactContains(project, payload, competitor);
   assert(recoverable, `external bytes are neither live nor recoverable; code=${payload.code}`);
   assert(['output_changed', 'memory_partial_write', 'store_changed'].includes(payload.code), `unexpected conflict code: ${payload.code}`);
-  // On Windows ReplaceFileW can atomically publish our planned bytes while the
-  // competing pathname object becomes the displaced backup. When that happens,
-  // the durable memory receipt itself must copy/reference those competitor bytes;
-  // passing merely because an internal scratch directory still exists is not enough.
+   
+   
+   
+   
   if (!liveEquals && payload.recoveryReceipt) {
     const receiptPath = path.join(project, ...payload.recoveryReceipt.split('/'));
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));

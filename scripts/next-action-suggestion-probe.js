@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const fs = require('fs');
 const os = require('os');
@@ -54,6 +54,7 @@ async function reproduceTakeMigrationRace(root) {
   };
   const concurrentAction = { ...oldAction, title: 'progress-tracker 25h 정체 — task T-0001 status 갱신' };
   writeQueue(root, [oldAction]);
+  fs.writeFileSync(path.join(root, '.leerness', 'HARNESS_VERSION'), require('../package.json').version + '\n');
   fs.mkdirSync(lockPath);
 
   const child = cp.spawn(process.execPath, [cliPath, 'next-action', 'take', '0', '--path', root], {
@@ -70,8 +71,8 @@ async function reproduceTakeMigrationRace(root) {
   child.stderr.on('data', chunk => { stderr += chunk; });
   await Promise.race([selected, delay(1000)]);
 
-  // Current buggy take has already selected the 24h title outside the lock. A concurrent
-  // normalizer changes that title while holding the queue lock, so its later title lookup misses.
+   
+   
   writeQueue(root, [concurrentAction]);
   fs.rmdirSync(lockPath);
   const result = await new Promise(resolve => {
@@ -79,7 +80,10 @@ async function reproduceTakeMigrationRace(root) {
     child.on('exit', code => { clearTimeout(timer); resolve({ code, stdout, stderr, timeout: false }); });
   });
   const persisted = JSON.parse(fs.readFileSync(queuePath, 'utf8')).queue;
-  return { ...result, remaining: persisted.length };
+  const trackerPath = path.join(root, '.leerness', 'progress-tracker.md');
+  const tasks = fs.existsSync(trackerPath)
+    ? require('../lib/progress-rows').parseProgressRows(fs.readFileSync(trackerPath, 'utf8')) : [];
+  return { ...result, remaining: persisted.length, tasks };
 }
 
 async function main() {
@@ -119,9 +123,9 @@ async function main() {
     if (queue.some(a => a.icon === '🔄' && /\d+h/.test(String(a.title)))) offenders.push('dynamic-progress-title');
     if (queue.filter(a => ['🎯', '💭', '🧪', '🧬', '🔄'].includes(a.icon)).some(a => !a.actionKey)) offenders.push('stable-action-key');
 
-    // Every read surface must expose the same normalized contract as next-action list/take.
-    // A published release writes auto-resume-plan from this snapshot, while context is consumed
-    // by external agents; leaking legacy commands through either surface reintroduces the bug.
+     
+     
+     
     const planRoot = path.join(arena, 'resume-project');
     fs.mkdirSync(path.join(planRoot, '.leerness'), { recursive: true });
     fs.writeFileSync(path.join(planRoot, '.leerness', 'auto-resume-plan.json'), JSON.stringify({
@@ -154,8 +158,8 @@ async function main() {
     if (!pendingFinding) offenders.push('pre-wake-missing-next-action');
     else if (pendingFinding.count !== queue.length) offenders.push('pre-wake-raw-next-action-count');
 
-    // Execute corrected generated commands against an ordinary project. This guards command
-    // existence and flags, rather than merely asserting that selected source strings changed.
+     
+     
     for (const action of queue.filter(a => ['🎯', '💭', '🧪'].includes(a.icon))) {
       const args = commandArgs(action.command);
       if (args.shift() !== 'leerness') { offenders.push(`non-leerness-command:${action.icon}`); continue; }
@@ -167,6 +171,7 @@ async function main() {
     const race = await reproduceTakeMigrationRace(raceRoot);
     if (race.timeout || race.code !== 0) offenders.push('take-race-process');
     if (race.remaining !== 0) offenders.push('take-race-left-queued');
+    if (race.tasks.length !== 1 || race.tasks[0].request !== 'progress-tracker 정체 — task T-0001 상태 검토') offenders.push('take-race-task-missing');
   } finally {
     try { fs.rmSync(arena, { recursive: true, force: true }); } catch {}
   }

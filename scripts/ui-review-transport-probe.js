@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -71,7 +71,7 @@ test('plain summary names render artifacts, developer notes and debug text diffe
   assert.match(lines.find(l => l.startsWith('- Surface 2:')), /developer note or temporary copy/);
   assert.match(lines.find(l => l.startsWith('- Surface 3:')), /development or debug text/);
   assert.ok(!lines.some(l => l.startsWith('- Surface 4:')));
-  // A surface mixing an artifact with a note keeps the general wording rather than excusing the note.
+   
   const mixed = cli(['scan', '--stdin'], input([surface('TODO: fix\n{{title}}')])).stdout;
   assert.match(mixed, /- Surface 1: possible development or debug text/);
 });

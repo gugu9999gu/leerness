@@ -44,7 +44,7 @@ for (const surface of ['decisions', 'lessons']) {
       assert.equal(result.ok, false); assert.equal(result.status, 'partial'); assert.equal(result.retentionVerified, true);
       assert(result.recoveryReceipt); assert(fs.readFileSync(path.join(root, p.retentionDirectory, 'source.md')).equals(raw));
       const retried = invoke(root, 'apply', surface, p.operationId);
-      // No ownership receipt means a matching canonical is not attributed to us.
+       
       assert.equal(retried.ok, !(name === 'canonical-created.json' && when === 'before'));
       if (retried.ok) assert.equal(invoke(root, 'rollback', surface, p.operationId).ok, true);
     });

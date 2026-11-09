@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
-// T-0304: per-command runtime cost. The checks count child processes instead of timing them,
-// so they stay deterministic on slow CI machines.
-//   - commands that never read skills do not run skillpack discovery (`npm root -g`)
-//   - skillpack discovery reuses a machine cache keyed by its inputs, and --dry-run writes none
-//   - runtime environment collection runs once per process; tool versions only on request
-//   - default handoff reuses the tool inventory per project until PATH executables, a probed
-//     executable or a version file change, while explicit capture (--writeback) always probes
-//   - machine cache entries stay bounded and keep the newest even within one millisecond
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');
@@ -23,22 +23,52 @@ const pathDir = path.join(root, 'path-dir');
 const preload = path.join(root, 'census.js');
 const TOOL_NAMES = new Set(['npm', 'pnpm', 'yarn', 'git', 'python', 'python3', 'pip', 'docker', 'gh', 'java',
   'go', 'rustc', 'cargo', 'deno', 'bun', 'tsc', 'next', 'vite']);
+let fixtureGit;
 
-// Every node process started with this preload appends one JSON argv line per child process.
-// The descriptor is opened before the CLI runs and written with writeSync: --dry-run later wraps
-// the path-based fs mutators (appendFileSync itself calls the wrapped writeFileSync), and the
-// census must keep recording under it.
-fs.writeFileSync(preload, `'use strict';
+ 
+ 
+ 
+ 
+fs.writeFileSync(preload, String.raw`'use strict';
 const file = process.env.LEERNESS_PROBE_CENSUS;
 if (file) {
   const cp = require('child_process');
   const fs = require('fs');
   const fd = fs.openSync(file, 'a');
   const writeSync = fs.writeSync.bind(fs);
+  const path = require('path');
+  const tools = new Set(${JSON.stringify([...TOOL_NAMES])});
+  const fixtureDir = process.env.LEERNESS_RUNTIME_COST_FIXTURE_DIR;
+  const toolName = value => {
+    const name = path.basename(String(value)).replace(/\.(exe|cmd|bat|cjs|mjs|js)$/i, '');
+    return name === 'npm-cli' ? 'npm' : name;
+  };
+  const located = tool => {
+    const candidate = tool === 'git' ? process.env.LEERNESS_RUNTIME_COST_GIT
+      : tool === 'npm' ? path.join(path.dirname(process.execPath), process.platform === 'win32' ? 'npm.cmd' : 'npm')
+      : path.join(fixtureDir, tool + (process.platform === 'win32' ? '.cmd' : ''));
+    return candidate && fs.existsSync(candidate) ? candidate : null;
+  };
   for (const name of ['spawnSync', 'spawn', 'execFileSync', 'execSync']) {
     const original = cp[name];
     cp[name] = function (command, args) {
-      try { writeSync(fd, JSON.stringify([String(command), ...(Array.isArray(args) ? args.map(String) : [])]) + '\\n'); } catch {}
+      try { writeSync(fd, JSON.stringify([String(command), ...(Array.isArray(args) ? args.map(String) : [])]) + '\n'); } catch {}
+      if (name === 'spawnSync' && fixtureDir && Array.isArray(args)) {
+        const locator = /^(where(?:\.exe)?|which)$/i.test(path.basename(String(command)));
+        const requested = args.length === 1 ? String(args[0]) : '';
+        if (locator && (tools.has(requested) || requested === 'leerness-probe-missing-tool')) {
+          const found = tools.has(requested) ? located(requested) : null;
+          return { status: found ? 0 : 1, signal: null, stdout: found ? found + '\n' : '', stderr: '' };
+        }
+        if (['--version', '-version', 'version'].includes(args[args.length - 1])) {
+          const tool = [command, ...args.slice(0, -1)].map(toolName).find(value => tools.has(value));
+          if (tool && !located(tool)) return { status: null, signal: null, stdout: '', stderr: '',
+            error: Object.assign(new Error('controlled executable is absent'), { code: 'ENOENT' }) };
+          if (tool) return process.env.LEERNESS_RUNTIME_COST_FIXTURE_MODE === 'incomplete' && tool === 'npm'
+            ? { status: 42, signal: null, stdout: '', stderr: 'controlled unavailable version' }
+            : { status: 0, signal: null, stdout: tool + '-fixture-version\n', stderr: '' };
+        }
+      }
       return original.apply(this, arguments);
     };
   }
@@ -48,13 +78,18 @@ if (file) {
 function envWith(overrides) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
-    if (/^(NODE_OPTIONS|LEERNESS_SKILLPACK_PATH|LEERNESS_CACHE_DIR|LEERNESS_NO_ENV_DETECT|LEERNESS_PROBE_CENSUS)$/i.test(key)) delete env[key];
+    if (/^(NODE_OPTIONS|LEERNESS_SKILLPACK_PATH|LEERNESS_CACHE_DIR|LEERNESS_NO_ENV_DETECT|LEERNESS_PROBE_CENSUS|LEERNESS_RUNTIME_COST_FIXTURE_\w+|LEERNESS_RUNTIME_COST_GIT)$/i.test(key)) delete env[key];
   }
   const pathKey = Object.keys(env).find(key => key.toUpperCase() === 'PATH') || 'PATH';
-  env[pathKey] = pathDir + path.delimiter + (env[pathKey] || '');
+  const systemDirs = process.platform === 'win32'
+    ? [path.join(process.env.SystemRoot || process.env.WINDIR, 'System32')]
+    : ['/usr/bin', '/bin'];
+  env[pathKey] = [pathDir, path.dirname(process.execPath), path.dirname(fixtureGit), ...systemDirs].join(path.delimiter);
   return Object.assign(env, {
     LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_AUTO_ROADMAP: '1',
     LEERNESS_NO_STALE_CHECK: '1',
+    LEERNESS_RUNTIME_COST_FIXTURE_DIR: pathDir, LEERNESS_RUNTIME_COST_GIT: fixtureGit,
+    LEERNESS_RUNTIME_COST_FIXTURE_MODE: 'complete',
   }, overrides);
 }
 
@@ -90,18 +125,33 @@ const envLines = text => text.split(/\r?\n/).filter(line => /PATH|leerness-probe
 try {
   fs.mkdirSync(project);
   fs.mkdirSync(pathDir);
+  const gitLocation = cp.spawnSync(process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || process.env.WINDIR, 'System32', 'where.exe') : 'which', ['git'],
+  { encoding: 'utf8', timeout: 2000, maxBuffer: 64 * 1024 });
+  assert.strictEqual(gitLocation.status, 0, 'controlled fixture requires the real Git used by non-version commands');
+  fixtureGit = String(gitLocation.stdout).split(/\r?\n/).find(file => path.isAbsolute(file) && fs.statSync(file).isFile());
+  assert(fixtureGit, 'controlled fixture requires an ordinary real Git executable');
+  for (const tool of TOOL_NAMES) {
+    if (['npm', 'git', 'deno'].includes(tool)) continue;
+    if (process.platform === 'win32') {
+      const entry = path.join(pathDir, 'node_modules', 'runtime-cost-fixture', tool + '.js');
+      fs.mkdirSync(path.dirname(entry), { recursive: true });
+      fs.writeFileSync(entry, `console.log(${JSON.stringify(tool + '-fixture-version')});\n`);
+      fs.writeFileSync(path.join(pathDir, tool + '.cmd'), '@"%_prog%" "%dp0%\\node_modules\\runtime-cost-fixture\\' + tool + '.js" %*\r\n');
+    } else fs.writeFileSync(path.join(pathDir, tool), '#!/bin/sh\necho ' + tool + '-fixture-version\n', { mode: 0o755 });
+  }
   fs.writeFileSync(path.join(project, 'package.json'),
     JSON.stringify({ name: 'runtime-cost-probe', version: '0.0.0', scripts: { lint: 'leerness-probe-missing-tool .' } }) + '\n');
   run(['init', project, '--yes'], path.join(root, 'cache-init'));
 
-  // 1. Commands that never read skills pay no skillpack discovery.
+   
   const skillCache = path.join(root, 'cache-skill');
   for (const args of [['--version'], ['task', 'list', '--json']]) {
     assert.strictEqual(npmRootCalls(run(args, skillCache)), 0, `${args.join(' ')} must not run npm root -g`);
   }
   console.log('PASS: --version and task list run no skillpack discovery');
 
-  // 2. Discovery that does run is cached by its inputs; --dry-run leaves no cache behind.
+   
   const dryCache = path.join(root, 'cache-dry');
   const dry = run(['skill', 'list', '--json', '--dry-run'], dryCache);
   assert(!fs.existsSync(dryCache), '--dry-run must not create a machine cache');
@@ -118,7 +168,7 @@ try {
     console.log(`SKIP: a skillpack is resolvable here (${source}); discovery-cache counts need a builtin environment`);
   }
 
-  // 3. Runtime environment: one collection per process, tool versions only on request, copies returned.
+   
   const calls = [];
   const originalSpawnSync = cp.spawnSync;
   cp.spawnSync = function (command, args) {
@@ -146,24 +196,40 @@ try {
   }
   console.log('PASS: runtime environment is collected once per process and tools only on request');
 
-  // 4. Default handoff reuses the tool inventory; PATH changes and explicit capture probe again.
+   
   const envCache = path.join(root, 'cache-env');
-  const first = run(['handoff', project], envCache);
+  const first = run(['handoff', project, '--inspect'], envCache);
   assert(toolProbes(first) > 0, 'a cold cache must probe tools');
-  const second = run(['handoff', project], envCache);
+  assert(!/환경 조회: 미확인|Environment inspection: unknown/.test(first.stdout), 'cold inspection must complete before testing warm reuse');
+  const inventoryFile = path.join(envCache, 'env-tools.json');
+  const inventoryEntries = JSON.parse(fs.readFileSync(inventoryFile, 'utf8')).entries;
+  assert.strictEqual(Object.keys(inventoryEntries).length, 1, 'cold inspection must publish one inventory');
+  const inventoryKey = Object.keys(inventoryEntries)[0], inventory = inventoryEntries[inventoryKey].value;
+  assert(inventory && inventory.tools && inventory.commands && Array.isArray(inventory.files) && inventory.files.length > 0
+    && Number.isFinite(inventory.probedAt), 'published inventory must be complete and usable');
+  assert.strictEqual(inventory.commands['leerness-probe-missing-tool'], false);
+  for (const [file, size, mtime] of inventory.files) {
+    const stat = fs.statSync(file);
+    assert.strictEqual(stat.size, size); assert.strictEqual(stat.mtimeMs, mtime);
+  }
+  const inventoryCache = require('../lib/machine-cache'), previousInventoryDir = process.env.LEERNESS_CACHE_DIR;
+  process.env.LEERNESS_CACHE_DIR = envCache;
+  try { assert.deepStrictEqual(inventoryCache.readCache('env-tools', inventoryKey, 24 * 60 * 60 * 1000), inventory); }
+  finally { if (previousInventoryDir === undefined) delete process.env.LEERNESS_CACHE_DIR; else process.env.LEERNESS_CACHE_DIR = previousInventoryDir; }
+  const second = run(['handoff', project, '--inspect'], envCache);
   assert.strictEqual(toolProbes(second), 0, 'a warm cache must not probe tools');
   assert.deepStrictEqual(envLines(second.stdout), envLines(first.stdout), 'cached inventory must not change handoff output');
   assert(envLines(second.stdout).some(line => line.includes('leerness-probe-missing-tool')),
     'the missing script command must still be reported from the cache');
-  // Directory activity that leaves the executable names alone (a daemon rewriting a lock or log)
-  // changes the directory time but must keep the cache; a new executable name must not.
+   
+   
   const transient = path.join(pathDir, 'daemon.lock');
   fs.writeFileSync(transient, 'x');
   fs.rmSync(transient);
-  assert.strictEqual(toolProbes(run(['handoff', project], envCache)), 0, 'directory activity without new executables keeps the cache');
-  // One of the probed tools (deno) now resolves to this directory, so its files are part of the inventory.
-  // Windows runs only native executables and npm-style shims without a shell (a plain .cmd is refused
-  // and never detected), so the fake tool there is an npm shim whose JavaScript entry prints the version.
+  assert.strictEqual(toolProbes(run(['handoff', project, '--inspect'], envCache)), 0, 'directory activity without new executables keeps the cache');
+   
+   
+   
   const win = process.platform === 'win32';
   const fakeEntry = win ? path.join(pathDir, 'node_modules', 'fake-deno', 'deno.js') : path.join(pathDir, 'deno');
   const writeFakeTool = version => fs.writeFileSync(fakeEntry,
@@ -173,21 +239,21 @@ try {
     fs.writeFileSync(path.join(pathDir, 'deno.cmd'), '@"%_prog%" "%dp0%\\node_modules\\fake-deno\\deno.js" %*\r\n');
   }
   writeFakeTool('0.0.0');
-  assert(toolProbes(run(['handoff', project], envCache)) > 0, 'a new executable on PATH must invalidate the cache');
-  assert(toolProbes(run(['handoff', project, '--writeback'], envCache)) > 0, 'explicit capture must always probe');
-  assert.strictEqual(toolProbes(run(['handoff', project], envCache)), 0, 'the refreshed inventory is reused');
-  // An upgrade in place keeps every executable name; only the probed file's state reveals it.
+  assert(toolProbes(run(['handoff', project, '--inspect'], envCache)) > 0, 'a new executable on PATH must invalidate the cache');
+  assert(toolProbes(run(['handoff', project, '--inspect', '--writeback'], envCache)) > 0, 'explicit capture must always probe');
+  assert.strictEqual(toolProbes(run(['handoff', project, '--inspect'], envCache)), 0, 'the refreshed inventory is reused');
+   
   writeFakeTool('0.0.1-upgraded');
-  assert(toolProbes(run(['handoff', project], envCache)) > 0, 'an executable upgraded in place must invalidate the cache');
-  // Version managers pick tool versions from project files: a changed version file, or another
-  // project, probes again instead of reusing this project's inventory.
+  assert(toolProbes(run(['handoff', project, '--inspect'], envCache)) > 0, 'an executable upgraded in place must invalidate the cache');
+   
+   
   fs.writeFileSync(path.join(project, '.tool-versions'), 'nodejs 0.0.0\n');
-  assert(toolProbes(run(['handoff', project], envCache)) > 0, 'a changed version file must invalidate the cache');
+  assert(toolProbes(run(['handoff', project, '--inspect'], envCache)) > 0, 'a changed version file must invalidate the cache');
   const other = path.join(root, 'other-project');
   fs.mkdirSync(other);
   run(['init', other, '--yes'], path.join(root, 'cache-init'));
-  // Same version files with the same size and time: only the project differs. A version file in a
-  // parent directory, which the key does not read, can still select different tools there.
+   
+   
   const stamp = new Date(Math.floor(Date.now() / 1000) * 1000);
   for (const name of ['package.json', '.tool-versions']) {
     fs.copyFileSync(path.join(project, name), path.join(other, name));
@@ -195,16 +261,36 @@ try {
     const [a, b] = [project, other].map(dir => fs.statSync(path.join(dir, name)));
     assert(a.size === b.size && a.mtimeMs === b.mtimeMs, `setup: ${name} must be identical in both projects`);
   }
-  run(['handoff', project], envCache);   // cache the inventory for the stamped files
-  assert(toolProbes(run(['handoff', other], envCache)) > 0, 'another project must not reuse this inventory');
-  // Version managers also read environment variables (PYENV_VERSION, ASDF_*, MISE_*, VOLTA_* and similar).
-  assert.strictEqual(toolProbes(run(['handoff', project], envCache)), 0, 'setup: this project is cached');
-  assert(toolProbes(run(['handoff', project], envCache, { PYENV_VERSION: 'probe-0.0' })) > 0,
+  run(['handoff', project, '--inspect'], envCache);
+  assert(toolProbes(run(['handoff', other, '--inspect'], envCache)) > 0, 'another project must not reuse this inventory');
+   
+  assert.strictEqual(toolProbes(run(['handoff', project, '--inspect'], envCache)), 0, 'setup: this project is cached');
+  assert(toolProbes(run(['handoff', project, '--inspect'], envCache, { PYENV_VERSION: 'probe-0.0' })) > 0,
     'a version-manager variable must invalidate the cache');
-  console.log('PASS: default handoff reuses tool detection per project until PATH executables, a probed executable, version files or version-manager variables change; --writeback always probes');
+  console.log('PASS: explicit handoff inspection reuses tool detection per project until PATH executables, a probed executable, version files or version-manager variables change; --writeback always probes');
 
-  // 5. Machine cache primitives: key/age bounds, corrupt files as misses, bounded entries,
-  //    and no path into a project workspace.
+  const unknownProject = path.join(root, 'unknown-project'); fs.mkdirSync(unknownProject);
+  run(['init', unknownProject, '--yes'], path.join(root, 'cache-init'));
+  const originalSnapshot = Buffer.from('{\r\n  "capturedAt":"2020-01-01T00:00:00.000Z","note":"보존 원문","tools":{"prior":{"version":"retained"}}\r\n}\r\n');
+  const unknownSnapshot = path.join(unknownProject, '.leerness', 'environment.json');
+  fs.writeFileSync(unknownSnapshot, originalSnapshot);
+  const unknownCache = path.join(root, 'cache-unknown'), unknownFile = path.join(unknownCache, 'env-tools.json');
+  const unavailable = run(['handoff', unknownProject, '--inspect'], unknownCache, { LEERNESS_RUNTIME_COST_FIXTURE_MODE: 'incomplete' });
+  assert(toolProbes(unavailable) > 0, 'unknown control must actually attempt tool observation');
+  assert(/환경 조회: 미확인|Environment inspection: unknown/.test(unavailable.stdout), 'an incomplete inspection must remain unknown');
+  assert(!fs.existsSync(unknownFile), 'an incomplete inspection must not create an inventory cache');
+  assert.deepStrictEqual(fs.readFileSync(unknownSnapshot), originalSnapshot, 'unknown inspection must preserve the original snapshot');
+  fs.mkdirSync(unknownCache, { recursive: true });
+  const originalCache = Buffer.from('{"entries":{},"note":"보존 cache"}\r\n'); fs.writeFileSync(unknownFile, originalCache);
+  const unavailableAgain = run(['handoff', unknownProject, '--inspect'], unknownCache, { LEERNESS_RUNTIME_COST_FIXTURE_MODE: 'incomplete' });
+  assert(toolProbes(unavailableAgain) > 0, 'unknown without a usable inventory must observe again');
+  assert(/환경 조회: 미확인|Environment inspection: unknown/.test(unavailableAgain.stdout));
+  assert.deepStrictEqual(fs.readFileSync(unknownFile), originalCache, 'unknown inspection must preserve the previous cache');
+  assert.deepStrictEqual(fs.readFileSync(unknownSnapshot), originalSnapshot);
+  console.log('PASS: incomplete inspection remains unknown without publishing a cache or overwriting original snapshot/cache bytes');
+
+   
+   
   const MC = require('../lib/machine-cache');
   const RW = require('../lib/runtime-writes');
   const unitCache = path.join(root, 'cache-unit');
@@ -217,7 +303,7 @@ try {
     assert.strictEqual(MC.readCache('probe', 'k1', -1), null, 'an expired entry is a miss');
     fs.writeFileSync(MC.cacheFile('probe'), '{not json');
     assert.strictEqual(MC.readCache('probe', 'k1', 60000), null, 'a corrupt cache file is a miss');
-    // Every write in the same millisecond: recency must not depend on the clock.
+     
     const realNow = Date.now;
     Date.now = () => 1700000000000;
     try {

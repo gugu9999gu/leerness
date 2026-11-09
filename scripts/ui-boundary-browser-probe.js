@@ -1,5 +1,5 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
+require('./temp-cleanup').trackTemp(module);  
 
 const assert = require('node:assert/strict');
 const { scanUiBoundaryBrowser: scan, UiBoundaryBrowserError, INPUT_SCHEMA, OUTPUT_SCHEMA,
@@ -153,8 +153,8 @@ test('raw response metadata and input values absent', async () => {
   f.dom.documents[0].nodes.inputValue={value:['PRIVATE_VALUE']}; f.ax.nodes[0].value={value:'PRIVATE_VALUE'};
   const r=await scan(transport(f),request()); checks(r); assert.equal(r.scanStatus,'no-pattern-match');
 });
-// A form control under BODY with [name, value] attributes, its own layout row (style null: not laid
-// out) and an optional AX node carrying the browser's accessible name for it.
+ 
+ 
 function control(f, tag, attrs, { style = ['inline-block','visible','1'], bounds = [0,40,200,20], axName } = {}) {
   const n=f.dom.documents[0].nodes, l=f.dom.documents[0].layout, i=n.nodeType.length, id=100+i;
   n.nodeType.push(1); n.parentIndex.push(1); n.nodeName.push(f.str(tag)); n.backendNodeId.push(id);
@@ -168,7 +168,7 @@ for (const tag of ['INPUT','TEXTAREA']) test(`labelled ${tag} placeholder is col
   const r=await scan(transport(control(fixture(['저장']),tag,[['aria-label','Email'],['placeholder','TODO: wire']],{axName:'Email'})),request());
   checks(r); assert.equal(findings(r).length,1); assert.equal(channelOf(r)(findings(r)[0]),'dom-placeholder');
   assert.ok(findings(r)[0].signals.some(s=>s.code==='developer-marker'));
-  // Scanned as the placeholder attribute, not as visible text: the evidence digest binds kind and name.
+   
   const { SCANNER_VERSION } = require('../lib/ui-boundary-scanner'), found = findings(r)[0];
   assert.equal(found.evidenceDigest, 'sha256:' + require('node:crypto').createHash('sha256').update(JSON.stringify(
     [SCANNER_VERSION, POLICY_VERSION, 'ui', found.surfaceIndex, 'attribute', 'rendered', 'placeholder', 'TODO: wire'])).digest('hex'));
@@ -201,7 +201,7 @@ test('an unknown input type is a text field and shows its placeholder', async ()
 });
 
 async function playwrightDriver() {
-  // Optional test dependency supplied by the host, never installed implicitly.
+   
   assert.ok(process.env.LEERNESS_TEST_PLAYWRIGHT, 'LEERNESS_TEST_PLAYWRIGHT is required for --browser');
   assert.ok(process.env.LEERNESS_TEST_BROWSER, 'LEERNESS_TEST_BROWSER is required for --browser');
   const { chromium } = require(process.env.LEERNESS_TEST_PLAYWRIGHT);
@@ -214,8 +214,8 @@ async function playwrightDriver() {
   } catch (error) { await browser.close(); throw error; }
 }
 async function cdpDriver() {
-  // No browser package: the host names a Chromium executable and plain CDP runs over the global
-  // WebSocket (Node 22+). Throwaway profile, every network request failed, as in the Playwright mode.
+   
+   
   assert.ok(process.env.LEERNESS_TEST_BROWSER, 'LEERNESS_TEST_BROWSER is required for --cdp');
   assert.equal(typeof WebSocket, 'function', 'a global WebSocket (Node 22+) is required for --cdp');
   const fs=require('node:fs'), os=require('node:os'), path=require('node:path'), cp=require('node:child_process');

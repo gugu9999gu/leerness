@@ -1,8 +1,8 @@
 'use strict';
-require('./temp-cleanup').trackTemp(module); // T-0357: records this run's temp folders; the runner that started it removes them after a clean exit
-// T-0345: `lazy detect --auto-track` registers a task for each new TODO whose file no tracker row references, and
-// only those. A batch that mixed such files with a file a task already referenced registered every new TODO, so the
-// TODOs in the referenced file got tasks of their own as well. known-todos.json gains exactly the registered TODOs.
+require('./temp-cleanup').trackTemp(module);  
+ 
+ 
+ 
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');
@@ -22,7 +22,7 @@ const run = (d, args) => {
   assert.strictEqual(r.error, undefined, r.error && r.error.message);
   return r;
 };
-// A project with the given source files and, for each entry of `referenced`, a task whose text names that file.
+ 
 function project(files, referenced = []) {
   const d = path.join(arena, 'p' + (++seq));
   fs.mkdirSync(d);
